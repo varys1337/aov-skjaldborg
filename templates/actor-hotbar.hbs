@@ -1,0 +1,635 @@
+<div class="skj-hotbar-inner {{#if collapsed}}skj-hotbar-collapsed{{/if}}" {{#unless actor}}hidden{{/unless}}>
+{{#if actor}}
+  <div
+    class="skj-hotbar-layout"
+    data-disposition="{{workflow.dispositionKey}}"
+    style="--skj-quick-stage-size: {{quickAccessStageSize}}px; --skj-disposition-label: {{workflow.dispositionLabelColor}}; --skj-disposition-label-weight: {{workflow.dispositionLabelWeight}};"
+  >
+    <section class="skj-actor-core" aria-label="{{actor.name}}">
+      <div class="skj-hotbar-resources">
+        {{#each resources}}
+          <label
+            class="skj-resource-card {{#unless secondary}}single-resource{{/unless}}"
+            style="--resource-accent: {{accent}};"
+            data-tooltip="{{label}}: {{value}}/{{max}}{{#if secondary}} - {{secondary}}{{/if}}"
+          >
+            <span class="sr-only">{{label}}</span>
+            <span class="skj-resource-current">
+              <input
+                type="number"
+                class="skj-resource-input"
+                value="{{value}}"
+                min="0"
+                max="{{max}}"
+                step="1"
+                inputmode="numeric"
+                data-resource-input="{{id}}"
+                data-original-value="{{value}}"
+                aria-label="{{label}}"
+              >
+              <span class="skj-resource-separator">/</span>
+              <span class="skj-resource-maximum">{{max}}</span>
+            </span>
+            {{#if secondary}}<span class="skj-resource-secondary">{{secondary}}</span>{{/if}}
+          </label>
+        {{/each}}
+      </div>
+
+      <div class="skj-avatar-container">
+        <button
+          type="button"
+          class="skj-avatar-button {{#if workflow.myTurn}}my-turn{{/if}}"
+          data-action="openActor"
+          data-tooltip="{{actor.name}}"
+          {{#if workflow.myTurn}}style="--skj-turn-color: {{workflow.turnColor}}; --skj-turn-glow-soft: {{workflow.turnGlowSoft}}; --skj-turn-glow-strong: {{workflow.turnGlowStrong}};"{{/if}}
+        >
+          <img class="skj-avatar" src="{{actor.img}}" alt="{{actor.name}}" draggable="false">
+        </button>
+        <div
+          class="skj-avatar-drop-zone"
+          data-quick-auto-target
+          aria-label="{{localize 'AOV_SKJADLBORG.ActorHotbar.QuickAccess.PortraitDropHint'}}"
+        ></div>
+        {{#each quickAccessSlots}}
+          <button
+            type="button"
+            class="skj-quick-slot {{#if empty}}empty{{/if}}"
+            style="{{style}}"
+            data-quick-slot-index="{{index}}"
+            {{#unless empty}}
+              data-action="activate"
+              data-action-kind="{{kind}}"
+              data-action-id="{{id}}"
+              data-quick-kind="{{kind}}"
+              data-quick-id="{{id}}"
+              draggable="true"
+            {{/unless}}
+            aria-label="{{tooltip}}"
+            {{#unless empty}}data-tooltip="{{tooltip}}"{{/unless}}
+          >
+            {{#unless empty}}
+              {{#if img}}<img src="{{img}}" alt="">{{else}}<i class="{{icon}}" inert></i>{{/if}}
+              {{#if score}}<span class="skj-slot-score">{{score}}</span>{{/if}}
+            {{/unless}}
+          </button>
+        {{/each}}
+      </div>
+    </section>
+
+    <button
+      type="button"
+      class="skj-hotbar-collapse-toggle"
+      data-action="toggleCollapse"
+      aria-expanded="{{#if collapsed}}false{{else}}true{{/if}}"
+      data-tooltip="{{#if collapsed}}AOV_SKJADLBORG.ActorHotbar.Expand{{else}}AOV_SKJADLBORG.ActorHotbar.Collapse{{/if}}"
+    >
+      <i class="fa-solid {{#if collapsed}}fa-chevron-right{{else}}fa-chevron-left{{/if}}" inert></i>
+    </button>
+
+    <section class="skj-actor-actions" {{#if collapsed}}hidden{{/if}}>
+      <div class="skj-hotbar-header-row">
+        <nav class="skj-hotbar-tabs tabs" aria-label="{{localize 'AOV_SKJADLBORG.ActorHotbar.Navigation'}}">
+          <a class="{{tabs.combat.cssClass}}" data-action="tab" data-group="sheet" data-tab="combat" data-tooltip="AOV_SKJADLBORG.ActorHotbar.Tabs.Combat"><i class="fa-solid fa-swords" inert></i></a>
+          <a class="{{tabs.stats.cssClass}}" data-action="tab" data-group="sheet" data-tab="stats" data-tooltip="AOV_SKJADLBORG.ActorHotbar.Tabs.Stats"><i class="fa-solid fa-chart-simple" inert></i></a>
+          <a class="{{tabs.skills.cssClass}}" data-action="tab" data-group="sheet" data-tab="skills" data-tooltip="AOV_SKJADLBORG.ActorHotbar.Tabs.Skills"><i class="fa-solid fa-swords" inert></i></a>
+          {{#if showEquipTab}}
+            <a class="{{tabs.equip.cssClass}}" data-action="tab" data-group="sheet" data-tab="equip" data-tooltip="AOV_SKJADLBORG.ActorHotbar.Tabs.Equip"><i class="fa-solid fa-toolbox" inert></i></a>
+          {{/if}}
+          <a class="{{tabs.magic.cssClass}}" data-action="tab" data-group="sheet" data-tab="magic" data-tooltip="AOV_SKJADLBORG.ActorHotbar.Tabs.Magic"><i class="fa-solid fa-wand-magic-sparkles" inert></i></a>
+          {{#if showHistoryFamilyTab}}
+            <a class="{{tabs.historyFamily.cssClass}}" data-action="tab" data-group="sheet" data-tab="historyFamily" data-tooltip="AOV_SKJADLBORG.ActorHotbar.Tabs.HistoryFamily"><i class="fa-solid fa-people-roof" inert></i></a>
+          {{/if}}
+          {{#if workflow.active}}
+            <a data-action="openCombatHud" data-tooltip="AOV_SKJADLBORG.Controls.OpenHud"><i class="fa-solid fa-gear" inert></i></a>
+          {{/if}}
+          {{#if showMacroTab}}
+            <a class="{{tabs.macros.cssClass}}" data-action="tab" data-group="sheet" data-tab="macros" data-tooltip="AOV_SKJADLBORG.ActorHotbar.Tabs.Macros"><i class="fa-solid fa-grid-2" inert></i></a>
+          {{/if}}
+        </nav>
+
+        <div class="skj-effect-row" aria-label="{{localize 'AOV_SKJADLBORG.ActorHotbar.ActiveEffects'}}">
+          {{#each effects}}
+            <button type="button" class="skj-effect-icon" data-action="activate" data-action-kind="effect" data-action-id="{{id}}" data-tooltip="{{name}}">
+              <img src="{{img}}" alt="">
+            </button>
+          {{/each}}
+        </div>
+      </div>
+
+      <section class="tab skj-hotbar-tab-panel skj-combat-tab-panel {{tabs.combat.cssClass}}" data-group="{{tabs.combat.group}}" data-tab="{{tabs.combat.id}}">
+        <div class="skj-combat-stage">
+          <div class="skj-intent-grid">
+            {{#each combatActions}}
+              <button
+                type="button"
+                class="skj-hotbar-slot skj-intent-slot"
+                data-action="activate"
+                data-action-kind="{{kind}}"
+                data-action-id="{{id}}"
+                data-quick-source
+                data-quick-kind="{{kind}}"
+                data-quick-id="{{id}}"
+                draggable="true"
+                data-tooltip="{{name}}"
+              >
+                <i class="{{icon}}" inert></i>
+                <span class="skj-intent-name">{{name}}</span>
+              </button>
+            {{else}}
+              <span class="skj-empty-actions">{{localize 'AOV_SKJADLBORG.ActorHotbar.NoCombatActions'}}</span>
+            {{/each}}
+          </div>
+
+          <div class="skj-weapon-action-strip">
+            <label class="skj-weapon-select-wrap {{#unless weaponState.canManage}}is-disabled{{/unless}}" data-tooltip="AOV_SKJADLBORG.Weapons.WeaponToDraw">
+              <i class="fa-solid fa-swords" inert></i>
+              <select data-readied-weapon-select aria-label="{{localize 'AOV_SKJADLBORG.Weapons.WeaponToDraw'}}" {{#unless weaponState.canManage}}disabled{{/unless}}>
+                {{#each weaponState.carriedWeapons}}
+                  <option value="{{id}}" {{#if selected}}selected{{/if}}>{{name}}</option>
+                {{else}}
+                  <option value="">{{localize 'AOV_SKJADLBORG.Weapons.NoCarriedWeapons'}}</option>
+                {{/each}}
+              </select>
+            </label>
+            <button type="button" class="skj-weapon-action-button {{#if weaponState.selectedIsReadied}}is-sheathe{{else}}is-draw{{/if}}" data-action="toggleReadiedWeapon" data-readied-weapon-toggle data-tooltip="{{#if weaponState.selectedIsReadied}}AOV_SKJADLBORG.Weapons.SheatheHint{{else}}AOV_SKJADLBORG.Weapons.DrawHint{{/if}}" {{#if weaponState.toggleDisabled}}disabled{{/if}}>
+              <i class="fa-solid {{#if weaponState.selectedIsReadied}}fa-hand{{else}}fa-swords{{/if}}" inert></i>
+              <span>{{#if weaponState.selectedIsReadied}}{{localize 'AOV_SKJADLBORG.Weapons.Sheathe'}}{{else}}{{localize 'AOV_SKJADLBORG.Weapons.Draw'}}{{/if}}</span>
+            </button>
+            <button type="button" class="skj-weapon-action-button" data-action="dropReadiedWeapon" data-tooltip="AOV_SKJADLBORG.Weapons.DropHint" {{#if weaponState.dropDisabled}}disabled{{/if}}>
+              <i class="fa-solid fa-hand-holding" inert></i>
+              <span>{{localize 'AOV_SKJADLBORG.Weapons.Drop'}}</span>
+            </button>
+          </div>
+          <div class="skj-readied-weapon-label" data-tooltip="AOV_SKJADLBORG.Weapons.CurrentlyReadied">
+            <i class="fa-solid fa-swords" inert></i>
+            <span>{{localize 'AOV_SKJADLBORG.Weapons.CurrentlyReadied'}}: {{weaponState.currentLabel}}</span>
+          </div>
+          {{#if workflow.active}}
+            <div class="skj-workflow-pips skj-workflow-pips-combat">
+              <span class="skj-workflow-pill phase" data-tooltip="{{localize 'AOV_SKJADLBORG.ActorHotbar.Phase'}}">{{workflow.phase}}</span>
+              <span class="skj-workflow-pill workflow-status {{workflow.status}}" data-tooltip="{{workflow.category}}">{{workflow.statusLabel}}</span>
+              <span class="skj-workflow-pill workflow-dex" data-tooltip="{{localize 'AOV_SKJADLBORG.Labels.FinalDex'}}"><i class="fa-solid fa-gauge-high" inert></i> {{workflow.dex}}</span>
+              <span class="skj-workflow-pill workflow-reactions" data-tooltip="{{localize 'AOV_SKJADLBORG.Labels.Reactions'}}"><i class="fa-solid fa-shield" inert></i> {{workflow.reactions}}</span>
+            </div>
+          {{/if}}
+        </div>
+      </section>
+
+      <section class="tab skj-hotbar-tab-panel skj-named-tab-panel skj-stat-tab-panel {{tabs.stats.cssClass}}" data-group="{{tabs.stats.group}}" data-tab="{{tabs.stats.id}}">
+        {{#if hasStatActions}}
+          <div class="skj-stat-groups" data-scroll-state="stats">
+            {{#each statGroups}}
+              <section class="skj-stat-group" data-stat-section="{{id}}">
+                <h3>{{label}}</h3>
+                {{#if isCharacteristics}}
+                  <div class="skj-stat-table skj-stat-characteristics">
+                    <div class="skj-stat-header skj-stat-characteristic-grid">
+                      <span>{{localize 'AOV.name'}}</span>
+                      <span>{{localize 'AOV.base'}}</span>
+                      <span>{{localize 'AOV.age'}}</span>
+                      <span>{{localize 'AOV.exp'}}</span>
+                      <span>{{localize 'AOV.effectsShort'}}</span>
+                      <span>{{localize 'AOV.total'}}</span>
+                      <span>{{localize 'AOV.dice'}}</span>
+                      <span>{{localize 'AOV.minMax'}}</span>
+                    </div>
+                    {{#each actions}}
+                      <button
+                        type="button"
+                        class="skj-stat-row skj-stat-characteristic-grid"
+                        data-action="activate"
+                        data-action-kind="stat"
+                        data-action-id="{{id}}"
+                        data-quick-source
+                        data-quick-kind="stat"
+                        data-quick-id="{{id}}"
+                        draggable="true"
+                        data-tooltip="{{name}}"
+                      >
+                        <span class="skj-stat-name">{{name}}</span>
+                        <span>{{base}}</span>
+                        <span>{{age}}</span>
+                        <span>{{xp}}</span>
+                        <span>{{effects}}</span>
+                        <span class="skj-stat-total">{{total}}</span>
+                        <span>{{formula}}</span>
+                        <span>{{range}}</span>
+                      </button>
+                    {{/each}}
+                  </div>
+                {{/if}}
+                {{#if isSocial}}
+                  <div class="skj-stat-table skj-stat-social">
+                    <div class="skj-stat-header skj-stat-social-grid">
+                      <span>{{localize 'AOV.name'}}</span>
+                      <span>{{localize 'AOV.base'}}</span>
+                      <span>{{localize 'AOV.historyAbbr'}}</span>
+                      <span>{{localize 'AOV.exp'}}</span>
+                      <span>{{localize 'AOV.effectsShort'}}</span>
+                      <span>{{localize 'AOV.total'}}</span>
+                    </div>
+                    {{#each actions}}
+                      <button
+                        type="button"
+                        class="skj-stat-row skj-stat-social-grid"
+                        data-action="activate"
+                        data-action-kind="stat"
+                        data-action-id="{{id}}"
+                        data-quick-source
+                        data-quick-kind="stat"
+                        data-quick-id="{{id}}"
+                        draggable="true"
+                        data-tooltip="{{name}}"
+                      >
+                        <span class="skj-stat-name">{{name}}</span>
+                        <span>{{base}}</span>
+                        <span>{{history}}</span>
+                        <span>{{xp}}</span>
+                        <span>{{effects}}</span>
+                        <span class="skj-stat-total">{{total}}</span>
+                      </button>
+                    {{/each}}
+                  </div>
+                {{/if}}
+                {{#if isIdentity}}
+                  <div class="skj-identity-grid">
+                    {{#each entries}}
+                      {{#if itemId}}
+                        <button type="button" class="skj-info-row" data-action="openItem" data-item-id="{{itemId}}" data-tooltip="{{name}}: {{value}}">
+                          <span>{{name}}</span><strong>{{value}}</strong>
+                        </button>
+                      {{else}}
+                        <div class="skj-info-row" data-tooltip="{{name}}: {{value}}">
+                          <span>{{name}}</span><strong>{{value}}</strong>
+                        </div>
+                      {{/if}}
+                    {{/each}}
+                  </div>
+                {{/if}}
+              </section>
+            {{/each}}
+          </div>
+        {{else}}
+          <span class="skj-empty-actions">{{localize 'AOV_SKJADLBORG.ActorHotbar.NoStats'}}</span>
+        {{/if}}
+      </section>
+
+      {{#if showHistoryFamilyTab}}
+        <section class="tab skj-hotbar-tab-panel skj-history-family-tab-panel {{tabs.historyFamily.cssClass}}" data-group="{{tabs.historyFamily.group}}" data-tab="{{tabs.historyFamily.id}}">
+          <div class="skj-history-family-groups" data-scroll-state="historyFamily">
+            {{#each historyFamily.actions}}
+              <section class="skj-history-family-group skj-history-action-group" data-action-section="{{id}}">
+                <h3>{{label}}</h3>
+                {{#if isPassions}}
+                  <div class="skj-history-action-table">
+                    <div class="skj-history-action-header skj-passion-grid">
+                      <span>{{localize 'AOV.name'}}</span>
+                      <span data-tooltip="{{localize 'AOV.xpAbbrHint'}}">{{localize 'AOV.xpAbbr'}}</span>
+                      <span>%</span>
+                    </div>
+                    {{#each actions}}
+                      <div
+                        class="skj-history-action-row skj-passion-grid skj-reorderable"
+                        data-action-id="{{id}}"
+                        data-quick-source
+                        data-quick-kind="item"
+                        data-quick-id="{{id}}"
+                        data-drag-group="historyFamily"
+                        data-action-section="{{section}}"
+                        draggable="true"
+                        data-tooltip="{{name}}"
+                      >
+                        <button
+                          type="button"
+                          class="skj-history-action-name"
+                          data-action="activate"
+                          data-action-kind="item"
+                          data-action-id="{{id}}"
+                          data-tooltip="{{name}}"
+                        >{{name}}</button>
+                        <span class="skj-history-action-xp-cell">
+                          {{#unless noXP}}
+                            <button
+                              type="button"
+                              class="skj-xp-toggle {{#if xpCheck}}checked{{/if}}"
+                              data-action="toggleXp"
+                              data-item-id="{{id}}"
+                              data-xp-toggle
+                              draggable="false"
+                              aria-pressed="{{#if xpCheck}}true{{else}}false{{/if}}"
+                              aria-label="{{localize 'AOV.xpCheck'}}: {{name}}"
+                              data-tooltip="AOV.xpCheck"
+                            ><i class="fa-regular {{#if xpCheck}}fa-square-check{{else}}fa-square{{/if}}" inert></i></button>
+                          {{/unless}}
+                        </span>
+                        <button
+                          type="button"
+                          class="skj-history-action-score"
+                          data-action="activate"
+                          data-action-kind="item"
+                          data-action-id="{{id}}"
+                          data-tooltip="{{name}}"
+                        >{{score}}</button>
+                      </div>
+                    {{/each}}
+                  </div>
+                {{/if}}
+                {{#if isDevotions}}
+                  <div class="skj-history-action-table">
+                    <div class="skj-history-action-header skj-devotion-grid">
+                      <span>{{localize 'AOV.name'}}</span>
+                      <span>{{localize 'AOV.ideals'}}</span>
+                      <span data-tooltip="{{localize 'AOV.devPoints'}}">{{localize 'AOV.devPointsAbbr'}}</span>
+                    </div>
+                    {{#each actions}}
+                      <button
+                        type="button"
+                        class="skj-history-action-row skj-devotion-grid skj-reorderable"
+                        data-action="activate"
+                        data-action-kind="item"
+                        data-action-id="{{id}}"
+                        data-quick-source
+                        data-quick-kind="item"
+                        data-quick-id="{{id}}"
+                        data-drag-group="historyFamily"
+                        data-action-section="{{section}}"
+                        draggable="true"
+                        data-tooltip="{{name}}"
+                      >
+                        <span class="skj-history-action-name">{{name}}</span>
+                        <span class="skj-history-action-detail" data-tooltip="{{ideals}}">{{ideals}}</span>
+                        <span class="skj-history-action-score">{{devotionPoints}}</span>
+                      </button>
+                    {{/each}}
+                  </div>
+                {{/if}}
+              </section>
+            {{/each}}
+
+            {{#if historyFamily.histories.length}}
+              <section class="skj-history-family-group">
+                <h3>{{localize 'AOV_SKJADLBORG.ActorHotbar.Groups.Histories'}}</h3>
+                <div class="skj-history-table">
+                  {{#each historyFamily.histories}}
+                    <div class="skj-history-row">
+                      <span class="skj-history-year">{{year}}</span>
+                      <button type="button" class="skj-history-name" data-action="openItem" data-item-id="{{id}}" data-tooltip="{{name}}">{{name}}</button>
+                      <span class="skj-history-description" data-tooltip="{{description}}">{{description}}</span>
+                    </div>
+                  {{/each}}
+                </div>
+              </section>
+            {{/if}}
+
+            {{#if historyFamily.families.length}}
+              <section class="skj-history-family-group">
+                <h3>{{localize 'AOV_SKJADLBORG.ActorHotbar.Groups.Family'}}</h3>
+                <div class="skj-family-summary">{{localize 'AOV.dependents'}}: <strong>{{historyFamily.dependents}}</strong> / {{historyFamily.thrallCount}}</div>
+                <div class="skj-family-table">
+                  <div class="skj-family-header skj-family-grid">
+                    <span>{{localize 'AOV.name'}}</span><span>{{localize 'AOV.gender'}}</span><span>{{localize 'AOV.relationship'}}</span><span>{{localize 'AOV.dependentAbbr'}}</span><span>{{localize 'AOV.born'}}</span><span>{{localize 'AOV.died'}}</span>
+                  </div>
+                  {{#each historyFamily.families}}
+                    <div class="skj-family-row skj-family-grid">
+                      <button type="button" data-action="openItem" data-item-id="{{id}}" data-tooltip="{{name}}">{{name}}</button>
+                      <span>{{gender}}</span><span>{{relationship}}</span><span><i class="fa-regular {{#if dependent}}fa-square-check{{else}}fa-square{{/if}}" inert></i></span><span>{{born}}</span><span>{{died}}</span>
+                    </div>
+                  {{/each}}
+                </div>
+              </section>
+            {{/if}}
+
+            {{#if historyFamily.thralls.length}}
+              <section class="skj-history-family-group">
+                <h3>{{localize 'AOV_SKJADLBORG.ActorHotbar.Groups.Thralls'}}</h3>
+                <div class="skj-family-table">
+                  <div class="skj-thrall-header skj-thrall-grid"><span>{{localize 'AOV.name'}}</span><span>{{localize 'AOV.gender'}}</span><span>{{localize 'TYPES.Actor.farm'}}</span><span>{{localize 'AOV.born'}}</span><span>{{localize 'AOV.died'}}</span></div>
+                  {{#each historyFamily.thralls}}
+                    <div class="skj-thrall-row skj-thrall-grid">
+                      <button type="button" data-action="openUuid" data-document-uuid="{{uuid}}" data-tooltip="{{name}}">{{name}}</button>
+                      <span>{{gender}}</span><span>{{farm}}</span><span>{{born}}</span><span>{{died}}</span>
+                    </div>
+                  {{/each}}
+                </div>
+              </section>
+            {{/if}}
+
+            {{#if historyFamily.farms.length}}
+              <section class="skj-history-family-group">
+                <h3>{{localize 'AOV_SKJADLBORG.ActorHotbar.Groups.Farms'}}</h3>
+                <div class="skj-family-table">
+                  <div class="skj-farm-header skj-farm-grid"><span>{{localize 'AOV.name'}}</span><span>{{localize 'AOV.size'}}</span><span>{{localize 'AOV.type'}}</span><span>{{localize 'AOV.value'}}</span></div>
+                  {{#each historyFamily.farms}}
+                    <div class="skj-farm-row skj-farm-grid">
+                      <button type="button" data-action="openUuid" data-document-uuid="{{uuid}}" data-tooltip="{{name}}">{{name}}</button>
+                      <span>{{size}}</span><span>{{type}}</span><span>{{value}}</span>
+                    </div>
+                  {{/each}}
+                </div>
+              </section>
+            {{/if}}
+
+            {{#unless hasHistoryFamily}}
+              <span class="skj-empty-actions">{{localize 'AOV_SKJADLBORG.ActorHotbar.NoHistoryFamily'}}</span>
+            {{/unless}}
+          </div>
+        </section>
+      {{/if}}
+
+      <section class="tab skj-hotbar-tab-panel skj-named-tab-panel {{tabs.skills.cssClass}}" data-group="{{tabs.skills.group}}" data-tab="{{tabs.skills.id}}">
+        {{#if hasSkillActions}}
+          <div class="skj-named-action-groups" data-scroll-state="skills">
+            {{#each skillGroups}}
+              <section class="skj-named-action-group" data-action-section="{{id}}">
+                <h3>{{label}}</h3>
+                <div class="skj-named-action-grid">
+                  {{#each actions}}
+                    <div
+                      class="skj-named-action skj-skill-action skj-reorderable"
+                      data-action-id="{{id}}"
+                      data-quick-source
+                      data-quick-kind="item"
+                      data-quick-id="{{id}}"
+                      data-drag-group="skills"
+                      data-action-section="{{section}}"
+                      draggable="true"
+                      data-tooltip="{{name}}"
+                    >
+                      <button
+                        type="button"
+                        class="skj-skill-action-main"
+                        data-action="activate"
+                        data-action-kind="item"
+                        data-action-id="{{id}}"
+                        data-tooltip="{{name}}"
+                      >
+                        <span class="skj-named-action-label">{{name}}</span>
+                        {{#if score}}<span class="skj-named-action-score">{{score}}</span>{{/if}}
+                      </button>
+                      {{#unless noXP}}
+                        <button
+                          type="button"
+                          class="skj-xp-toggle {{#if xpCheck}}checked{{/if}}"
+                          data-action="toggleXp"
+                          data-item-id="{{id}}"
+                          data-xp-toggle
+                          draggable="false"
+                          aria-pressed="{{#if xpCheck}}true{{else}}false{{/if}}"
+                          aria-label="{{localize 'AOV.xpCheck'}}: {{name}}"
+                          data-tooltip="AOV.xpCheck"
+                        ><i class="fa-regular {{#if xpCheck}}fa-square-check{{else}}fa-square{{/if}}" inert></i></button>
+                      {{/unless}}
+                    </div>
+                  {{/each}}
+                </div>
+              </section>
+            {{/each}}
+          </div>
+        {{else}}
+          <span class="skj-empty-actions">{{localize 'AOV_SKJADLBORG.ActorHotbar.NoSkills'}}</span>
+        {{/if}}
+      </section>
+
+      <section class="tab skj-hotbar-tab-panel skj-named-tab-panel {{tabs.magic.cssClass}}" data-group="{{tabs.magic.group}}" data-tab="{{tabs.magic.id}}">
+        {{#if hasMagicActions}}
+          <div class="skj-named-action-groups" data-scroll-state="magic">
+            {{#each magicGroups}}
+              <section class="skj-named-action-group" data-action-section="{{id}}">
+                <h3>{{label}}</h3>
+                <div class="skj-named-action-grid">
+                  {{#each actions}}
+                    <button
+                      type="button"
+                      class="skj-named-action skj-reorderable {{#if prepared}}prepared{{/if}}"
+                      data-action="activate"
+                      data-action-kind="item"
+                      data-action-id="{{id}}"
+                      data-quick-source
+                      data-quick-kind="item"
+                      data-quick-id="{{id}}"
+                      data-drag-group="magic"
+                      data-action-section="{{section}}"
+                      draggable="true"
+                      data-tooltip="{{name}}"
+                    >
+                      <span class="skj-named-action-label">{{name}}</span>
+                      {{#if score}}<span class="skj-named-action-score">{{score}}</span>{{/if}}
+                    </button>
+                  {{/each}}
+                </div>
+              </section>
+            {{/each}}
+          </div>
+        {{else}}
+          <span class="skj-empty-actions">{{localize 'AOV_SKJADLBORG.ActorHotbar.NoMagic'}}</span>
+        {{/if}}
+      </section>
+
+      {{#if showEquipTab}}
+        <section class="tab skj-hotbar-tab-panel skj-equipment-tab-panel {{tabs.equip.cssClass}}" data-group="{{tabs.equip.group}}" data-tab="{{tabs.equip.id}}">
+          {{#if hasEquipment}}
+            <div class="skj-equipment-groups" data-scroll-state="equip">
+              {{#each equipmentGroups}}
+                <section class="skj-equipment-group" data-equipment-section="{{id}}">
+                  <h3>{{label}}</h3>
+                  {{#if isWeapon}}
+                    <div class="skj-equipment-table skj-equipment-table-weapon">
+                      <div class="skj-equipment-header skj-equipment-grid-weapon">
+                        <span>{{localize 'AOV_SKJADLBORG.ActorHotbar.EquipmentHeaders.Item'}}</span>
+                        <span>{{localize 'AOV_SKJADLBORG.ActorHotbar.EquipmentHeaders.Percentage'}}</span>
+                        <span>{{localize 'AOV_SKJADLBORG.ActorHotbar.EquipmentHeaders.Damage'}}</span>
+                        <span>{{localize 'AOV_SKJADLBORG.ActorHotbar.EquipmentHeaders.DamageBonus'}}</span>
+                        <span>{{localize 'AOV_SKJADLBORG.ActorHotbar.EquipmentHeaders.Enc'}}</span>
+                        <span>{{localize 'AOV_SKJADLBORG.ActorHotbar.EquipmentHeaders.HP'}}</span>
+                        <span>{{localize 'AOV_SKJADLBORG.ActorHotbar.EquipmentHeaders.Status'}}</span>
+                        <span>{{localize 'AOV_SKJADLBORG.ActorHotbar.EquipmentHeaders.Range'}}</span>
+                      </div>
+                      {{#each items}}
+                        <div class="skj-equipment-row skj-equipment-grid-weapon {{#if readied}}readied{{/if}}" data-equipment-id="{{id}}">
+                          <button type="button" class="skj-equipment-name" data-action="openEquipment" data-equipment-id="{{id}}" data-action-kind="item" data-action-id="{{id}}" data-quick-source data-quick-kind="item" data-quick-id="{{id}}" draggable="true" data-tooltip="{{name}}">{{#if readied}}<i class="fa-solid fa-swords skj-readied-marker" inert></i>{{/if}}<span>{{name}}</span></button>
+                          <button type="button" class="skj-equipment-value skj-equipment-roll" data-action="activate" data-action-kind="item" data-action-id="{{id}}" data-tooltip="{{name}}">{{total}}</button>
+                          <span class="skj-equipment-value">{{damage}}</span>
+                          <span class="skj-equipment-value">{{damageBonus}}</span>
+                          <span class="skj-equipment-value">{{encumbrance}}</span>
+                          <span class="skj-equipment-value">{{hitPoints}}</span>
+                          <button type="button" class="skj-equipment-status" data-action="toggleEquipment" data-equipment-id="{{id}}" data-tooltip="{{statusLabel}}"><i class="{{statusIcon}}" inert></i></button>
+                          <span class="skj-equipment-value">{{range}}</span>
+                        </div>
+                      {{/each}}
+                    </div>
+                  {{/if}}
+                  {{#if isGear}}
+                    <div class="skj-equipment-table skj-equipment-table-gear">
+                      <div class="skj-equipment-header skj-equipment-grid-gear">
+                        <span>{{localize 'AOV_SKJADLBORG.ActorHotbar.EquipmentHeaders.Item'}}</span>
+                        <span>{{localize 'AOV_SKJADLBORG.ActorHotbar.EquipmentHeaders.Enc'}}</span>
+                        <span>{{localize 'AOV_SKJADLBORG.ActorHotbar.EquipmentHeaders.Quantity'}}</span>
+                        <span>{{localize 'AOV_SKJADLBORG.ActorHotbar.EquipmentHeaders.Status'}}</span>
+                      </div>
+                      {{#each items}}
+                        <div class="skj-equipment-row skj-equipment-grid-gear" data-equipment-id="{{id}}">
+                          <button type="button" class="skj-equipment-name" data-action="openEquipment" data-equipment-id="{{id}}" data-action-kind="item" data-action-id="{{id}}" data-quick-source data-quick-kind="item" data-quick-id="{{id}}" draggable="true" data-tooltip="{{name}}">{{name}}</button>
+                          <span class="skj-equipment-value">{{encumbrance}}</span>
+                          <input
+                            type="number"
+                            class="skj-equipment-quantity"
+                            value="{{quantity}}"
+                            min="0"
+                            step="1"
+                            inputmode="numeric"
+                            data-equipment-quantity="{{id}}"
+                            data-original-value="{{quantity}}"
+                            aria-label="{{localize 'AOV_SKJADLBORG.ActorHotbar.EquipmentHeaders.Quantity'}}"
+                          >
+                          <button type="button" class="skj-equipment-status" data-action="toggleEquipment" data-equipment-id="{{id}}" data-tooltip="{{statusLabel}}"><i class="{{statusIcon}}" inert></i></button>
+                        </div>
+                      {{/each}}
+                    </div>
+                  {{/if}}
+                  {{#if isArmour}}
+                    <div class="skj-equipment-table skj-equipment-table-armour">
+                      <div class="skj-equipment-header skj-equipment-grid-armour">
+                        <span>{{localize 'AOV_SKJADLBORG.ActorHotbar.EquipmentHeaders.Item'}}</span>
+                        <span>{{localize 'AOV_SKJADLBORG.ActorHotbar.EquipmentHeaders.Location'}}</span>
+                        <span>{{localize 'AOV_SKJADLBORG.ActorHotbar.EquipmentHeaders.AP'}}</span>
+                        <span>{{localize 'AOV_SKJADLBORG.ActorHotbar.EquipmentHeaders.Enc'}}</span>
+                        <span>{{localize 'AOV_SKJADLBORG.ActorHotbar.EquipmentHeaders.MQ'}}</span>
+                        <span>{{localize 'AOV_SKJADLBORG.ActorHotbar.EquipmentHeaders.Status'}}</span>
+                      </div>
+                      {{#each items}}
+                        <div class="skj-equipment-row skj-equipment-grid-armour" data-equipment-id="{{id}}">
+                          <button type="button" class="skj-equipment-name" data-action="openEquipment" data-equipment-id="{{id}}" data-action-kind="item" data-action-id="{{id}}" data-quick-source data-quick-kind="item" data-quick-id="{{id}}" draggable="true" data-tooltip="{{name}}">{{name}}</button>
+                          <span class="skj-equipment-value">{{location}}</span>
+                          <span class="skj-equipment-value">{{armourPoints}}</span>
+                          <span class="skj-equipment-value">{{encumbrance}}</span>
+                          <span class="skj-equipment-value">{{moveQuietly}}</span>
+                          <button type="button" class="skj-equipment-status" data-action="toggleEquipment" data-equipment-id="{{id}}" data-tooltip="{{statusLabel}}"><i class="{{statusIcon}}" inert></i></button>
+                        </div>
+                      {{/each}}
+                    </div>
+                  {{/if}}
+                </section>
+              {{/each}}
+            </div>
+          {{else}}
+            <span class="skj-empty-actions">{{localize 'AOV_SKJADLBORG.ActorHotbar.NoEquipment'}}</span>
+          {{/if}}
+        </section>
+      {{/if}}
+
+      {{#if showMacroTab}}
+        <section class="tab skj-hotbar-tab-panel skj-macro-tab-panel {{tabs.macros.cssClass}}" data-group="{{tabs.macros.group}}" data-tab="{{tabs.macros.id}}">
+          <div class="skj-actions-bar macro-actions" data-scroll-state="macros">
+            {{#each macroSlots}}
+              <button type="button" class="skj-hotbar-slot macro-slot {{#if empty}}empty{{/if}}" {{#unless empty}}data-action="activate" data-action-kind="macro" data-action-id="{{macroId}}" data-quick-source data-quick-kind="macro" data-quick-id="{{macroId}}" draggable="true"{{/unless}} data-tooltip="{{name}}">
+                {{#if img}}<img src="{{img}}" alt="">{{/if}}
+                <span class="skj-macro-key">{{key}}</span>
+              </button>
+            {{/each}}
+          </div>
+        </section>
+      {{/if}}
+    </section>
+  </div>
+{{/if}}
+</div>

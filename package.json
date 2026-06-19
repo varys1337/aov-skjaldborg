@@ -1,0 +1,18 @@
+{
+  "name": "aov-skjadlborg",
+  "version": "0.2.35",
+  "private": true,
+  "description": "Development, validation, packaging, and release automation for the Age of Vikings - Skjadlborg Foundry VTT module.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "check:syntax": "node tools/check-syntax.mjs",
+    "test": "node tools/run-tests.mjs",
+    "validate": "node tools/validate-module.mjs",
+    "build": "node tools/build-release.mjs",
+    "ci": "npm run check:syntax && npm test && npm run validate",
+    "set-version": "node tools/set-version.mjs"
+  }
+}

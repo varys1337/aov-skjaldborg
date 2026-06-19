@@ -1,0 +1,168 @@
+/**
+ * Constants shared by the Skjaldborg module.
+ *
+ * Keep this file dependency-free so other modules can import stable IDs and enum
+ * values without triggering Foundry document or application work during init.
+ */
+export const MODULE_ID = "aov-skjadlborg";
+export const SOCKET_NAME = `module.${MODULE_ID}`;
+
+export const MODULE_VERSION = "0.2.35";
+
+
+export const ACTION_UI_THEMES = Object.freeze({
+  CLASSIC: "classic",
+  AOV: "aov"
+});
+
+export const ACTION_UI_MIGRATION_VERSION = 1;
+
+export const ACTION_UI_DEFAULTS = Object.freeze({
+  enableActionRing: true,
+  actionRingMaxItems: 6,
+  enableActorHotbar: true,
+  replaceCoreHotbar: true,
+  actorHotbarScale: 1,
+  actorHotbarActionWidth: 420,
+  actorHotbarOpacity: 100,
+  actionUiTheme: ACTION_UI_THEMES.AOV,
+  actorHotbarCollapsed: false,
+  actorHotbarPosition: {}
+});
+
+export const ACTION_UI_LIMITS = Object.freeze({
+  actionRingMaxItems: Object.freeze({ min: 6, max: 12, step: 1 }),
+  actorHotbarScale: Object.freeze({ min: 0.75, max: 1.4, step: 0.05 }),
+  actorHotbarActionWidth: Object.freeze({ min: 240, max: 720, step: 20 }),
+  actorHotbarOpacity: Object.freeze({ min: 0, max: 100, step: 5 })
+});
+
+export const PHASES = Object.freeze({
+  INTENT: "intent",
+  MOVEMENT: "movement",
+  RESOLUTION: "resolution",
+  BOOKKEEPING: "bookkeeping"
+});
+
+export const PHASE_ORDER = Object.freeze([
+  PHASES.INTENT,
+  PHASES.MOVEMENT,
+  PHASES.RESOLUTION,
+  PHASES.BOOKKEEPING
+]);
+
+export const PHASE_STRUCTURE_SETTING_KEYS = Object.freeze({
+  [PHASES.INTENT]: "phaseIntentEnabled",
+  [PHASES.MOVEMENT]: "phaseMovementEnabled",
+  [PHASES.RESOLUTION]: "phaseResolutionEnabled",
+  [PHASES.BOOKKEEPING]: "phaseBookkeepingEnabled"
+});
+
+
+export const REPORT_DELIVERY = Object.freeze({
+  PUBLIC: "public",
+  WHISPER: "whisper"
+});
+
+export const REPORT_RECIPIENTS = Object.freeze({
+  GM: "gm",
+  GM_AND_PLAYERS: "gm-and-players"
+});
+
+export const REPORT_SCOPE = Object.freeze({
+  ALL: "all",
+  PLAYER_OWNED: "player-owned"
+});
+
+export const REPORT_PHASE_SETTING_KEYS = Object.freeze({
+  [PHASES.INTENT]: "reportPhaseIntent",
+  [PHASES.MOVEMENT]: "reportPhaseMovement",
+  [PHASES.RESOLUTION]: "reportPhaseResolution",
+  [PHASES.BOOKKEEPING]: "reportPhaseBookkeeping"
+});
+
+export const ACTION_CATEGORIES = Object.freeze({
+  ATTACK: "attack",
+  MISSILE: "missile",
+  MAGIC: "magic",
+  DEFEND: "defend",
+  RETREAT: "retreat",
+  KNOCKBACK: "knockback",
+  FLEE: "flee",
+  WAIT: "wait",
+  DELAY: "delay",
+  OTHER: "other"
+});
+
+export const INTENT_STATUS = Object.freeze({
+  UNCOMMITTED: "uncommitted",
+  COMMITTED: "committed",
+  HELD: "held"
+});
+
+export const RESOLUTION_STATUS = Object.freeze({
+  PENDING: "pending",
+  ACTIVE: "active",
+  RESOLVED: "resolved",
+  SKIPPED: "skipped",
+  CARRYOVER: "carryover"
+});
+
+export const ROUNDING_POLICIES = Object.freeze({
+  CEIL: "ceil",
+  FLOOR: "floor",
+  NEAREST: "nearest"
+});
+
+export const MOVEMENT_DEBUG_LEVELS = Object.freeze({
+  SUMMARY: "summary",
+  VERBOSE: "verbose",
+  TRACE: "trace"
+});
+
+export const MOVEMENT_DEBUG_CATEGORIES = Object.freeze({
+  CAPTURE: "capture",
+  SOCKET: "socket",
+  ROUTE: "route",
+  EXPANSION: "expansion",
+  RUN: "run",
+  SCHEDULER: "scheduler",
+  COLLISION: "collision",
+  ENGAGEMENT: "engagement",
+  STOP: "stop",
+  STATUS: "status",
+  DEX: "dex"
+});
+
+export const MOVEMENT_DEBUG_DEFAULT_CATEGORIES = Object.freeze(Object.fromEntries(
+  Object.values(MOVEMENT_DEBUG_CATEGORIES).map(category => [category, true])
+));
+
+export const MOVEMENT_PLAN_STATUS = Object.freeze({
+  NONE: "none",
+  PLANNED: "planned",
+  EXECUTING: "executing",
+  COMPLETED: "completed",
+  STOPPED: "stopped",
+  FAILED: "failed"
+});
+
+export const ENGAGEMENT_STATUS = Object.freeze({
+  NONE: "none",
+  ENGAGED: "engaged"
+});
+
+export const ENGAGED_STATUS_ID = `${MODULE_ID}-engaged`;
+
+export const DEX_MODIFIERS = Object.freeze({
+  DRAW_WEAPON: -5,
+  SHEATHE_WEAPON: -5,
+  SURPRISED: -5
+});
+
+export const DEFENSE_REACTION_STEP = -20;
+
+export const FLAG_KEYS = Object.freeze({
+  COMBAT_STATE: "combatState",
+  COMBATANT_STATE: "combatantState"
+});

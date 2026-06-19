@@ -1,0 +1,2496 @@
+import { AoVAdapter } from "../adapter/aov-adapter.mjs";
+import {
+  ACTION_CATEGORIES,
+  ENGAGEMENT_STATUS,
+  MODULE_ID,
+  MOVEMENT_DEBUG_CATEGORIES,
+  MOVEMENT_DEBUG_LEVELS,
+  MOVEMENT_PLAN_STATUS,
+  PHASES
+} from "../constants.mjs";
+import { debug, warn } from "../logger.mjs";
+import { getCombatState, getCombatantState, updateCombatantState, updateCombatState } from "./state.mjs";
+import { syncEngagedStatusEffect } from "./engagement-status.mjs";
+import { getReadiedWeapon } from "./weapon-state.mjs";
+import {
+  appendRoutePoint,
+  cleanMovementPoint,
+  normalizeMovementRoute,
+  sameMovementPoint
+} from "./movement-route.mjs";
+import { movementDebug, movementDebugWarn, newMovementDebugRunId } from "./movement-debugger.mjs";
+import { settleMovementWrites } from "./authoritative-write-queue.mjs";
+import { isMovementPlanningPhase, shouldExecuteMovementImmediately } from "./phase-structure.mjs";
+
+export { cleanMovementPoint, normalizeMovementRoute } from "./movement-route.mjs";
+
+const activeRuns = new Map();
+const movementRunLocks = new Map();
+const activeEngagementPairs = new Map();
+const movementRulerDrafts = new Map();
+const MOVEMENT_RULER_CAPTURE_PATCH = Symbol.for("aov-skjadlborg.movement-ruler-capture");
+const DEFAULT_GRID_SIZE = 100;
+const DEFAULT_MOVEMENT_TICK_DELAY_MS = 250;
+const MAX_BLOCKED_TICKS = 8;
+const FRIENDLY_DISPOSITION = 1;
+const HOSTILE_DISPOSITION = -1;
+const RAW_WEAPON_LENGTHS_METERS = Object.freeze({
+  atgeir: 2.2,
+  battleaxe: 0.7,
+  broadsword: 1,
+  knife: 0.3,
+  longaxe: 1.4,
+  longspear: 3,
+  quarterstaff: 2,
+  sax: 0.6
+});
+
+/**
+ * Resolve the grid size used to convert pixel distance to grid units.
+ *
+ * @returns {number}
+ */
+function gridSize() {
+  return Number(canvas.scene?.grid?.size ?? canvas.grid?.size) || DEFAULT_GRID_SIZE;
+}
+
+/**
+ * Resolve the scene-unit distance represented by one grid space.
+ *
+ * @returns {number}
+ */
+function gridDistance() {
+  return Number(canvas.scene?.grid?.distance) || 1;
+}
+
+/**
+ * Measure a point path in scene units.
+ *
+ * @param {{x: number, y: number}[]} points Canvas points.
+ * @returns {number}
+ */
+function measureSceneDistance(points) {
+  if (!Array.isArray(points) || points.length < 2) return 0;
+  return AoVAdapter.measureDistanceFromWaypoints(points);
+}
+
+/**
+ * Measure two token centers in grid spaces.
+ *
+ * @param {{x: number, y: number}} a First center.
+ * @param {{x: number, y: number}} b Second center.
+ * @returns {number}
+ */
+export function measureGridUnits(a, b) {
+  return Math.hypot(Number(b.x) - Number(a.x), Number(b.y) - Number(a.y)) / gridSize();
+}
+
+/**
+ * Build a center-like point from a TokenDocument when the placeable is absent.
+ *
+ * @param {TokenDocument|object|null} document Token document.
+ * @returns {{x: number, y: number}|null}
+ */
+export function tokenCenter(document) {
+  const objectCenter = cleanMovementPoint(document?.object?.center);
+  if (objectCenter) return objectCenter;
+  const origin = cleanMovementPoint(document);
+  if (!origin) return null;
+  const width = Number(document?.width) || 1;
+  const height = Number(document?.height) || 1;
+  const size = gridSize();
+  return {
+    x: Math.round(origin.x + ((width * size) / 2)),
+    y: Math.round(origin.y + ((height * size) / 2))
+  };
+}
+
+/**
+ * Build the source-position center of a TokenDocument.
+ *
+ * Movement engagement must compare persisted checkpoint positions rather than
+ * an in-flight Placeable animation. Foundry movement waypoints use top-left
+ * pixel coordinates, so this helper deliberately prefers the document source.
+ *
+ * @param {TokenDocument|object|null} document Token document.
+ * @returns {{x: number, y: number}|null}
+ */
+export function tokenSourceCenter(document) {
+  const origin = cleanMovementPoint(document?._source) ?? cleanMovementPoint(document);
+  if (!origin) return null;
+  const width = Number(document?.width ?? document?._source?.width) || 1;
+  const height = Number(document?.height ?? document?._source?.height) || 1;
+  const size = gridSize();
+  return {
+    x: Math.round(origin.x + ((width * size) / 2)),
+    y: Math.round(origin.y + ((height * size) / 2))
+  };
+}
+
+/**
+ * Resolve the occupied grid rectangle for a token top-left source point.
+ *
+ * The v13 compatibility movement engine uses occupied grid footprints for RAW
+ * engagement and collision checks instead of center-to-center ruler distance.
+ *
+ * @param {TokenDocument|object|null} document Token document.
+ * @param {object|null} [sourcePoint=null] Optional top-left point override.
+ * @returns {{minX: number, minY: number, maxX: number, maxY: number}|null}
+ */
+export function tokenSourceGridRect(document, sourcePoint = null) {
+  const origin = cleanMovementPoint(sourcePoint) ?? cleanMovementPoint(document?._source) ?? cleanMovementPoint(document);
+  if (!origin) return null;
+  const width = Math.max(1, Number(document?.width ?? document?._source?.width) || 1);
+  const height = Math.max(1, Number(document?.height ?? document?._source?.height) || 1);
+  const size = gridSize();
+  return {
+    minX: Math.floor(origin.x / size),
+    minY: Math.floor(origin.y / size),
+    maxX: Math.ceil((origin.x + (width * size)) / size) - 1,
+    maxY: Math.ceil((origin.y + (height * size)) / size) - 1
+  };
+}
+
+/**
+ * Measure occupied-grid separation. Diagonal adjacency counts as 1.
+ *
+ * @param {object|null} first First occupied grid rectangle.
+ * @param {object|null} second Second occupied grid rectangle.
+ * @returns {number}
+ */
+export function measureOccupiedGridSeparation(first, second) {
+  if (!first || !second) return Number.POSITIVE_INFINITY;
+  const gapX = first.maxX < second.minX
+    ? second.minX - first.maxX
+    : second.maxX < first.minX
+      ? first.minX - second.maxX
+      : 0;
+  const gapY = first.maxY < second.minY
+    ? second.minY - first.maxY
+    : second.maxY < first.minY
+      ? first.minY - second.maxY
+      : 0;
+  return Math.max(gapX, gapY);
+}
+
+/**
+ * Determine whether two occupied grid rectangles overlap.
+ *
+ * @param {object|null} first First rectangle.
+ * @param {object|null} second Second rectangle.
+ * @returns {boolean}
+ */
+function gridRectsOverlap(first, second) {
+  return measureOccupiedGridSeparation(first, second) === 0;
+}
+
+/**
+ * Expand a stored movement route into stoppable grid-step checkpoints.
+ *
+ * Foundry v13 can only stop an active TokenDocument movement at checkpoints.
+ * The public complete-path helper supplies the intermediate path positions; the
+ * module marks each positional step as a checkpoint so engagement can halt at
+ * the first applicable grid unit. The deterministic interpolation fallback is
+ * retained only as a defensive guard for incomplete document test doubles.
+ *
+ * @param {TokenDocument|object|null} document Token document.
+ * @param {unknown[]} storedWaypoints Stored top-left movement waypoints.
+ * @returns {object[]} Stoppable movement waypoints.
+ */
+export function movementExecutionWaypoints(document, storedWaypoints) {
+  const requested = [];
+  if (Array.isArray(storedWaypoints)) {
+    for (const waypoint of storedWaypoints) appendRoutePoint(requested, waypoint);
+  }
+  movementDebug(MOVEMENT_DEBUG_CATEGORIES.EXPANSION, "start-expansion", () => ({
+    tokenId: document?.id ?? document?._id ?? null,
+    source: cleanMovementPoint(document?._source) ?? cleanMovementPoint(document),
+    storedCount: storedWaypoints?.length ?? 0,
+    requestedCount: requested.length,
+    requested
+  }), { level: MOVEMENT_DEBUG_LEVELS.TRACE, tokenId: document?.id ?? document?._id ?? null });
+  if (!requested.length) return [];
+
+  const current = cleanMovementPoint(document?._source) ?? cleanMovementPoint(document);
+  let origin = current ?? cleanMovementPoint(requested[0]);
+  if (!origin) return [];
+
+  const size = gridSize();
+  const checkpoints = [];
+
+  const pushSegmentCheckpoints = (segmentOrigin, expanded, routeWaypoint, segmentIndex) => {
+    const routeDestination = cleanMovementPoint(routeWaypoint);
+    if (!routeDestination || sameMovementPoint(routeDestination, segmentOrigin)) return;
+
+    let stepOrigin = segmentOrigin;
+    for (const rawWaypoint of expanded) {
+      const stepDestination = cleanMovementPoint(rawWaypoint);
+      if (!stepDestination || sameMovementPoint(stepDestination, stepOrigin)) continue;
+      const deltaX = stepDestination.x - stepOrigin.x;
+      const deltaY = stepDestination.y - stepOrigin.y;
+      const steps = Math.max(1, Math.ceil(Math.max(Math.abs(deltaX), Math.abs(deltaY)) / size));
+      for (let step = 1; step <= steps; step += 1) {
+        const point = {
+          x: Math.round(stepOrigin.x + ((deltaX * step) / steps)),
+          y: Math.round(stepOrigin.y + ((deltaY * step) / steps))
+        };
+        if (sameMovementPoint(point, current) || sameMovementPoint(point, cleanMovementPoint(checkpoints.at(-1)))) continue;
+        const finalSegmentPoint = sameMovementPoint(point, routeDestination);
+        checkpoints.push({
+          ...(finalSegmentPoint ? routeWaypoint : rawWaypoint),
+          ...point,
+          checkpoint: true,
+          routeIndex: segmentIndex,
+          segmentIndex,
+          explicitCorner: finalSegmentPoint,
+          intermediate: !finalSegmentPoint || routeWaypoint?.intermediate === true,
+          explicit: finalSegmentPoint ? routeWaypoint?.explicit === true : rawWaypoint?.explicit === true,
+          snapped: rawWaypoint?.snapped !== false && routeWaypoint?.snapped !== false
+        });
+      }
+      stepOrigin = stepDestination;
+    }
+  };
+
+  for (const [segmentIndex, routeWaypoint] of requested.entries()) {
+    const destination = cleanMovementPoint(routeWaypoint);
+    if (!destination || sameMovementPoint(destination, origin)) continue;
+    let expanded = [];
+    let expansionSource = "fallback";
+    if (typeof document?.getCompleteMovementPath === "function") {
+      try {
+        const complete = document.getCompleteMovementPath([
+          { ...origin, checkpoint: true, snapped: true },
+          routeWaypoint
+        ]);
+        if (Array.isArray(complete)) {
+          expanded = complete;
+          expansionSource = "getCompleteMovementPath";
+        }
+      }
+      catch (err) {
+        warn(err);
+        movementDebugWarn(MOVEMENT_DEBUG_CATEGORIES.EXPANSION, "complete-path-error", () => ({
+          tokenId: document?.id ?? document?._id ?? null,
+          origin,
+          destination,
+          error: String(err?.message ?? err)
+        }), { tokenId: document?.id ?? document?._id ?? null });
+      }
+    }
+    if (!expanded.length) expanded = [routeWaypoint];
+    if (!sameMovementPoint(cleanMovementPoint(expanded.at(-1)), destination)) expanded.push(routeWaypoint);
+    const beforeCount = checkpoints.length;
+    pushSegmentCheckpoints(origin, expanded, routeWaypoint, segmentIndex);
+    movementDebug(MOVEMENT_DEBUG_CATEGORIES.EXPANSION, "segment-expanded", () => ({
+      tokenId: document?.id ?? document?._id ?? null,
+      segmentIndex,
+      origin,
+      destination,
+      expansionSource,
+      expandedCount: expanded.length,
+      checkpointDelta: checkpoints.length - beforeCount,
+      expanded,
+      checkpoints: checkpoints.slice(beforeCount)
+    }), { level: MOVEMENT_DEBUG_LEVELS.TRACE, tokenId: document?.id ?? document?._id ?? null });
+    origin = destination;
+  }
+
+  const expandedSegmentCount = new Set(checkpoints.map(point => Number(point.segmentIndex ?? point.routeIndex)).filter(Number.isFinite)).size;
+  if (requested.length > 1 && expandedSegmentCount < 2) {
+    movementDebugWarn(MOVEMENT_DEBUG_CATEGORIES.EXPANSION, "multi-route-expanded-too-short", () => ({
+      requested,
+      expandedSegmentCount,
+      checkpoints
+    }), { tokenId: document?.id ?? document?._id ?? null });
+  }
+  movementDebug(MOVEMENT_DEBUG_CATEGORIES.EXPANSION, "finish-expansion", () => ({
+    requestedCount: requested.length,
+    expandedSegmentCount,
+    checkpointCount: checkpoints.length,
+    checkpoints
+  }), { level: MOVEMENT_DEBUG_LEVELS.VERBOSE, tokenId: document?.id ?? document?._id ?? null });
+  return checkpoints;
+}
+
+/**
+ * Normalize a route into plain ordered movement points.
+ *
+ * @param {unknown[]} points Candidate route points.
+ * @param {{x: number, y: number}|null} [origin=null] Optional origin to omit.
+ * @returns {object[]}
+ */
+function cleanMovementRoute(points, origin = null) {
+  const route = [];
+  if (!Array.isArray(points)) return route;
+  for (const point of points) {
+    const clean = cleanMovementPoint(point);
+    if (!clean) continue;
+    if (!route.length && sameMovementPoint(clean, cleanMovementPoint(origin))) continue;
+    appendRoutePoint(route, point);
+  }
+  return route;
+}
+
+/**
+ * Return whether every required point occurs in the same order within a route.
+ *
+ * @param {object[]} route Candidate containing route.
+ * @param {object[]} required Ordered points that must be retained.
+ * @returns {boolean}
+ */
+function routeContainsOrderedPoints(route, required) {
+  if (!required.length) return true;
+  let index = 0;
+  for (const point of route) {
+    if (!sameMovementPoint(cleanMovementPoint(point), cleanMovementPoint(required[index]))) continue;
+    index += 1;
+    if (index >= required.length) return true;
+  }
+  return false;
+}
+
+/**
+ * Merge a live ruler draft with the final Foundry movement operation.
+ *
+ * The final `pending.waypoints` route is preferred when it already contains
+ * every explicit ruler corner. If the final operation only exposes its current
+ * destination, the cached explicit corners are retained and the destination is
+ * appended. The largest shared suffix/prefix is removed when two partial route
+ * revisions are joined.
+ *
+ * @param {unknown[]} draftRoute Explicit corners captured from TokenRuler data.
+ * @param {unknown[]} operationRoute Route captured from preMoveToken.
+ * @param {object|null} [destination=null] Final movement destination.
+ * @returns {object[]}
+ */
+export function mergeMovementRoutes(draftRoute, operationRoute, destination = null) {
+  const draft = cleanMovementRoute(draftRoute);
+  const operation = cleanMovementRoute(operationRoute);
+  let merged;
+
+  if (!draft.length) merged = operation;
+  else if (!operation.length) merged = draft;
+  else if (routeContainsOrderedPoints(operation, draft)) merged = operation;
+  else if (routeContainsOrderedPoints(draft, operation)) merged = draft;
+  else {
+    let overlap = Math.min(draft.length, operation.length);
+    while (overlap > 0) {
+      const draftTail = draft.slice(draft.length - overlap);
+      const operationHead = operation.slice(0, overlap);
+      const matches = draftTail.every((point, index) => {
+        return sameMovementPoint(cleanMovementPoint(point), cleanMovementPoint(operationHead[index]));
+      });
+      if (matches) break;
+      overlap -= 1;
+    }
+    merged = [...draft, ...operation.slice(overlap)];
+  }
+
+  const result = cleanMovementRoute(merged);
+  if (destination && !sameMovementPoint(cleanMovementPoint(destination), cleanMovementPoint(result.at(-1)))) {
+    appendRoutePoint(result, destination);
+  }
+  return result;
+}
+
+/**
+ * Read the current user's planned movement from TokenRuler refresh data.
+ *
+ * `foundPath` contains the complete preview path. Only user-authored explicit
+ * points and checkpoints are treated as bankable route corners while the drag
+ * is still active. The final destination is supplied authoritatively by the
+ * subsequent preMoveToken operation.
+ *
+ * @param {object} [rulerData={}] TokenRuler refresh data.
+ * @param {string|null} [userId=game.user.id] User whose route is being read.
+ * @returns {{source: string|null, plannedUserId: string|null, plannedUserIds: string[], foundPath: object[], explicitWaypoints: object[], passedWaypoints: object[], pendingWaypoints: object[], searching: boolean, hidden: boolean, history: object[], unreachableWaypoints: object[]}}
+ */
+export function movementRouteFromRulerData(rulerData = {}, userId = game.user?.id ?? null) {
+  const plannedByUser = rulerData?.plannedMovement && typeof rulerData.plannedMovement === "object"
+    ? rulerData.plannedMovement
+    : {};
+  const plannedUserIds = Object.keys(plannedByUser);
+  const fallbackUserId = plannedUserIds.length === 1 ? plannedUserIds[0] : null;
+  const plannedUserId = userId && plannedByUser[userId] ? userId : fallbackUserId;
+  const plannedMovement = plannedUserId ? plannedByUser[plannedUserId] : null;
+  const plannedFoundPath = cleanMovementRoute(plannedMovement?.foundPath ?? []);
+  const pendingWaypoints = cleanMovementRoute(rulerData?.pendingWaypoints ?? []);
+  const foundPath = plannedFoundPath.length ? plannedFoundPath : pendingWaypoints;
+  const explicitWaypoints = cleanMovementRoute(
+    foundPath.filter(point => point?.explicit === true || point?.checkpoint === true)
+  );
+  return {
+    source: plannedFoundPath.length ? "plannedMovement.foundPath" : pendingWaypoints.length ? "pendingWaypoints" : null,
+    plannedUserId,
+    plannedUserIds,
+    foundPath,
+    explicitWaypoints,
+    passedWaypoints: cleanMovementRoute(rulerData?.passedWaypoints ?? []),
+    pendingWaypoints,
+    searching: plannedMovement?.searching === true,
+    hidden: plannedMovement?.hidden === true,
+    history: cleanMovementRoute(plannedMovement?.history ?? []),
+    unreachableWaypoints: cleanMovementRoute(plannedMovement?.unreachableWaypoints ?? [])
+  };
+}
+
+/**
+ * Read the authoritative user-authored waypoint list from a Foundry v13
+ * preMoveToken operation.
+ *
+ * During a drag movement, TokenMovementData.pending contains only the portion
+ * of the measured path which remains after the current checkpoint, while
+ * TokenMovementData.destination can identify that current checkpoint. The
+ * update operation separately retains the complete authored waypoint list in
+ * operation.movement[tokenId].waypoints. That operation route must therefore
+ * take precedence when finalizing a banked movement declaration.
+ *
+ * @param {TokenDocument|object|null} document Token document.
+ * @param {object} [operation={}] Foundry document update operation.
+ * @returns {{source: string|null, tokenId: string|null, availableTokenIds: string[], waypoints: object[]}}
+ */
+export function movementRouteFromOperation(document, operation = {}) {
+  const tokenId = document?.id ?? document?._id ?? null;
+  const movement = operation?.movement && typeof operation.movement === "object"
+    ? operation.movement
+    : null;
+  const availableTokenIds = movement
+    ? Object.entries(movement)
+      .filter(([, value]) => value && typeof value === "object" && Array.isArray(value.waypoints))
+      .map(([id]) => id)
+    : [];
+
+  const candidates = [];
+  const addCandidate = (source, value) => {
+    const points = Array.isArray(value)
+      ? value
+      : Array.isArray(value?.waypoints)
+        ? value.waypoints
+        : [];
+    const waypoints = cleanMovementRoute(points, cleanMovementPoint(document?._source) ?? cleanMovementPoint(document));
+    if (waypoints.length) candidates.push({ source, waypoints });
+  };
+
+  if (tokenId && movement?.[tokenId]) {
+    addCandidate(`operation.movement.${tokenId}.waypoints`, movement[tokenId]);
+  }
+  addCandidate("operation.movement.waypoints", movement);
+  addCandidate("operation.waypoints", operation?.waypoints);
+
+  if (!candidates.length && availableTokenIds.length === 1) {
+    const fallbackTokenId = availableTokenIds[0];
+    addCandidate(`operation.movement.${fallbackTokenId}.waypoints`, movement[fallbackTokenId]);
+  }
+
+  const selected = candidates[0] ?? null;
+  return {
+    source: selected?.source ?? null,
+    tokenId,
+    availableTokenIds,
+    waypoints: selected?.waypoints ?? []
+  };
+}
+
+/**
+ * Build a stable cache key for one user's ruler draft.
+ *
+ * @param {TokenDocument|object|null} document Token document.
+ * @param {string|null} [userId=game.user.id] Planning user id.
+ * @returns {string|null}
+ */
+function movementRulerDraftKey(document, userId = game.user?.id ?? null) {
+  const tokenId = document?.id ?? document?._id ?? null;
+  if (!tokenId || !userId) return null;
+  const sceneId = document?.parent?.id ?? canvas.scene?.id ?? "no-scene";
+  return `${sceneId}:${tokenId}:${userId}`;
+}
+
+/**
+ * Create a compact route signature used to suppress duplicate ruler refreshes.
+ *
+ * @param {object[]} route Movement route.
+ * @returns {string}
+ */
+function movementRouteSignature(route) {
+  return JSON.stringify(cleanMovementRoute(route).map(point => [
+    point.x,
+    point.y,
+    point.explicit === true,
+    point.checkpoint === true
+  ]));
+}
+
+/**
+ * Return a monotonic route revision suitable for asynchronous socket writes.
+ *
+ * @param {...unknown} revisions Existing revision values.
+ * @returns {number}
+ */
+function nextMovementRouteRevision(...revisions) {
+  const current = Math.max(0, ...revisions.map(value => Number(value) || 0));
+  return Math.max(Date.now(), current + 1);
+}
+
+/**
+ * Add route-capture metadata to a movement plan.
+ *
+ * @param {object} plan Movement plan.
+ * @param {object} metadata Capture metadata.
+ * @returns {object}
+ */
+function annotateMovementPlan(plan, metadata) {
+  return {
+    ...plan,
+    routeRevision: Number(metadata.routeRevision) || 0,
+    routeId: String(metadata.routeId ?? ""),
+    captureSource: String(metadata.captureSource ?? ""),
+    capturedAt: Number(metadata.capturedAt) || Date.now(),
+    draft: metadata.draft === true
+  };
+}
+
+/**
+ * Read the stored module route from a combatant movement flag.
+ *
+ * `movement.route` is canonical. `movement.waypoints` remains a compatibility
+ * alias for movement plans written by earlier v13 test builds.
+ *
+ * @param {object|null} movement Combatant movement state.
+ * @returns {object[]}
+ */
+function storedMovementRoute(movement) {
+  if (Array.isArray(movement?.route) && movement.route.length) return movement.route;
+  return Array.isArray(movement?.waypoints) ? movement.waypoints : [];
+}
+
+/**
+ * Return compact route-state data for movement diagnostics.
+ *
+ * @param {object|null} movement Combatant movement state.
+ * @returns {object|null}
+ */
+function storedMovementSummary(movement) {
+  if (!movement || typeof movement !== "object") return null;
+  const route = storedMovementRoute(movement);
+  return {
+    planStatus: movement.planStatus ?? "",
+    draft: movement.draft === true,
+    routeId: movement.routeId ?? "",
+    routeRevision: Number(movement.routeRevision) || 0,
+    captureSource: movement.captureSource ?? "",
+    origin: cleanMovementPoint(movement.origin),
+    destination: cleanMovementPoint(movement.destination),
+    routeCount: route.length,
+    distance: Number(movement.distance) || 0,
+    stoppedReason: movement.stoppedReason ?? ""
+  };
+}
+
+/**
+ * Return compact Foundry movement-shape diagnostics without preserving stale
+ * history arrays in high-frequency console logs.
+ *
+ * @param {object|null} movement Foundry movement-like object.
+ * @returns {object|null}
+ */
+function foundryMovementSummary(movement) {
+  if (!movement || typeof movement !== "object") return null;
+  const count = value => Array.isArray(value?.waypoints) ? value.waypoints.length : 0;
+  return {
+    id: movement.id ?? null,
+    state: movement.state ?? null,
+    method: movement.method ?? null,
+    destination: cleanMovementPoint(movement.destination),
+    routeCount: Array.isArray(movement.route) ? movement.route.length : 0,
+    waypointCount: Array.isArray(movement.waypoints) ? movement.waypoints.length : 0,
+    pathCount: Array.isArray(movement.path) ? movement.path.length : 0,
+    pendingWaypointCount: count(movement.pending),
+    passedWaypointCount: count(movement.passed),
+    unrecordedHistoryWaypointCount: count(movement.history?.unrecorded),
+    recordedHistoryWaypointCount: count(movement.history?.recorded)
+  };
+}
+
+/**
+ * Bank a newly created explicit ruler waypoint as a draft movement revision.
+ *
+ * Draft revisions are persisted so the HUD and Combatant flag reflect every
+ * Ctrl-authored corner. They are marked `draft: true` and are therefore never
+ * executed unless preMoveToken finalizes the route.
+ *
+ * @param {TokenDocument|object} document Token document.
+ * @param {object} rulerData TokenRuler refresh data.
+ * @param {(action: string, payload?: object) => Promise<unknown>} requestGm GM request function.
+ * @returns {void}
+ */
+function bankRulerMovementDraft(document, rulerData, requestGm) {
+  const decision = movementCaptureDecision(document, {}, game.combat);
+  if (!decision.capture || decision.reason !== "ok") return;
+  const key = movementRulerDraftKey(document);
+  if (!key) return;
+
+  const rulerRoute = movementRouteFromRulerData(rulerData);
+  const origin = cleanMovementPoint(document?._source) ?? cleanMovementPoint(document);
+  const explicitWaypoints = cleanMovementRoute(rulerRoute.explicitWaypoints, origin);
+  const signature = movementRouteSignature(explicitWaypoints);
+  const previousDraft = movementRulerDrafts.get(key) ?? null;
+
+  if (!explicitWaypoints.length || previousDraft?.signature === signature) return;
+
+  movementDebug(MOVEMENT_DEBUG_CATEGORIES.CAPTURE, "ruler-refresh-observed", () => ({
+    combatantId: decision.combatant.id,
+    tokenId: document?.id ?? document?._id ?? null,
+    currentUserId: game.user?.id ?? null,
+    routeSource: rulerRoute.source,
+    plannedUserId: rulerRoute.plannedUserId,
+    plannedUserIds: rulerRoute.plannedUserIds,
+    searching: rulerRoute.searching,
+    hidden: rulerRoute.hidden,
+    foundPathCount: rulerRoute.foundPath.length,
+    explicitWaypointCount: explicitWaypoints.length,
+    explicitWaypoints,
+    pendingWaypointCount: rulerRoute.pendingWaypoints.length,
+    passedWaypointCount: rulerRoute.passedWaypoints.length,
+    historyWaypointCount: rulerRoute.history.length,
+    unreachableWaypointCount: rulerRoute.unreachableWaypoints.length,
+    signature,
+    previousSignature: previousDraft?.signature ?? null
+  }), {
+    combatId: decision.combat.id,
+    combatantId: decision.combatant.id,
+    tokenId: document?.id ?? document?._id ?? null,
+    phase: getCombatState(decision.combat).phase,
+    level: MOVEMENT_DEBUG_LEVELS.TRACE
+  });
+
+  const combatantState = getCombatantState(decision.combatant);
+  const routeRevision = nextMovementRouteRevision(
+    combatantState.movement?.routeRevision,
+    previousDraft?.routeRevision
+  );
+  const routeId = previousDraft?.routeId
+    || `ruler:${document?.id ?? document?._id}:${game.user?.id ?? "unknown"}:${Date.now()}`;
+  const capturedAt = Date.now();
+  const draftPlan = annotateMovementPlan(
+    movementPlanFromOperation(document, {
+      id: routeId,
+      origin,
+      pending: { waypoints: explicitWaypoints },
+      destination: explicitWaypoints.at(-1)
+    }),
+    {
+      routeRevision,
+      routeId,
+      captureSource: "token-ruler-refresh",
+      capturedAt,
+      draft: true
+    }
+  );
+
+  const draft = {
+    key,
+    sceneId: document?.parent?.id ?? canvas.scene?.id ?? null,
+    tokenId: document?.id ?? document?._id ?? null,
+    userId: game.user?.id ?? null,
+    combatId: decision.combat.id,
+    combatantId: decision.combatant.id,
+    routeId,
+    routeRevision,
+    capturedAt,
+    signature,
+    explicitWaypoints,
+    foundPath: rulerRoute.foundPath,
+    pendingWaypoints: rulerRoute.pendingWaypoints,
+    passedWaypoints: rulerRoute.passedWaypoints,
+    history: rulerRoute.history,
+    unreachableWaypoints: rulerRoute.unreachableWaypoints,
+    previousMovement: previousDraft?.previousMovement
+      ?? foundry.utils.deepClone(combatantState.movement),
+    finalized: false,
+    persisted: true
+  };
+  movementRulerDrafts.set(key, draft);
+
+  movementDebug(MOVEMENT_DEBUG_CATEGORIES.CAPTURE, "ruler-waypoint-banked", () => ({
+    combatantId: decision.combatant.id,
+    tokenId: document?.id ?? document?._id ?? null,
+    routeId,
+    routeRevision,
+    explicitWaypointCount: explicitWaypoints.length,
+    explicitWaypoints,
+    foundPathCount: rulerRoute.foundPath.length,
+    foundPath: rulerRoute.foundPath,
+    searching: rulerRoute.searching,
+    unreachableWaypoints: rulerRoute.unreachableWaypoints,
+    previousBankedMovement: storedMovementSummary(combatantState.movement),
+    draftPlan: storedMovementSummary(draftPlan)
+  }), {
+    combatId: decision.combat.id,
+    combatantId: decision.combatant.id,
+    tokenId: document?.id ?? document?._id ?? null,
+    phase: getCombatState(decision.combat).phase,
+    level: MOVEMENT_DEBUG_LEVELS.TRACE
+  });
+
+  void requestGm("recordMovement", {
+    combatId: decision.combat.id,
+    combatantId: decision.combatant.id,
+    movement: draftPlan
+  }).then(() => {
+    ui.combat?.render?.();
+  }).catch(warn);
+}
+
+/**
+ * Restore the movement plan that existed before an unfinished ruler drag.
+ *
+ * @param {object} draft Cached ruler draft.
+ * @param {(action: string, payload?: object) => Promise<unknown>} requestGm GM request function.
+ * @returns {void}
+ */
+function restoreCancelledRulerDraft(draft, requestGm) {
+  if (!draft?.persisted || draft.finalized || !draft.previousMovement) return;
+  const combat = AoVAdapter.getCombatById?.(draft.combatId) ?? game.combat;
+  const combatant = AoVAdapter.getCombatantById?.(combat, draft.combatantId)
+    ?? combat?.combatants?.get?.(draft.combatantId)
+    ?? null;
+  const tokenId = draft.tokenId ?? null;
+  const sceneId = draft.sceneId ?? canvas.scene?.id ?? "no-scene";
+  if (!combatant || !combat?.started) return;
+
+  const routeRevision = nextMovementRouteRevision(
+    draft.routeRevision,
+    getCombatantState(combatant).movement?.routeRevision
+  );
+  const restored = annotateMovementPlan(foundry.utils.deepClone(draft.previousMovement), {
+    routeRevision,
+    routeId: draft.previousMovement.routeId || `restore:${sceneId}:${tokenId}:${Date.now()}`,
+    captureSource: "token-ruler-cancel-restore",
+    capturedAt: Date.now(),
+    draft: draft.previousMovement.draft === true
+  });
+
+  movementDebug(MOVEMENT_DEBUG_CATEGORIES.CAPTURE, "ruler-draft-cancelled", () => ({
+    combatantId: combatant.id,
+    tokenId,
+    cancelledRouteId: draft.routeId,
+    cancelledRevision: draft.routeRevision,
+    restored
+  }), {
+    combatId: combat.id,
+    combatantId: combatant.id,
+    tokenId,
+    phase: getCombatState(combat).phase,
+    level: MOVEMENT_DEBUG_LEVELS.VERBOSE
+  });
+
+  void requestGm("recordMovement", {
+    combatId: combat.id,
+    combatantId: combatant.id,
+    movement: restored
+  }).then(() => ui.combat?.render?.()).catch(warn);
+}
+
+/**
+ * Wrap the documented TokenRuler refresh surface to observe live route edits.
+ *
+ * @param {(action: string, payload?: object) => Promise<unknown>} requestGm GM request function.
+ * @returns {boolean}
+ */
+function installMovementRulerCapture(requestGm) {
+  const activeRuler = globalThis.canvas?.tokens?.placeables
+    ?.find?.(token => token?.ruler)?.ruler
+    ?? null;
+  const RulerClass = globalThis.CONFIG?.Token?.rulerClass
+    ?? globalThis.foundry?.canvas?.placeables?.tokens?.TokenRuler
+    ?? activeRuler?.constructor
+    ?? null;
+  const prototype = RulerClass?.prototype;
+  if (!prototype || typeof prototype.refresh !== "function") {
+    movementDebugWarn(MOVEMENT_DEBUG_CATEGORIES.CAPTURE, "token-ruler-unavailable", () => ({
+      hasConfigRulerClass: !!globalThis.CONFIG?.Token?.rulerClass,
+      hasNamespacedRulerClass: !!globalThis.foundry?.canvas?.placeables?.tokens?.TokenRuler
+    }));
+    return false;
+  }
+  if (prototype[MOVEMENT_RULER_CAPTURE_PATCH]) return true;
+
+  const originalRefresh = prototype.refresh;
+  const originalClear = prototype.clear;
+  Object.defineProperty(prototype, MOVEMENT_RULER_CAPTURE_PATCH, {
+    configurable: false,
+    enumerable: false,
+    value: true
+  });
+
+  prototype.refresh = function skjadlborgRefreshMovementRuler(rulerData) {
+    const result = originalRefresh.call(this, rulerData);
+    try {
+      bankRulerMovementDraft(this.token?.document ?? this.token, rulerData, requestGm);
+    }
+    catch (err) {
+      warn(err);
+      movementDebugWarn(MOVEMENT_DEBUG_CATEGORIES.CAPTURE, "ruler-refresh-capture-error", () => ({
+        error: String(err?.stack ?? err?.message ?? err)
+      }));
+    }
+    return result;
+  };
+
+  if (typeof originalClear === "function") {
+    prototype.clear = function skjadlborgClearMovementRuler(...args) {
+      const document = this.token?.document ?? this.token;
+      const key = movementRulerDraftKey(document);
+      const draft = key ? movementRulerDrafts.get(key) : null;
+      const result = originalClear.apply(this, args);
+      queueMicrotask(() => {
+        if (!key || movementRulerDrafts.get(key) !== draft) return;
+        movementRulerDrafts.delete(key);
+        restoreCancelledRulerDraft(draft, requestGm);
+      });
+      return result;
+    };
+  }
+
+  movementDebug(MOVEMENT_DEBUG_CATEGORIES.CAPTURE, "token-ruler-capture-installed", () => ({
+    rulerClass: RulerClass.name ?? "TokenRuler"
+  }), { level: MOVEMENT_DEBUG_LEVELS.VERBOSE });
+  return true;
+}
+
+/**
+ * Normalize a Foundry v13 Token movement operation into a storable module plan.
+ *
+ * The movement hook supplies movement data and operation options separately.
+ * Preserve both because ctrl-authored waypoints may be exposed by either
+ * surface depending on the initiating core workflow.
+ *
+ * @param {TokenDocument|object} document Token document.
+ * @param {object} [movement={}] Token movement data.
+ * @param {object} [operation={}] Token movement operation options.
+ * @returns {import("../types.mjs").SkjaldborgMovementPlan}
+ */
+export function movementPlanFromOperation(document, movement = {}, operation = {}) {
+  const movementPayload = movement && typeof movement === "object" ? movement : {};
+  const operationPayload = operation && typeof operation === "object" ? operation : {};
+  const origin = cleanMovementPoint(movementPayload.origin)
+    ?? cleanMovementPoint(document?._source)
+    ?? cleanMovementPoint(document)
+    ?? tokenCenter(document);
+  const operationRoute = movementRouteFromOperation(document, operationPayload);
+  const routePayload = operationRoute.waypoints.length
+    ? { route: operationRoute.waypoints }
+    : {
+        ...movementPayload,
+        operation: operationPayload
+      };
+  const baseNormalized = normalizeMovementRoute(routePayload, {
+    document: operationRoute.waypoints.length ? null : document,
+    origin
+  });
+  const normalized = operationRoute.waypoints.length
+    ? {
+        ...baseNormalized,
+        source: operationRoute.source,
+        candidates: [{
+          source: operationRoute.source,
+          priority: 0,
+          count: operationRoute.waypoints.length,
+          points: operationRoute.waypoints
+        }]
+      }
+    : baseNormalized;
+  const { route, waypoints, destination, source, truncated, candidates } = normalized;
+  const measuredPath = [origin, ...waypoints].filter(Boolean);
+  const plan = {
+    mode: "planned",
+    origin,
+    destination: destination ?? waypoints.at(-1) ?? null,
+    route,
+    waypoints,
+    distance: measureSceneDistance(measuredPath),
+    units: String(canvas.scene?.grid?.units ?? ""),
+    manual: false,
+    planStatus: waypoints.length ? MOVEMENT_PLAN_STATUS.PLANNED : MOVEMENT_PLAN_STATUS.NONE,
+    startedAt: null,
+    completedAt: null,
+    stoppedReason: "",
+    routeRevision: 0,
+    routeId: String(movementPayload.id ?? ""),
+    captureSource: source ?? "",
+    capturedAt: Date.now(),
+    draft: false
+  };
+  movementDebug(MOVEMENT_DEBUG_CATEGORIES.CAPTURE, "movement-plan-from-operation", () => ({
+    tokenId: document?.id ?? document?._id ?? null,
+    movementId: movementPayload.id ?? null,
+    movementState: movementPayload.state ?? null,
+    movementMethod: movementPayload.method ?? null,
+    movementChain: movementPayload.chain ?? [],
+    origin,
+    destination: plan.destination,
+    routeSource: source,
+    routeCandidates: candidates,
+    pendingWaypointCount: movementPayload.pending?.waypoints?.length ?? 0,
+    passedWaypointCount: movementPayload.passed?.waypoints?.length ?? 0,
+    unrecordedHistoryWaypointCount: movementPayload.history?.unrecorded?.waypoints?.length ?? 0,
+    recordedHistoryWaypointCount: movementPayload.history?.recorded?.waypoints?.length ?? 0,
+    truncated,
+    movementSummary: foundryMovementSummary(movementPayload),
+    operationKeys: Object.keys(operationPayload),
+    operationMovementTokenIds: operationPayload.movement && typeof operationPayload.movement === "object"
+      ? Object.keys(operationPayload.movement)
+      : [],
+    operationRouteSource: operationRoute.source,
+    operationRouteTokenId: operationRoute.tokenId,
+    operationRouteAvailableTokenIds: operationRoute.availableTokenIds,
+    operationRouteWaypointCount: operationRoute.waypoints.length,
+    operationRouteWaypoints: operationRoute.waypoints,
+    waypointCount: plan.waypoints.length,
+    distance: plan.distance,
+    plan
+  }), { level: MOVEMENT_DEBUG_LEVELS.TRACE, tokenId: document?.id ?? document?._id ?? null });
+  return plan;
+}
+
+/**
+ * Normalize an AoV weapon length string to meters.
+ *
+ * @param {unknown} value AoV weapon length string.
+ * @returns {number|null}
+ */
+export function parseWeaponLengthMeters(value) {
+  const text = String(value ?? "").toLowerCase();
+  const matches = [...text.matchAll(/(\d+(?:[.,]\d+)?)/g)].map(match => Number(match[1].replace(",", ".")));
+  const numeric = matches.filter(Number.isFinite);
+  if (!numeric.length) return null;
+  const amount = Math.max(...numeric);
+  if (/\b(cm|centimeter|centimeters|centimetre|centimetres)\b/.test(text)) return amount / 100;
+  if (/\b(mm|millimeter|millimeters|millimetre|millimetres)\b/.test(text)) return amount / 1000;
+  if (/\b(ft|feet|foot)\b/.test(text)) return amount * 0.3048;
+  if (/\b(in|inch|inches)\b/.test(text)) return amount * 0.0254;
+  if (/\b(yd|yard|yards)\b/.test(text)) return amount * 0.9144;
+  return amount > 10 ? amount / 100 : amount;
+}
+
+/**
+ * Normalize weapon names for RAW length fallback matching.
+ *
+ * @param {unknown} name Weapon name.
+ * @returns {string}
+ */
+function normalizeWeaponName(name) {
+  return String(name ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+/**
+ * Resolve a RAW weapon length fallback for standard AoV melee weapons.
+ *
+ * @param {Item|object|null} item AoV weapon item.
+ * @returns {number|null}
+ */
+export function rawWeaponLengthFallbackMeters(item) {
+  const normalized = normalizeWeaponName(item?.name);
+  if (!normalized) return null;
+  if (normalized.includes("battleaxe")) return RAW_WEAPON_LENGTHS_METERS.battleaxe;
+  if (normalized.includes("longaxe")) return RAW_WEAPON_LENGTHS_METERS.longaxe;
+  if (normalized.includes("longspear")) return RAW_WEAPON_LENGTHS_METERS.longspear;
+  if (normalized.includes("quarterstaff")) return RAW_WEAPON_LENGTHS_METERS.quarterstaff;
+  if (normalized.includes("broadsword")) return RAW_WEAPON_LENGTHS_METERS.broadsword;
+  if (normalized.includes("atgeir")) return RAW_WEAPON_LENGTHS_METERS.atgeir;
+  if (normalized.includes("knife")) return RAW_WEAPON_LENGTHS_METERS.knife;
+  if (normalized.includes("sax")) return RAW_WEAPON_LENGTHS_METERS.sax;
+  return null;
+}
+
+/**
+ * Determine whether a weapon item can establish melee engagement reach.
+ *
+ * @param {Item|object|null} item AoV weapon item.
+ * @returns {boolean}
+ */
+function weaponCanEstablishReach(item) {
+  if (item?.type !== "weapon") return false;
+  if (Number(item?.system?.equipStatus) !== 1) return false;
+  const weaponType = String(item?.system?.weaponType ?? "");
+  if (weaponType === "missile") return false;
+  if (weaponType === "thrown") return rawWeaponLengthFallbackMeters(item) !== null;
+  return true;
+}
+
+/**
+ * Resolve the best available melee length for an equipped AoV weapon.
+ *
+ * @param {Item|object|null} item AoV weapon item.
+ * @returns {number|null}
+ */
+export function weaponReachLengthMeters(item) {
+  if (!weaponCanEstablishReach(item)) return null;
+  return parseWeaponLengthMeters(item?.system?.length) ?? rawWeaponLengthFallbackMeters(item);
+}
+
+/**
+ * Read and normalize a numeric module setting.
+ *
+ * @param {string} key Setting key.
+ * @param {number} fallback Fallback value.
+ * @returns {number}
+ */
+function numericSetting(key, fallback) {
+  const value = Number(game.settings.get(MODULE_ID, key));
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+/**
+ * Convert a weapon length in meters to configured grid-unit reach.
+ *
+ * @param {number|null} meters Weapon length in meters.
+ * @returns {number}
+ */
+export function reachUnitsFromLength(meters) {
+  if (!Number.isFinite(meters)) return numericSetting("shortReachGridUnits", 1);
+  if (meters > 2) return numericSetting("longReachGridUnits", 3);
+  if (meters > 1) return numericSetting("mediumReachGridUnits", 2);
+  return numericSetting("shortReachGridUnits", 1);
+}
+
+/**
+ * Determine melee reach from the combatant's one currently readied weapon.
+ *
+ * @param {Combatant|object|null} combatant Foundry Combatant document.
+ * @returns {number}
+ */
+export function reachUnitsForCombatant(combatant) {
+  const baseReach = numericSetting("shortReachGridUnits", 1);
+  const weapon = getReadiedWeapon(combatant?.actor);
+  if (!weapon || !weaponCanEstablishReach(weapon)) return baseReach;
+  return Math.max(baseReach, reachUnitsFromLength(weaponReachLengthMeters(weapon)));
+}
+
+/**
+ * Determine whether two token dispositions are hostile opposites.
+ *
+ * @param {number|null|undefined} a First disposition.
+ * @param {number|null|undefined} b Second disposition.
+ * @returns {boolean}
+ */
+export function areOpposingDispositions(a, b) {
+  const friendly = globalThis.CONST?.TOKEN_DISPOSITIONS?.FRIENDLY ?? FRIENDLY_DISPOSITION;
+  const hostile = globalThis.CONST?.TOKEN_DISPOSITIONS?.HOSTILE ?? HOSTILE_DISPOSITION;
+  return (Number(a) === friendly && Number(b) === hostile)
+    || (Number(a) === hostile && Number(b) === friendly);
+}
+
+/**
+ * Resolve a TokenDocument for a combatant.
+ *
+ * @param {Combatant|object|null} combatant Foundry Combatant.
+ * @returns {TokenDocument|object|null}
+ */
+function tokenDocumentForCombatant(combatant) {
+  return combatant?.token?.object?.document
+    ?? combatant?.token?.document
+    ?? combatant?.token
+    ?? canvas.scene?.tokens?.get?.(combatant?.tokenId)
+    ?? null;
+}
+
+/**
+ * Iterate combatants from either Foundry Collections or plain Maps.
+ *
+ * @param {Combat|null|undefined} combat Combat document.
+ * @returns {Combatant[]}
+ */
+function combatantValues(combat) {
+  return Array.from(combat?.combatants ?? []).map(entry => Array.isArray(entry) ? entry[1] : entry);
+}
+
+/**
+ * Resolve a combatant for a TokenDocument.
+ *
+ * @param {Combat|null} combat Active combat.
+ * @param {TokenDocument|object|null} document Token document.
+ * @returns {Combatant|null}
+ */
+function combatantForTokenDocument(combat, document) {
+  const tokenId = document?.id ?? document?._id;
+  if (!combat || !tokenId) return null;
+  return combatantValues(combat).find(combatant => {
+    return combatant.tokenId === tokenId
+      || combatant.token?.id === tokenId
+      || combatant.token?.object?.id === tokenId
+      || combatant.token?.object?.document?.id === tokenId;
+  }) ?? null;
+}
+
+/**
+ * Check whether a document update belongs to module-owned movement execution.
+ *
+ * @param {object} [operation={}] Token movement operation.
+ * @returns {boolean}
+ */
+export function isInternalMovementOperation(operation = {}) {
+  return operation?.[MODULE_ID]?.movementExecution === true;
+}
+
+/**
+ * Whether this token movement should be captured in the active planning surface.
+ *
+ * @param {TokenDocument|object} document Token document.
+ * @param {object} [operation={}] Token movement operation options.
+ * @param {Combat|null} [combat=game.combat] Active combat.
+ * @returns {{capture: boolean, combat: Combat|null, combatant: Combatant|null, reason: string}}
+ */
+export function movementCaptureDecision(document, operation = {}, combat = game.combat) {
+  if (isInternalMovementOperation(operation)) return { capture: false, combat, combatant: null, reason: "internal" };
+  if (!AoVAdapter.enabledSetting) return { capture: false, combat, combatant: null, reason: "disabled" };
+  if (!combat?.started) return { capture: false, combat, combatant: null, reason: "not-started" };
+  const state = getCombatState(combat);
+  if (!state.enabled || !isMovementPlanningPhase(state.phase)) {
+    return { capture: false, combat, combatant: null, reason: "phase" };
+  }
+  if (
+    state.movementRun?.status === MOVEMENT_PLAN_STATUS.EXECUTING
+    && !shouldExecuteMovementImmediately(state.phase)
+  ) {
+    return { capture: false, combat, combatant: null, reason: "movement-running" };
+  }
+  const combatant = combatantForTokenDocument(combat, document);
+  if (!combatant) return { capture: false, combat, combatant: null, reason: "non-combatant" };
+  if (!AoVAdapter.canUserControlCombatant(game.user, combatant)) return { capture: false, combat, combatant, reason: "permission" };
+  const combatantState = getCombatantState(combatant);
+  const actionCategory = combatantState.intent?.actionCategory;
+  if (
+    combatantState.engagement?.engaged
+    && ![ACTION_CATEGORIES.RETREAT, ACTION_CATEGORIES.FLEE].includes(actionCategory)
+  ) {
+    return { capture: true, combat, combatant, reason: "engaged-blocked" };
+  }
+  return { capture: true, combat, combatant, reason: "ok" };
+}
+
+/**
+ * Log one movement-capture decision.
+ *
+ * @param {TokenDocument|object} document Token document.
+ * @param {object} movement Foundry movement payload.
+ * @param {object} operation Foundry movement operation options.
+ * @param {object} decision Capture decision.
+ * @returns {void}
+ */
+function debugCaptureDecision(document, movement, operation, decision) {
+  const category = MOVEMENT_DEBUG_CATEGORIES.CAPTURE;
+  const payload = () => ({
+    reason: decision.reason,
+    capture: decision.capture,
+    combatStarted: decision.combat?.started === true,
+    phase: getCombatState(decision.combat).phase,
+    combatantId: decision.combatant?.id ?? null,
+    tokenSource: cleanMovementPoint(document?._source) ?? cleanMovementPoint(document),
+    movement,
+    operation
+  });
+  const meta = {
+    combatId: decision.combat?.id ?? null,
+    combatantId: decision.combatant?.id ?? null,
+    tokenId: document?.id ?? document?._id ?? null,
+    phase: getCombatState(decision.combat).phase,
+    level: MOVEMENT_DEBUG_LEVELS.VERBOSE
+  };
+  movementDebug(category, "capture-decision", payload, meta);
+  if (decision.reason === "not-started" || (decision.capture && !isMovementPlanningPhase(getCombatState(decision.combat).phase))) {
+    movementDebugWarn(category, "unexpected-capture-gate", payload, meta);
+  }
+}
+
+/**
+ * Display scrolling text over a token if the canvas interface is available.
+ *
+ * @param {TokenDocument|object|null} document Token document.
+ * @param {string} text Text to display.
+ * @returns {Promise<void>}
+ */
+async function showScrollingText(document, text) {
+  const center = tokenCenter(document);
+  if (!center || !canvas.interface?.createScrollingText) {
+    movementDebug(MOVEMENT_DEBUG_CATEGORIES.ENGAGEMENT, "scrolling-text-unavailable", () => ({
+      tokenId: document?.id ?? document?._id ?? null,
+      text,
+      center,
+      hasInterface: !!canvas.interface?.createScrollingText
+    }), { tokenId: document?.id ?? document?._id ?? null, level: MOVEMENT_DEBUG_LEVELS.TRACE });
+    return;
+  }
+  movementDebug(MOVEMENT_DEBUG_CATEGORIES.ENGAGEMENT, "scrolling-text", () => ({
+    tokenId: document?.id ?? document?._id ?? null,
+    text,
+    center
+  }), { tokenId: document?.id ?? document?._id ?? null, level: MOVEMENT_DEBUG_LEVELS.TRACE });
+  await canvas.interface.createScrollingText(center, text, {
+    anchor: globalThis.CONST?.TEXT_ANCHOR_POINTS?.CENTER,
+    direction: globalThis.CONST?.TEXT_ANCHOR_POINTS?.TOP,
+    distance: 40,
+    duration: 1400,
+    jitter: 0.15
+  });
+}
+
+/**
+ * Mark a combatant's movement plan with a new status.
+ *
+ * @param {Combatant|object} combatant Combatant document.
+ * @param {string} status New plan status.
+ * @param {object} [patch={}] Additional movement fields.
+ * @returns {Promise<unknown>}
+ */
+async function markMovementStatus(combatant, status, patch = {}) {
+  const state = getCombatantState(combatant);
+  return updateCombatantState(combatant, {
+    movement: {
+      ...state.movement,
+      planStatus: status,
+      ...patch
+    }
+  });
+}
+
+/**
+ * Calculate actual traveled distance from movement history where possible.
+ *
+ * @param {TokenDocument|object|null} document Token document.
+ * @param {import("../types.mjs").SkjaldborgMovementPlan} plan Stored movement plan.
+ * @returns {number}
+ */
+export function actualMovementDistance(document, plan) {
+  const history = Array.isArray(document?.movementHistory) ? document.movementHistory : [];
+  const historyPoints = history.map(cleanMovementPoint).filter(Boolean);
+  if (historyPoints.length > 1) return measureSceneDistance(historyPoints);
+
+  const current = cleanMovementPoint(document) ?? tokenCenter(document);
+  const path = [plan?.origin, current].map(cleanMovementPoint).filter(Boolean);
+  return measureSceneDistance(path);
+}
+
+/**
+ * Measure the module-owned path traveled by one movement context.
+ *
+ * @param {object|null|undefined} context Active movement context.
+ * @returns {number|null}
+ */
+function contextMovementDistance(context) {
+  const path = Array.isArray(context?.traveledWaypoints)
+    ? context.traveledWaypoints.map(cleanMovementPoint).filter(Boolean)
+    : [];
+  return path.length > 1 ? measureSceneDistance(path) : null;
+}
+
+/**
+ * Resolve the active movement context for a combatant.
+ *
+ * @param {Combat|null} combat Active combat.
+ * @param {Combatant|object|null} combatant Combatant document.
+ * @returns {object|null}
+ */
+function activeMovementContext(combat, combatant) {
+  return activeRuns.get(combat?.id)?.contextsByCombatantId?.get(combatant?.id) ?? null;
+}
+
+/**
+ * Read the v13 compatibility checkpoint pacing delay.
+ *
+ * @returns {number}
+ */
+function movementTickDelayMs() {
+  const value = Number(game.settings.get(MODULE_ID, "movementTickDelayMs"));
+  if (!Number.isFinite(value)) return DEFAULT_MOVEMENT_TICK_DELAY_MS;
+  return Math.max(0, Math.min(1000, Math.round(value)));
+}
+
+/**
+ * Await the configured movement tick delay.
+ *
+ * @returns {Promise<void>}
+ */
+async function waitMovementTickDelay() {
+  const delay = movementTickDelayMs();
+  if (delay <= 0) return;
+  await new Promise(resolve => globalThis.setTimeout(resolve, delay));
+}
+
+/**
+ * Build a stable unordered key for an engagement pair.
+ *
+ * @param {Combatant|object} first First combatant.
+ * @param {Combatant|object} second Second combatant.
+ * @returns {string}
+ */
+function engagementPairKey(first, second) {
+  return [String(first?.id ?? ""), String(second?.id ?? "")].sort().join(":");
+}
+
+/**
+ * Mark combatants as stopped in the in-memory run before any document writes.
+ * This prevents a following checkpoint from being submitted while engagement
+ * flags and Active Effects are still being persisted.
+ *
+ * @param {Combat|null} combat Active combat.
+ * @param {...(Combatant|object|null)} combatants Combatants to stop.
+ * @returns {void}
+ */
+function markRunCombatantsStopped(combat, ...combatants) {
+  const run = activeRuns.get(combat?.id);
+  if (!run) return;
+  run.stoppedCombatantIds ??= new Set();
+  for (const combatant of combatants) {
+    if (combatant?.id) run.stoppedCombatantIds.add(combatant.id);
+  }
+}
+
+/**
+ * Test the in-memory movement stop latch for a combatant.
+ *
+ * @param {Combat|null} combat Active combat.
+ * @param {Combatant|object|null} combatant Combatant document.
+ * @returns {boolean}
+ */
+function isRunCombatantStopped(combat, combatant) {
+  return activeRuns.get(combat?.id)?.stoppedCombatantIds?.has(combatant?.id) === true;
+}
+
+/**
+ * Build current token footprint occupancy for this combat.
+ *
+ * @param {Combat|null} combat Active combat.
+ * @returns {{combatant: object, document: object, rect: object}[]}
+ */
+function currentCombatOccupancy(combat) {
+  return combatantValues(combat)
+    .filter(AoVAdapter.isCombatantCapable.bind(AoVAdapter))
+    .map(combatant => {
+      const document = tokenDocumentForCombatant(combatant);
+      return { combatant, document, rect: tokenSourceGridRect(document) };
+    })
+    .filter(entry => entry.document && entry.rect);
+}
+
+/**
+ * Find whether a proposed checkpoint footprint is occupied or reserved.
+ *
+ * @param {object} context Movement context.
+ * @param {object} waypoint Candidate checkpoint waypoint.
+ * @param {object[]} occupancy Current combat token occupancy.
+ * @param {object[]} reservations Current tick reservations.
+ * @returns {object|null}
+ */
+function movementFootprintBlocker(context, waypoint, occupancy, reservations) {
+  const rect = tokenSourceGridRect(context.document, waypoint);
+  if (!rect) return null;
+  for (const entry of occupancy) {
+    if (entry.combatant?.id === context.combatant?.id) continue;
+    if (gridRectsOverlap(rect, entry.rect)) return { type: "occupied", rect, blocker: entry.combatant };
+  }
+  for (const reservation of reservations) {
+    if (reservation.combatant?.id === context.combatant?.id) continue;
+    if (gridRectsOverlap(rect, reservation.rect)) return { type: "reserved", rect, blocker: reservation.combatant };
+  }
+  return null;
+}
+
+/**
+ * Find whether the next checkpoint footprint is blocked this tick.
+ *
+ * @param {object} context Movement context.
+ * @param {object} checkpoint Candidate checkpoint.
+ * @param {object[]} occupancy Current combat token occupancy.
+ * @param {object[]} reservations Current tick reservations.
+ * @returns {object|null}
+ */
+function movementCheckpointBlocker(context, checkpoint, occupancy, reservations) {
+  return movementFootprintBlocker(context, checkpoint, occupancy, reservations);
+}
+
+/**
+ * Reserve the occupied footprint for one checkpoint.
+ *
+ * @param {object} context Movement context.
+ * @param {object} checkpoint Candidate checkpoint.
+ * @param {object[]} reservations Current tick reservations.
+ * @returns {object|null}
+ */
+function reserveMovementCheckpoint(context, checkpoint, reservations) {
+  const rect = tokenSourceGridRect(context.document, checkpoint);
+  if (!rect) return null;
+  reservations.push({ combatant: context.combatant, rect });
+  return { checkpoint, rect };
+}
+
+/**
+ * Safely stop a movement context which cannot progress.
+ *
+ * @param {object} context Movement context.
+ * @param {string} reason Stop reason.
+ * @returns {Promise<void>}
+ */
+async function stopMovementContext(context, reason) {
+  if (context.status !== MOVEMENT_PLAN_STATUS.EXECUTING) return;
+  const distance = contextMovementDistance(context);
+  await markMovementStatus(context.combatant, MOVEMENT_PLAN_STATUS.STOPPED, {
+    distance: distance ?? actualMovementDistance(context.document, getCombatantState(context.combatant).movement),
+    completedAt: Date.now(),
+    stoppedReason: reason
+  });
+  context.status = MOVEMENT_PLAN_STATUS.STOPPED;
+}
+
+/**
+ * Select all unblocked operations for one scheduler tick.
+ *
+ * @param {Combat} combat Active combat.
+ * @param {object[]} contexts Movement contexts.
+ * @returns {Promise<{operations: object[], blocked: object[]}>}
+ */
+async function selectMovementTickOperations(combat, contexts) {
+  const run = activeRuns.get(combat?.id);
+  const occupancy = currentCombatOccupancy(combat);
+  const reservations = [];
+  const operations = [];
+  const blocked = [];
+  movementDebug(MOVEMENT_DEBUG_CATEGORIES.COLLISION, "tick-occupancy", () => ({
+    occupancy: occupancy.map(entry => ({
+      combatantId: entry.combatant?.id,
+      tokenId: entry.document?.id ?? entry.document?._id ?? null,
+      rect: entry.rect
+    }))
+  }), { runId: run?.runId, tick: run?.tick, combatId: combat?.id, level: MOVEMENT_DEBUG_LEVELS.TRACE });
+
+  for (const context of contexts) {
+    const waypoints = nextMovementWaypoints(combat, context);
+    if (!waypoints.length) {
+      if (context.status === MOVEMENT_PLAN_STATUS.EXECUTING) await completeMovementContext(context);
+      continue;
+    }
+    const [waypoint] = waypoints;
+    const blocker = movementCheckpointBlocker(context, waypoint, occupancy, reservations);
+    if (blocker) {
+      context.blockedTicks = Number(context.blockedTicks ?? 0) + 1;
+      blocked.push({ context, waypoint, blocker });
+      movementDebug(MOVEMENT_DEBUG_CATEGORIES.COLLISION, "checkpoint-blocked", () => ({
+        combatantId: context.combatant?.id,
+        tokenId: context.document?.id ?? context.document?._id ?? null,
+        checkpointIndex: context.index,
+        segmentIndex: context.segmentIndex,
+        checkpoint: waypoint,
+        blockedTicks: context.blockedTicks,
+        blocker: {
+          type: blocker.type,
+          combatantId: blocker.blocker?.id ?? null,
+          rect: blocker.rect
+        }
+      }), {
+        runId: run?.runId,
+        tick: run?.tick,
+        combatId: combat?.id,
+        combatantId: context.combatant?.id,
+        tokenId: context.document?.id ?? context.document?._id ?? null,
+        level: MOVEMENT_DEBUG_LEVELS.VERBOSE
+      });
+      continue;
+    }
+    const reservedFootprint = reserveMovementCheckpoint(context, waypoint, reservations);
+    context.blockedTicks = 0;
+    operations.push({ context, waypoints });
+    movementDebug(MOVEMENT_DEBUG_CATEGORIES.SCHEDULER, "checkpoint-reserved", () => ({
+      combatantId: context.combatant?.id,
+      checkpointIndex: context.index,
+      segmentIndex: context.segmentIndex,
+      checkpoint: waypoint,
+      reservedFootprint
+    }), {
+      runId: run?.runId,
+      tick: run?.tick,
+      combatId: combat?.id,
+      combatantId: context.combatant?.id,
+      tokenId: context.document?.id ?? context.document?._id ?? null,
+      level: MOVEMENT_DEBUG_LEVELS.TRACE
+    });
+  }
+
+  if (blocked.length) {
+    await checkMovementEngagements(combat);
+    for (const { context } of blocked) {
+      if (!canExecuteContext(combat, context)) {
+        context.status = MOVEMENT_PLAN_STATUS.STOPPED;
+        continue;
+      }
+      if (Number(context.blockedTicks ?? 0) < MAX_BLOCKED_TICKS) continue;
+      movementDebugWarn(MOVEMENT_DEBUG_CATEGORIES.COLLISION, "blocked-stop-threshold", () => ({
+        combatantId: context.combatant?.id,
+        blockedTicks: context.blockedTicks,
+        index: context.index,
+        remaining: context.waypoints.length - context.index
+      }), { runId: run?.runId, tick: run?.tick, combatId: combat?.id, combatantId: context.combatant?.id });
+      await stopMovementContext(context, "blocked");
+      await showScrollingText(context.document, game.i18n.localize("AOV_SKJADLBORG.MovementAutomation.Blocked"));
+    }
+  }
+
+  movementDebug(MOVEMENT_DEBUG_CATEGORIES.SCHEDULER, "tick-selection", () => ({
+    operations: operations.map(({ context, waypoints }) => ({
+      combatantId: context.combatant?.id,
+      index: context.index,
+      segmentIndex: context.segmentIndex,
+      waypoints
+    })),
+    blocked: blocked.map(({ context, waypoint, blocker }) => ({
+      combatantId: context.combatant?.id,
+      index: context.index,
+      segmentIndex: context.segmentIndex,
+      waypoint,
+      blockerType: blocker.type,
+      blockerCombatantId: blocker.blocker?.id ?? null,
+      blockedTicks: context.blockedTicks
+    }))
+  }), { runId: run?.runId, tick: run?.tick, combatId: combat?.id, level: MOVEMENT_DEBUG_LEVELS.VERBOSE });
+  return { operations, blocked };
+}
+
+/**
+ * Mark two combatants engaged and stop any executing movement.
+ *
+ * @param {Combat} combat Active combat.
+ * @param {Combatant} first First combatant.
+ * @param {Combatant} second Second combatant.
+ * @returns {Promise<void>}
+ */
+async function engagePair(combat, first, second) {
+  const run = activeRuns.get(combat?.id);
+  const pairs = [
+    [first, second],
+    [second, first]
+  ];
+
+  // Latch both participants before stopMovement or any awaited persistence.
+  markRunCombatantsStopped(combat, first, second);
+  movementDebug(MOVEMENT_DEBUG_CATEGORIES.ENGAGEMENT, "engage-pair-latched", () => ({
+    first: first?.id,
+    second: second?.id
+  }), { runId: run?.runId, tick: run?.tick, combatId: combat?.id });
+
+  /*
+   * Request interruption before any awaited work. Foundry only permits the
+   * initiating user to stop movement, and only while a movement is active.
+   * The module's authoritative execution now advances one checkpoint at a
+   * time, so this call is a defensive interruption for a checkpoint currently
+   * being animated rather than the primary stopping mechanism.
+   */
+  for (const [combatant] of pairs) {
+    const state = getCombatantState(combatant);
+    if (state.movement?.planStatus !== MOVEMENT_PLAN_STATUS.EXECUTING) continue;
+    const document = tokenDocumentForCombatant(combatant);
+    try {
+      document?.stopMovement?.();
+      movementDebug(MOVEMENT_DEBUG_CATEGORIES.STOP, "stop-movement-requested", () => ({
+        combatantId: combatant?.id,
+        tokenId: document?.id ?? document?._id ?? null,
+        reason: "engagement"
+      }), { runId: run?.runId, tick: run?.tick, combatId: combat?.id, combatantId: combatant?.id, tokenId: document?.id ?? document?._id ?? null });
+    }
+    catch (err) {
+      warn(err);
+      movementDebugWarn(MOVEMENT_DEBUG_CATEGORIES.STOP, "stop-movement-error", () => ({
+        combatantId: combatant?.id,
+        error: String(err?.message ?? err)
+      }), { runId: run?.runId, tick: run?.tick, combatId: combat?.id, combatantId: combatant?.id });
+    }
+  }
+
+  await Promise.all(pairs.map(async ([combatant, partner]) => {
+    const document = tokenDocumentForCombatant(combatant);
+    const state = getCombatantState(combatant);
+    const wasExecuting = state.movement?.planStatus === MOVEMENT_PLAN_STATUS.EXECUTING;
+    const context = activeMovementContext(combat, combatant);
+    const contextDistance = contextMovementDistance(context);
+    const distance = wasExecuting
+      ? (contextDistance ?? actualMovementDistance(document, state.movement))
+      : state.movement?.distance;
+    const engagement = {
+      status: ENGAGEMENT_STATUS.ENGAGED,
+      engaged: true,
+      partnerIds: Array.from(new Set([...(state.engagement?.partnerIds ?? []), partner.id])),
+      reachUnits: reachUnitsForCombatant(combatant),
+      reason: "opposing-reach"
+    };
+
+    await updateCombatantState(combatant, {
+      movement: {
+        ...state.movement,
+        distance: Number.isFinite(distance) ? distance : state.movement?.distance,
+        planStatus: wasExecuting ? MOVEMENT_PLAN_STATUS.STOPPED : state.movement?.planStatus,
+        completedAt: wasExecuting ? Date.now() : state.movement?.completedAt,
+        stoppedReason: wasExecuting ? "engaged" : state.movement?.stoppedReason
+      },
+      engagement
+    });
+    movementDebug(MOVEMENT_DEBUG_CATEGORIES.ENGAGEMENT, "engagement-state-written", () => ({
+      combatantId: combatant?.id,
+      partnerId: partner?.id,
+      wasExecuting,
+      distance,
+      movement: getCombatantState(combatant).movement,
+      engagement
+    }), { runId: run?.runId, tick: run?.tick, combatId: combat?.id, combatantId: combatant?.id, level: MOVEMENT_DEBUG_LEVELS.VERBOSE });
+    await syncEngagedStatusEffect(combatant, engagement, combat);
+    await showScrollingText(document, game.i18n.localize("AOV_SKJADLBORG.MovementAutomation.Engaged"));
+  }));
+
+  ui.combat?.render?.();
+  debug("engaged movement pair", { combatId: combat.id, first: first.id, second: second.id });
+}
+
+/**
+ * Find and resolve any current engagement contacts in an active movement run.
+ *
+ * @param {Combat} combat Active combat.
+ * @returns {Promise<number>} Number of engagement pairs resolved.
+ */
+export async function checkMovementEngagements(combat) {
+  if (!combat) return 0;
+  const run = activeRuns.get(combat?.id);
+  const combatants = combatantValues(combat).filter(AoVAdapter.isCombatantCapable.bind(AoVAdapter));
+  const moving = combatants.filter(combatant => getCombatantState(combatant).movement?.planStatus === MOVEMENT_PLAN_STATUS.EXECUTING);
+  const reachByCombatantId = new Map(combatants.map(combatant => [combatant.id, reachUnitsForCombatant(combatant)]));
+  let resolved = 0;
+
+  for (const mover of moving) {
+    const moverDocument = tokenDocumentForCombatant(mover);
+    const moverRect = tokenSourceGridRect(moverDocument);
+    if (!moverRect) continue;
+    for (const other of combatants) {
+      if (mover.id === other.id) continue;
+      const moverState = getCombatantState(mover);
+      if (moverState.engagement?.partnerIds?.includes(other.id)) continue;
+      const pairKey = engagementPairKey(mover, other);
+      const pendingEngagement = activeEngagementPairs.get(pairKey);
+      if (pendingEngagement) {
+        await pendingEngagement;
+        continue;
+      }
+      const otherDocument = tokenDocumentForCombatant(other);
+      if (!areOpposingDispositions(moverDocument?.disposition, otherDocument?.disposition)) continue;
+      const otherRect = tokenSourceGridRect(otherDocument);
+      if (!otherRect) continue;
+      const threshold = Math.max(reachByCombatantId.get(mover.id), reachByCombatantId.get(other.id));
+      const separation = measureOccupiedGridSeparation(moverRect, otherRect);
+      movementDebug(MOVEMENT_DEBUG_CATEGORIES.ENGAGEMENT, "reach-check", () => ({
+        moverId: mover.id,
+        otherId: other.id,
+        moverDisposition: moverDocument?.disposition,
+        otherDisposition: otherDocument?.disposition,
+        moverRect,
+        otherRect,
+        moverReach: reachByCombatantId.get(mover.id),
+        otherReach: reachByCombatantId.get(other.id),
+        threshold,
+        separation,
+        inReach: separation <= threshold
+      }), { runId: run?.runId, tick: run?.tick, combatId: combat?.id, combatantId: mover.id, level: MOVEMENT_DEBUG_LEVELS.TRACE });
+      if (!Number.isFinite(separation) || !Number.isFinite(threshold)) {
+        movementDebugWarn(MOVEMENT_DEBUG_CATEGORIES.ENGAGEMENT, "invalid-reach-check", () => ({
+          moverId: mover.id,
+          otherId: other.id,
+          moverRect,
+          otherRect,
+          threshold,
+          separation
+        }), { runId: run?.runId, tick: run?.tick, combatId: combat?.id, combatantId: mover.id });
+      }
+      if (separation > threshold) continue;
+
+      let engagementOperation;
+      engagementOperation = engagePair(combat, mover, other).finally(() => {
+        if (activeEngagementPairs.get(pairKey) === engagementOperation) activeEngagementPairs.delete(pairKey);
+      });
+      activeEngagementPairs.set(pairKey, engagementOperation);
+      await engagementOperation;
+      resolved += 1;
+      debug("engaged movement contact", {
+        combatId: combat.id,
+        first: mover.id,
+        second: other.id,
+        firstRect: moverRect,
+        secondRect: otherRect,
+        separation,
+        threshold
+      });
+    }
+  }
+
+  return resolved;
+}
+
+/**
+ * Await the current canvas movement animation, when one exists.
+ *
+ * @param {Combat} combat Active combat.
+ * @param {Combatant} combatant Combatant document.
+ * @returns {Promise<{combatantId: string, status: string}>}
+ */
+async function waitForTokenAnimation(document) {
+  const animation = document?.object?.movementAnimationPromise;
+  if (!animation || typeof animation.then !== "function") return;
+  try {
+    await animation;
+  }
+  catch (err) {
+    warn(err);
+  }
+}
+
+/**
+ * Prepare one combatant for deterministic checkpoint execution.
+ *
+ * @param {Combat} combat Active combat.
+ * @param {Combatant} combatant Combatant document.
+ * @returns {Promise<object>}
+ */
+async function prepareCombatantMovement(combat, combatant) {
+  const document = tokenDocumentForCombatant(combatant);
+  const state = getCombatantState(combatant);
+  const run = activeRuns.get(combat?.id);
+  const plannedWaypoints = [];
+  for (const waypoint of storedMovementRoute(state.movement)) appendRoutePoint(plannedWaypoints, waypoint);
+  const executionWaypoints = movementExecutionWaypoints(document, plannedWaypoints);
+  if (!document?.move || !executionWaypoints.length) {
+    movementDebugWarn(MOVEMENT_DEBUG_CATEGORIES.RUN, "prepare-context-unavailable", () => ({
+      combatantId: combatant?.id,
+      hasMove: !!document?.move,
+      plannedWaypoints,
+      executionWaypoints
+    }), { runId: run?.runId, combatId: combat?.id, combatantId: combatant?.id });
+    await markMovementStatus(combatant, MOVEMENT_PLAN_STATUS.FAILED, {
+      completedAt: Date.now(),
+      stoppedReason: "unavailable"
+    });
+    return {
+      combatant,
+      document,
+      plannedWaypoints,
+      executionWaypoints: [],
+      waypoints: [],
+      traveledWaypoints: [],
+      index: 0,
+      segmentIndex: 0,
+      status: MOVEMENT_PLAN_STATUS.FAILED,
+      blockedTicks: 0
+    };
+  }
+
+  await markMovementStatus(combatant, MOVEMENT_PLAN_STATUS.EXECUTING, {
+    startedAt: Date.now(),
+    completedAt: null,
+    stoppedReason: ""
+  });
+  const context = {
+    combatant,
+    document,
+    plannedWaypoints,
+    executionWaypoints,
+    waypoints: executionWaypoints,
+    traveledWaypoints: [cleanMovementPoint(state.movement?.origin) ?? cleanMovementPoint(document?._source) ?? cleanMovementPoint(document)].filter(Boolean),
+    index: 0,
+    segmentIndex: 0,
+    status: MOVEMENT_PLAN_STATUS.EXECUTING,
+    blockedTicks: 0
+  };
+  const storedDestination = cleanMovementPoint(state.movement?.destination);
+  const plannedRouteTail = cleanMovementPoint(plannedWaypoints.at(-1));
+  movementDebug(MOVEMENT_DEBUG_CATEGORIES.RUN, "prepare-context", () => ({
+    combatantId: combatant?.id,
+    tokenId: document?.id ?? document?._id ?? null,
+    plannedCount: plannedWaypoints.length,
+    executionCount: executionWaypoints.length,
+    plannedWaypoints,
+    executionWaypoints,
+    traveledWaypoints: context.traveledWaypoints,
+    storedDestination,
+    plannedRouteTail,
+    destinationMatchesRouteTail: !storedDestination || sameMovementPoint(storedDestination, plannedRouteTail)
+  }), { runId: run?.runId, combatId: combat?.id, combatantId: combatant?.id, tokenId: document?.id ?? document?._id ?? null, level: MOVEMENT_DEBUG_LEVELS.VERBOSE });
+  return context;
+}
+
+/**
+ * Finalize a completed movement context.
+ *
+ * @param {object} context Movement context.
+ * @returns {Promise<void>}
+ */
+async function completeMovementContext(context) {
+  if (context.status !== MOVEMENT_PLAN_STATUS.EXECUTING) return;
+  const contextDistance = contextMovementDistance(context);
+  const plannedDestination = cleanMovementPoint(context.plannedWaypoints?.at(-1));
+  const actualDestination = cleanMovementPoint(context.document?._source) ?? cleanMovementPoint(context.document);
+  await markMovementStatus(context.combatant, MOVEMENT_PLAN_STATUS.COMPLETED, {
+    distance: contextDistance ?? actualMovementDistance(context.document, getCombatantState(context.combatant).movement),
+    completedAt: Date.now(),
+    stoppedReason: ""
+  });
+  context.status = MOVEMENT_PLAN_STATUS.COMPLETED;
+  const payload = () => ({
+    combatantId: context.combatant?.id ?? null,
+    tokenId: context.document?.id ?? context.document?._id ?? null,
+    plannedDestination,
+    actualDestination,
+    destinationMatches: !plannedDestination || sameMovementPoint(plannedDestination, actualDestination),
+    index: context.index,
+    waypointCount: context.waypoints?.length ?? 0,
+    traveledWaypoints: context.traveledWaypoints
+  });
+  const run = activeRuns.get(context.combatant?.combat?.id ?? game.combat?.id);
+  const meta = {
+    runId: run?.runId,
+    tick: run?.tick,
+    combatId: context.combatant?.combat?.id ?? game.combat?.id ?? null,
+    combatantId: context.combatant?.id ?? null,
+    tokenId: context.document?.id ?? context.document?._id ?? null,
+    level: MOVEMENT_DEBUG_LEVELS.VERBOSE
+  };
+  if (plannedDestination && !sameMovementPoint(plannedDestination, actualDestination)) {
+    movementDebugWarn(MOVEMENT_DEBUG_CATEGORIES.SCHEDULER, "context-completed-position-mismatch", payload, meta);
+  }
+  else movementDebug(MOVEMENT_DEBUG_CATEGORIES.SCHEDULER, "context-completed", payload, meta);
+}
+
+/**
+ * Return whether a context is still eligible to submit movement.
+ *
+ * @param {Combat} combat Active combat.
+ * @param {object} context Movement context.
+ * @returns {boolean}
+ */
+function canExecuteContext(combat, context) {
+  if (context.status !== MOVEMENT_PLAN_STATUS.EXECUTING) return false;
+  const state = getCombatantState(context.combatant);
+  return !(
+    isRunCombatantStopped(combat, context.combatant)
+    || state.movement?.planStatus === MOVEMENT_PLAN_STATUS.STOPPED
+    || state.engagement?.engaged === true
+  );
+}
+
+/**
+ * Build the single-checkpoint batch submitted by one scheduler tick.
+ *
+ * @param {object} context Movement context.
+ * @returns {object[]} Zero or one waypoint.
+ */
+export function movementCheckpointBatch(context) {
+  const first = context?.waypoints?.[Number(context?.index) || 0];
+  return first ? [first] : [];
+}
+
+/**
+ * Select the next checkpoint for one active context.
+ *
+ * @param {Combat} combat Active combat.
+ * @param {object} context Movement context.
+ * @returns {object[]} Waypoints to submit in one documented move call.
+ */
+function nextMovementWaypoints(combat, context) {
+  if (!canExecuteContext(combat, context)) {
+    context.status = MOVEMENT_PLAN_STATUS.STOPPED;
+    return [];
+  }
+  return movementCheckpointBatch(context);
+}
+
+/**
+ * Submit one movement operation and normalize the result.
+ *
+ * @param {Combat} combat Active combat.
+ * @param {object} context Movement context.
+ * @param {object[]} waypoints Waypoints for this move call.
+ * @returns {Promise<{context: object, waypoints: object[], moved: boolean}>}
+ */
+async function submitMovementBatch(combat, context, waypoints) {
+  const { combatant, document } = context;
+  const run = activeRuns.get(combat?.id);
+  try {
+    movementDebug(MOVEMENT_DEBUG_CATEGORIES.SCHEDULER, "submit-move", () => ({
+      combatantId: combatant.id,
+      index: context.index,
+      segmentIndex: context.segmentIndex,
+      waypoints,
+      options: {
+        [MODULE_ID]: {
+          movementExecution: true,
+          checkpointExecution: true,
+          segmentExecution: false,
+          combatantId: combatant.id,
+          checkpointIndex: context.index,
+          segmentIndex: context.segmentIndex,
+          checkpointCount: waypoints.length
+        },
+        showRuler: false
+      }
+    }), { runId: run?.runId, tick: run?.tick, combatId: combat?.id, combatantId: combatant.id, tokenId: document?.id ?? document?._id ?? null, level: MOVEMENT_DEBUG_LEVELS.TRACE });
+    const moved = await document.move(waypoints, {
+      [MODULE_ID]: {
+        movementExecution: true,
+        checkpointExecution: true,
+        segmentExecution: false,
+        combatantId: combatant.id,
+        checkpointIndex: context.index,
+        segmentIndex: context.segmentIndex,
+        checkpointCount: waypoints.length
+      },
+      showRuler: false
+    });
+    movementDebug(MOVEMENT_DEBUG_CATEGORIES.SCHEDULER, "move-result", () => ({
+      combatantId: combatant.id,
+      index: context.index,
+      segmentIndex: context.segmentIndex,
+      moved: moved !== false,
+      waypoints
+    }), { runId: run?.runId, tick: run?.tick, combatId: combat?.id, combatantId: combatant.id, tokenId: document?.id ?? document?._id ?? null, level: MOVEMENT_DEBUG_LEVELS.VERBOSE });
+    return { context, waypoints, moved: moved !== false };
+  }
+  catch (err) {
+    warn(err);
+    movementDebugWarn(MOVEMENT_DEBUG_CATEGORIES.SCHEDULER, "move-exception", () => ({
+      combatantId: combatant.id,
+      index: context.index,
+      waypoints,
+      error: String(err?.message ?? err)
+    }), { runId: run?.runId, tick: run?.tick, combatId: combat?.id, combatantId: combatant.id, tokenId: document?.id ?? document?._id ?? null });
+    const latest = getCombatantState(combatant);
+    if (
+      isRunCombatantStopped(combat, combatant)
+      || latest.engagement?.engaged === true
+      || latest.movement?.planStatus === MOVEMENT_PLAN_STATUS.STOPPED
+    ) {
+      context.status = MOVEMENT_PLAN_STATUS.STOPPED;
+      return { context, waypoints, moved: false };
+    }
+    await markMovementStatus(combatant, MOVEMENT_PLAN_STATUS.FAILED, {
+      completedAt: Date.now(),
+      stoppedReason: "exception"
+    });
+    context.status = MOVEMENT_PLAN_STATUS.FAILED;
+    ui.notifications.warn(game.i18n.localize("AOV_SKJADLBORG.MovementAutomation.MoveFailed"));
+    return { context, waypoints, moved: false };
+  }
+}
+
+/**
+ * Execute one simultaneous scheduler tick across all active contexts.
+ *
+ * @param {Combat} combat Active combat.
+ * @param {object[]} contexts All movement contexts.
+ * @returns {Promise<void>}
+ */
+async function executeMovementTick(combat, contexts) {
+  const run = activeRuns.get(combat?.id);
+  if (run) run.tick = Number(run.tick ?? 0) + 1;
+  movementDebug(MOVEMENT_DEBUG_CATEGORIES.SCHEDULER, "tick-start", () => ({
+    contexts: contexts.map(context => ({
+      combatantId: context.combatant?.id,
+      status: context.status,
+      index: context.index,
+      segmentIndex: context.segmentIndex,
+      waypointCount: context.waypoints.length,
+      blockedTicks: context.blockedTicks
+    }))
+  }), { runId: run?.runId, tick: run?.tick, combatId: combat?.id, level: MOVEMENT_DEBUG_LEVELS.VERBOSE });
+  const { operations, blocked } = await selectMovementTickOperations(combat, contexts);
+  if (!operations.length) {
+    if (blocked.length) await waitMovementTickDelay();
+    movementDebug(MOVEMENT_DEBUG_CATEGORIES.SCHEDULER, "tick-no-operations", () => ({
+      blockedCount: blocked.length
+    }), { runId: run?.runId, tick: run?.tick, combatId: combat?.id });
+    return;
+  }
+
+  const results = await Promise.allSettled(operations.map(({ context, waypoints }) => submitMovementBatch(combat, context, waypoints)));
+  await Promise.all(operations.map(({ context }) => waitForTokenAnimation(context.document)));
+
+  for (const result of results) {
+    if (result.status !== "fulfilled") {
+      warn(result.reason);
+      continue;
+    }
+    const { context, waypoints, moved } = result.value;
+    const { combatant } = context;
+    if (!moved) {
+      if (context.status === MOVEMENT_PLAN_STATUS.STOPPED) continue;
+      await markMovementStatus(combatant, MOVEMENT_PLAN_STATUS.FAILED, {
+        completedAt: Date.now(),
+        stoppedReason: "move-returned-false"
+      });
+      context.status = MOVEMENT_PLAN_STATUS.FAILED;
+      continue;
+    }
+
+    for (const waypoint of waypoints) appendRoutePoint(context.traveledWaypoints, waypoint);
+    context.index += waypoints.length;
+    const nextWaypoint = context.waypoints[context.index];
+    context.segmentIndex = Number(nextWaypoint?.segmentIndex ?? nextWaypoint?.routeIndex ?? context.segmentIndex + 1);
+    movementDebug(MOVEMENT_DEBUG_CATEGORIES.SCHEDULER, "context-advanced", () => ({
+      combatantId: context.combatant?.id,
+      index: context.index,
+      segmentIndex: context.segmentIndex,
+      waypointCount: context.waypoints.length,
+      completedCheckpoints: waypoints,
+      traveledWaypoints: context.traveledWaypoints
+    }), { runId: run?.runId, tick: run?.tick, combatId: combat?.id, combatantId: context.combatant?.id, level: MOVEMENT_DEBUG_LEVELS.TRACE });
+  }
+
+  await checkMovementEngagements(combat);
+
+  for (const context of contexts) {
+    if (context.status !== MOVEMENT_PLAN_STATUS.EXECUTING) continue;
+    const { combatant } = context;
+    const afterStep = getCombatantState(combatant);
+    if (
+      isRunCombatantStopped(combat, combatant)
+      || afterStep.movement?.planStatus === MOVEMENT_PLAN_STATUS.STOPPED
+      || afterStep.engagement?.engaged === true
+    ) {
+      if (context.index < context.waypoints.length && afterStep.engagement?.engaged !== true && afterStep.movement?.stoppedReason !== "blocked") {
+        movementDebugWarn(MOVEMENT_DEBUG_CATEGORIES.SCHEDULER, "context-stopped-with-remaining-route", () => ({
+          combatantId: combatant?.id,
+          index: context.index,
+          waypointCount: context.waypoints.length,
+          movement: afterStep.movement,
+          engagement: afterStep.engagement
+        }), { runId: run?.runId, tick: run?.tick, combatId: combat?.id, combatantId: combatant?.id });
+      }
+      context.status = MOVEMENT_PLAN_STATUS.STOPPED;
+      continue;
+    }
+    if (context.index >= context.waypoints.length) await completeMovementContext(context);
+  }
+
+  movementDebug(MOVEMENT_DEBUG_CATEGORIES.SCHEDULER, "tick-end", () => ({
+    contexts: contexts.map(context => ({
+      combatantId: context.combatant?.id,
+      status: context.status,
+      index: context.index,
+      segmentIndex: context.segmentIndex,
+      waypointCount: context.waypoints.length,
+      blockedTicks: context.blockedTicks
+    }))
+  }), { runId: run?.runId, tick: run?.tick, combatId: combat?.id, level: MOVEMENT_DEBUG_LEVELS.VERBOSE });
+
+  await waitMovementTickDelay();
+}
+
+/**
+ * Return planned combatants in the encounter's authoritative turn order.
+ *
+ * @param {Combat} combat Active combat.
+ * @param {Combatant[]} planned Planned combatants.
+ * @returns {Combatant[]}
+ */
+function orderMovementCombatants(combat, planned) {
+  const byId = new Map(planned.map(combatant => [combatant.id, combatant]));
+  const ordered = [];
+  for (const combatant of Array.from(combat?.turns ?? [])) {
+    const plannedCombatant = byId.get(combatant?.id);
+    if (!plannedCombatant) continue;
+    ordered.push(plannedCombatant);
+    byId.delete(combatant.id);
+  }
+  for (const combatant of planned) {
+    if (byId.delete(combatant.id)) ordered.push(combatant);
+  }
+  return ordered;
+}
+
+/**
+ * Whether the current combat movement run is still executing.
+ *
+ * @param {Combat|null} combat Active combat.
+ * @returns {boolean}
+ */
+export function isMovementRunActive(combat) {
+  const state = getCombatState(combat);
+  return state.movementRun?.status === MOVEMENT_PLAN_STATUS.EXECUTING;
+}
+
+/**
+ * Move the tracker cursor to the last combatant after simultaneous movement has
+ * completed. This is a module-owned direct update rather than a sequence of
+ * artificial turns, so no combatant action workflows are executed en route.
+ *
+ * @param {Combat|null} combat Active combat.
+ * @returns {Promise<void>}
+ */
+export async function moveCombatTurnToLast(combat = game.combat) {
+  const turns = Array.from(combat?.turns ?? []);
+  if (!combat?.started || !turns.length) return;
+  const lastTurn = turns.length - 1;
+  if (Number(combat.turn) === lastTurn) return;
+  await combat.update({ turn: lastTurn }, {
+    direction: 0,
+    turnEvents: false,
+    combatTurn: combat.turn,
+    [MODULE_ID]: {
+      internal: true,
+      reason: "movement-complete-last-turn"
+    }
+  });
+}
+
+/**
+ * Start deterministic Movement-phase checkpoint execution for planned combatants.
+ *
+ * @param {Combat|null} combat Active combat.
+ * @param {{positionAtLast?: boolean}} [options={}] Completion navigation options.
+ * @returns {Promise<object|null>}
+ */
+export async function startMovementPhase(combat = game.combat, { positionAtLast = true } = {}) {
+  if (!game.user?.isGM || !combat) return null;
+  const key = combat.uuid ?? combat.id;
+  const pending = movementRunLocks.get(key);
+  if (pending) {
+    await pending;
+    return startMovementPhase(combat, { positionAtLast });
+  }
+
+  let operation;
+  operation = startMovementPhaseUnlocked(combat, { positionAtLast }).finally(() => {
+    if (movementRunLocks.get(key) === operation) movementRunLocks.delete(key);
+  });
+  movementRunLocks.set(key, operation);
+  return operation;
+}
+
+/**
+ * Execute one serialized movement run. Plans finalized while another run is in
+ * progress are picked up by the next queued pass rather than being stranded in
+ * PLANNED state by the active-run guard.
+ *
+ * @param {Combat} combat Active combat.
+ * @param {{positionAtLast: boolean}} options Completion navigation options.
+ * @returns {Promise<object|null>}
+ * @protected
+ */
+async function startMovementPhaseUnlocked(combat, { positionAtLast }) {
+  if (isMovementRunActive(combat)) return getCombatState(combat).movementRun;
+  await settleMovementWrites(combat.id, { quietMs: 100, timeoutMs: 1000 });
+  const runId = newMovementDebugRunId(combat);
+
+  const planned = orderMovementCombatants(combat, combatantValues(combat).filter(combatant => {
+    if (!AoVAdapter.isCombatantCapable(combatant)) return false;
+    const state = getCombatantState(combatant);
+    const route = storedMovementRoute(state.movement);
+    return state.movement?.planStatus === MOVEMENT_PLAN_STATUS.PLANNED
+      && state.movement?.draft !== true
+      && route.length > 0;
+  }));
+
+  if (!planned.length) {
+    movementDebug(MOVEMENT_DEBUG_CATEGORIES.RUN, "start-empty-run", () => ({
+      plannedCount: 0,
+      combatState: getCombatState(combat)
+    }), { runId, combatId: combat.id, phase: getCombatState(combat).phase });
+    await updateCombatState(combat, {
+      movementRun: {
+        status: MOVEMENT_PLAN_STATUS.COMPLETED,
+        startedAt: Date.now(),
+        completedAt: Date.now(),
+        pendingCombatantIds: []
+      }
+    });
+    if (positionAtLast) await moveCombatTurnToLast(combat);
+    return getCombatState(combat).movementRun;
+  }
+
+  const run = {
+    status: MOVEMENT_PLAN_STATUS.EXECUTING,
+    startedAt: Date.now(),
+    completedAt: null,
+    pendingCombatantIds: planned.map(combatant => combatant.id)
+  };
+  await updateCombatState(combat, { movementRun: run });
+  activeRuns.set(combat.id, {
+    runId,
+    tick: 0,
+    stoppedCombatantIds: new Set(),
+    contextsByCombatantId: new Map()
+  });
+  movementDebug(MOVEMENT_DEBUG_CATEGORIES.RUN, "start-run", () => ({
+    plannedCombatantIds: planned.map(combatant => combatant.id),
+    planned: planned.map(combatant => ({
+      id: combatant.id,
+      tokenId: combatant.tokenId,
+      movement: getCombatantState(combatant).movement
+    }))
+  }), { runId, combatId: combat.id, phase: getCombatState(combat).phase, level: MOVEMENT_DEBUG_LEVELS.VERBOSE });
+
+  const contexts = [];
+  try {
+    // All participants become EXECUTING before the first reach check so tokens
+    // already within weapon length engage without taking an extra grid step.
+    for (const combatant of planned) {
+      const context = await prepareCombatantMovement(combat, combatant);
+      contexts.push(context);
+      activeRuns.get(combat.id)?.contextsByCombatantId?.set(combatant.id, context);
+    }
+    await checkMovementEngagements(combat);
+
+    // v13 compatibility scheduler: submit one checkpoint per mover in each
+    // tick, then resolve engagement before any later checkpoint is submitted.
+    while (contexts.some(context => context.status === MOVEMENT_PLAN_STATUS.EXECUTING)) {
+      await executeMovementTick(combat, contexts);
+    }
+  }
+  finally {
+    activeRuns.delete(combat.id);
+  }
+
+  await checkMovementEngagements(combat);
+  await updateCombatState(combat, {
+    movementRun: {
+      status: MOVEMENT_PLAN_STATUS.COMPLETED,
+      startedAt: run.startedAt,
+      completedAt: Date.now(),
+      pendingCombatantIds: []
+    }
+  });
+  if (positionAtLast) await moveCombatTurnToLast(combat);
+  ui.combat?.render?.();
+  debug("movement run complete", {
+    combatId: combat.id,
+    results: contexts.map(context => ({ combatantId: context.combatant.id, status: context.status }))
+  });
+  movementDebug(MOVEMENT_DEBUG_CATEGORIES.RUN, "complete-run", () => ({
+    results: contexts.map(context => ({
+      combatantId: context.combatant.id,
+      status: context.status,
+      index: context.index,
+      segmentIndex: context.segmentIndex,
+      waypointCount: context.waypoints.length,
+      traveledWaypoints: context.traveledWaypoints
+    }))
+  }), { runId, combatId: combat.id, phase: getCombatState(combat).phase });
+  return getCombatState(combat).movementRun;
+}
+
+/**
+ * Register token movement hooks.
+ *
+ * @param {(action: string, payload?: object) => Promise<unknown>} requestGm GM request function.
+ * @returns {void}
+ */
+export function registerMovementHooks(requestGm) {
+  installMovementRulerCapture(requestGm);
+  Hooks.on("canvasReady", () => installMovementRulerCapture(requestGm));
+
+  Hooks.on("preMoveToken", (document, movement, operation) => {
+    const decision = movementCaptureDecision(document, operation);
+    debugCaptureDecision(document, movement, operation, decision);
+    if (!decision.capture) return undefined;
+    if (decision.reason === "engaged-blocked") {
+      ui.notifications.warn(game.i18n.localize("AOV_SKJADLBORG.MovementAutomation.EngagedCannotMove"));
+      return false;
+    }
+
+    const key = movementRulerDraftKey(document);
+    const rulerDraft = key ? movementRulerDrafts.get(key) : null;
+    const captured = movementPlanFromOperation(document, movement, operation);
+    const mergedRoute = mergeMovementRoutes(
+      rulerDraft?.explicitWaypoints ?? [],
+      captured.waypoints,
+      captured.destination
+    );
+    const combatantState = getCombatantState(decision.combatant);
+    const routeRevision = nextMovementRouteRevision(
+      combatantState.movement?.routeRevision,
+      rulerDraft?.routeRevision
+    );
+    const routeId = String(movement?.id ?? rulerDraft?.routeId ?? `movement:${document?.id ?? document?._id}:${Date.now()}`);
+    const plan = annotateMovementPlan({
+      ...captured,
+      // The route tail is authoritative. In Foundry v13 movement.destination
+      // can refer to the current checkpoint rather than the final authored
+      // waypoint when passed and pending sections split the measured path.
+      destination: cleanMovementPoint(mergedRoute.at(-1)) ?? cleanMovementPoint(captured.destination),
+      route: mergedRoute,
+      waypoints: mergedRoute,
+      distance: measureSceneDistance([captured.origin, ...mergedRoute].filter(Boolean)),
+      planStatus: mergedRoute.length ? MOVEMENT_PLAN_STATUS.PLANNED : MOVEMENT_PLAN_STATUS.NONE
+    }, {
+      routeRevision,
+      routeId,
+      captureSource: rulerDraft ? "pre-move-token+ruler-draft" : "pre-move-token",
+      capturedAt: Date.now(),
+      draft: false
+    });
+
+    if (rulerDraft) rulerDraft.finalized = true;
+    movementDebug(MOVEMENT_DEBUG_CATEGORIES.CAPTURE, "final-route-selection", () => ({
+      combatantId: decision.combatant.id,
+      tokenId: document?.id ?? document?._id ?? null,
+      routeId,
+      routeRevision,
+      selectedSource: captured.captureSource,
+      operationRouteAuthoritative: captured.captureSource?.startsWith("operation.movement.") === true,
+      foundryMovementDestination: cleanMovementPoint(movement?.destination),
+      rulerDraftWaypoints: cleanMovementRoute(rulerDraft?.explicitWaypoints ?? []),
+      capturedWaypoints: cleanMovementRoute(captured.waypoints ?? []),
+      finalWaypoints: cleanMovementRoute(mergedRoute),
+      finalDestination: cleanMovementPoint(plan.destination),
+      destinationMatchesRouteTail: sameMovementPoint(
+        cleanMovementPoint(plan.destination),
+        cleanMovementPoint(mergedRoute.at(-1))
+      )
+    }), {
+      combatId: decision.combat.id,
+      combatantId: decision.combatant.id,
+      tokenId: document?.id ?? document?._id ?? null,
+      phase: getCombatState(decision.combat).phase,
+      level: MOVEMENT_DEBUG_LEVELS.VERBOSE
+    });
+    movementDebug(MOVEMENT_DEBUG_CATEGORIES.CAPTURE, "final-route-banked", () => ({
+      combatantId: decision.combatant.id,
+      tokenId: document?.id ?? document?._id ?? null,
+      routeId,
+      routeRevision,
+      rulerDraft: rulerDraft ? {
+        routeId: rulerDraft.routeId,
+        routeRevision: rulerDraft.routeRevision,
+        explicitWaypoints: rulerDraft.explicitWaypoints,
+        foundPath: rulerDraft.foundPath
+      } : null,
+      preMoveRouteSource: captured.captureSource,
+      preMoveRoute: captured.waypoints,
+      selectedFinalRouteSource: captured.captureSource?.startsWith("operation.movement.")
+        ? "pre-move-operation"
+        : rulerDraft
+          ? "ruler-draft-merge"
+          : "pre-move-fallback",
+      foundryMovementDestination: cleanMovementPoint(movement?.destination),
+      finalRouteDestination: cleanMovementPoint(mergedRoute.at(-1)),
+      mergedRoute,
+      finalPlan: plan,
+      previousBankedMovement: storedMovementSummary(combatantState.movement),
+      rawMovement: movement,
+      rawOperation: operation,
+      documentMovement: foundryMovementSummary(document?.movement),
+      movementHistoryCount: Array.isArray(document?.movementHistory) ? document.movementHistory.length : 0
+    }), {
+      combatId: decision.combat.id,
+      combatantId: decision.combatant.id,
+      tokenId: document?.id ?? document?._id ?? null,
+      phase: getCombatState(decision.combat).phase,
+      level: MOVEMENT_DEBUG_LEVELS.TRACE
+    });
+
+    if (plan.planStatus !== MOVEMENT_PLAN_STATUS.PLANNED) return false;
+    void requestGm("recordMovement", {
+      combatId: decision.combat.id,
+      combatantId: decision.combatant.id,
+      movement: plan
+    }).then(result => {
+      if (result === null) return;
+      if (key) movementRulerDrafts.delete(key);
+      ui.notifications.info(game.i18n.localize("AOV_SKJADLBORG.MovementAutomation.PlanCaptured"));
+      ui.combat?.render?.();
+    }).catch(exception => {
+      warn(exception);
+      ui.notifications.error(exception?.message ?? game.i18n.localize("AOV_SKJADLBORG.MovementAutomation.MoveFailed"));
+    });
+    return false;
+  });
+
+  // Foundry v13 documents recordToken as a single-argument notification. It is
+  // diagnostic only here; treating its nonexistent second and third arguments
+  // as movement data previously created competing, incomplete plan writes.
+  Hooks.on("recordToken", document => {
+    const decision = movementCaptureDecision(document, {});
+    movementDebug(MOVEMENT_DEBUG_CATEGORIES.CAPTURE, "record-token-hook", () => ({
+      tokenId: document?.id ?? document?._id ?? null,
+      reason: decision.reason,
+      capture: decision.capture,
+      documentMovement: foundryMovementSummary(document?.movement),
+      movementHistoryCount: Array.isArray(document?.movementHistory) ? document.movementHistory.length : 0,
+      bankedMovement: decision.combatant ? storedMovementSummary(getCombatantState(decision.combatant).movement) : null
+    }), {
+      combatId: decision.combat?.id ?? null,
+      combatantId: decision.combatant?.id ?? null,
+      tokenId: document?.id ?? document?._id ?? null,
+      phase: getCombatState(decision.combat).phase,
+      level: MOVEMENT_DEBUG_LEVELS.TRACE
+    });
+  });
+
+  Hooks.on("moveToken", (document, _movement, _operation, user) => {
+    if (!game.user?.isGM || user?.id !== game.user.id) return;
+    const combat = game.combat;
+    const run = activeRuns.get(combat?.id);
+    movementDebug(MOVEMENT_DEBUG_CATEGORIES.STOP, "move-token-hook", () => ({
+      tokenId: document?.id ?? document?._id ?? null,
+      movement: _movement,
+      operation: _operation,
+      userId: user?.id ?? null,
+      isActiveRun: isMovementRunActive(combat)
+    }), { runId: run?.runId, tick: run?.tick, combatId: combat?.id, tokenId: document?.id ?? document?._id ?? null, level: MOVEMENT_DEBUG_LEVELS.TRACE });
+    const combatState = getCombatState(combat);
+    if (!combatState.enabled || combatState.phase !== PHASES.MOVEMENT || !isMovementRunActive(combat)) return;
+    const combatant = combatantForTokenDocument(combat, document);
+    if (!combatant) return;
+    if (getCombatantState(combatant).movement?.planStatus !== MOVEMENT_PLAN_STATUS.EXECUTING) return;
+    void checkMovementEngagements(combat).catch(warn);
+  });
+
+  Hooks.on("stopToken", document => {
+    if (!game.user?.isGM) return;
+    const combat = game.combat;
+    const run = activeRuns.get(combat?.id);
+    const combatant = combatantForTokenDocument(combat, document);
+    movementDebug(MOVEMENT_DEBUG_CATEGORIES.STOP, "stop-token-hook", () => ({
+      tokenId: document?.id ?? document?._id ?? null,
+      combatantId: combatant?.id ?? null,
+      hasCombatant: !!combatant
+    }), { runId: run?.runId, tick: run?.tick, combatId: combat?.id, combatantId: combatant?.id ?? null, tokenId: document?.id ?? document?._id ?? null, level: MOVEMENT_DEBUG_LEVELS.VERBOSE });
+    if (!combatant) return;
+    const state = getCombatantState(combatant);
+    if (state.movement?.planStatus !== MOVEMENT_PLAN_STATUS.EXECUTING) return;
+    const context = activeMovementContext(combat, combatant);
+    const contextDistance = contextMovementDistance(context);
+    const engagedStop = isRunCombatantStopped(combat, combatant);
+    if (context && engagedStop) context.status = MOVEMENT_PLAN_STATUS.STOPPED;
+    movementDebug(MOVEMENT_DEBUG_CATEGORIES.STOP, "stop-token-status-write", () => ({
+      combatantId: combatant?.id,
+      engagedStop,
+      contextDistance,
+      fallbackDistance: actualMovementDistance(document, state.movement),
+      stoppedReason: state.movement?.stoppedReason || (engagedStop ? "engaged" : "stopped"),
+      context: context ? {
+        index: context.index,
+        waypointCount: context.waypoints.length,
+        status: context.status,
+        traveledWaypoints: context.traveledWaypoints
+      } : null
+    }), { runId: run?.runId, tick: run?.tick, combatId: combat?.id, combatantId: combatant?.id, tokenId: document?.id ?? document?._id ?? null, level: MOVEMENT_DEBUG_LEVELS.TRACE });
+    if (context && !engagedStop) {
+      if (context.index < context.waypoints.length) {
+        movementDebugWarn(MOVEMENT_DEBUG_CATEGORIES.STOP, "non-authoritative-stop-with-remaining-route", () => ({
+          combatantId: combatant?.id,
+          index: context.index,
+          waypointCount: context.waypoints.length,
+          movement: state.movement
+        }), { runId: run?.runId, tick: run?.tick, combatId: combat?.id, combatantId: combatant?.id, tokenId: document?.id ?? document?._id ?? null });
+      }
+      return;
+    }
+    void markMovementStatus(combatant, MOVEMENT_PLAN_STATUS.STOPPED, {
+      distance: contextDistance ?? actualMovementDistance(document, state.movement),
+      completedAt: Date.now(),
+      stoppedReason: state.movement?.stoppedReason || (engagedStop ? "engaged" : "stopped")
+    });
+  });
+}

@@ -1,0 +1,43 @@
+<section id="dex-ranks-adj" class="skj-adjust-initiative-form">
+  <div class="diff-label bold">{{cardLabel}}:</div>
+
+  <div>{{localize 'AOV.Combat.select'}}</div>
+  <label class="skj-adjust-option">
+    <input type="radio" name="action" value="draw" {{#if weaponState.canDraw}}checked{{else}}disabled{{/if}}>
+    <span>{{localize 'AOV.Combat.drawWpn'}}</span>
+  </label>
+  <label class="skj-adjust-option">
+    <input type="radio" name="action" value="sheath" {{#unless weaponState.canDraw}}checked{{/unless}}>
+    <span>{{localize 'AOV.Combat.sheathWpn'}}</span>
+  </label>
+  <label class="skj-adjust-option">
+    <input type="radio" name="action" value="surprised">
+    <span>{{localize 'AOV.Combat.surprised'}}</span>
+  </label>
+  <label class="skj-adjust-option">
+    <input type="radio" name="action" value="move">
+    <span>{{localize 'AOV.Combat.fullMove'}}</span>
+  </label>
+
+  <label class="skj-adjust-weapon-field">
+    <span>{{localize 'AOV_SKJADLBORG.Weapons.WeaponToDraw'}}</span>
+    <select name="weaponId" {{#unless weaponState.canDraw}}disabled{{/unless}}>
+      {{#each weaponState.carriedWeapons}}
+        <option value="{{id}}" {{#if selected}}selected{{/if}}>{{name}}</option>
+      {{else}}
+        <option value="">{{localize 'AOV_SKJADLBORG.Weapons.NoCarriedWeapons'}}</option>
+      {{/each}}
+    </select>
+  </label>
+
+  <p class="skj-adjust-current">
+    <strong>{{localize 'AOV_SKJADLBORG.Weapons.CurrentlyReadied'}}:</strong>
+    {{#if weaponState.name}}{{weaponState.name}}{{else}}{{localize 'AOV_SKJADLBORG.Weapons.None'}}{{/if}}
+  </p>
+
+  <div class="flexrow skj-adjust-other">
+    <label data-tooltip="{{localize 'AOV.Combat.otherHint'}}">{{localize "AOV.Combat.amount"}}</label>
+    <input data-handle-change class="centre" type="number" name="adjOther">
+  </div>
+  <div>{{localize 'AOV.Combat.otherAdj'}}</div>
+</section>

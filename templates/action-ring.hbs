@@ -1,0 +1,32 @@
+<div class="skj-action-ring" style="width: {{diameter}}px; height: {{diameter}}px; --skj-ring-center: {{center}}px;" aria-label="{{actorName}}">
+  <div class="skj-action-ring-hint">{{hint}}</div>
+  {{#each actions}}
+    <button
+      type="button"
+      class="skj-ring-action collapsed"
+      data-action="activate"
+      data-action-kind="{{kind}}"
+      data-action-id="{{id}}"
+      data-tooltip="{{name}}"
+      aria-label="{{name}}"
+      style="{{style}}"
+    >
+      {{#if img}}
+        <img src="{{img}}" alt="">
+      {{else}}
+        <i class="{{icon}}" inert></i>
+      {{/if}}
+      {{#if score}}<span class="skj-ring-score">{{score}}</span>{{/if}}
+    </button>
+  {{/each}}
+  <button
+    type="button"
+    class="skj-ring-close"
+    data-action="closeRing"
+    data-tooltip="AOV_SKJADLBORG.Controls.Close"
+    aria-label="{{localize 'AOV_SKJADLBORG.Controls.Close'}}"
+    style="left: calc(var(--skj-ring-center) - 30px); top: calc(var(--skj-ring-center) - 30px);"
+  >
+    <i class="fa-solid fa-xmark" inert></i>
+  </button>
+</div>

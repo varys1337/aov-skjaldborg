@@ -1,0 +1,177 @@
+<section class="skj-hud-body">
+  {{#if combatant}}
+    <header class="skj-hud-header">
+      <img src="{{combatant.img}}" alt="{{combatant.name}}">
+      <div>
+        <strong>{{combatant.name}}</strong>
+        <span>{{localize "AOV_SKJADLBORG.RoundLabel" round=combatState.logicalRound phase=phaseLabel}}</span>
+      </div>
+    </header>
+
+    <nav class="skj-hud-phases">
+      {{#each phases}}
+        <button type="button" class="skj-icon-button {{#if active}}active{{/if}}" data-action="advancePhase" data-phase="{{value}}" {{#unless ../isGM}}disabled{{/unless}}>
+          {{label}}
+        </button>
+      {{/each}}
+    </nav>
+
+    <section class="skj-panel">
+      <h3>{{localize "AOV_SKJADLBORG.Hud.Intent"}}</h3>
+      <label>
+        <span>{{localize "AOV_SKJADLBORG.Labels.Action"}}</span>
+        <select name="actionCategory" {{#unless canEdit}}disabled{{/unless}}>
+          {{#each actionCategories}}
+            <option value="{{value}}" {{#if selected}}selected{{/if}}>{{label}}</option>
+          {{/each}}
+        </select>
+      </label>
+      <label>
+        <span>{{localize "AOV_SKJADLBORG.Labels.PublicIntent"}}</span>
+        <textarea name="publicText" rows="2" {{#unless canEdit}}disabled{{/unless}}>{{combatantState.intent.publicText}}</textarea>
+      </label>
+      <label>
+        <span>{{localize "AOV_SKJADLBORG.Labels.PrivateIntent"}}</span>
+        <textarea name="privateText" rows="2" {{#unless canEdit}}disabled{{/unless}}>{{combatantState.intent.privateText}}</textarea>
+      </label>
+
+      <div class="skj-check-grid">
+        <label><input type="checkbox" name="drawWeapon" {{#if combatantState.intent.modifiers.drawWeapon}}checked{{/if}} {{#unless canEdit}}disabled{{/unless}}> {{localize "AOV_SKJADLBORG.Dex.DrawWeapon"}}</label>
+        <label><input type="checkbox" name="sheatheWeapon" {{#if combatantState.intent.modifiers.sheatheWeapon}}checked{{/if}} {{#unless canEdit}}disabled{{/unless}}> {{localize "AOV_SKJADLBORG.Dex.SheatheWeapon"}}</label>
+        <label><input type="checkbox" name="surprised" {{#if combatantState.intent.modifiers.surprised}}checked{{/if}} {{#unless canEdit}}disabled{{/unless}}> {{localize "AOV_SKJADLBORG.Dex.Surprised"}}</label>
+        <label><input type="checkbox" name="fullMove" {{#if combatantState.intent.modifiers.fullMove}}checked{{/if}} {{#unless canEdit}}disabled{{/unless}}> {{localize "AOV_SKJADLBORG.Dex.FullMove"}}</label>
+        <label><input type="checkbox" name="runeCarryover" {{#if combatantState.intent.runeCarryover}}checked{{/if}} {{#unless canEdit}}disabled{{/unless}}> {{localize "AOV_SKJADLBORG.Labels.RuneCarryover"}}</label>
+      </div>
+
+      <div class="skj-field-grid">
+        <label>
+          <span>{{localize "AOV_SKJADLBORG.Labels.SplitCount"}}</span>
+          <input type="number" name="splitCount" min="1" max="4" value="{{combatantState.intent.splitCount}}" {{#unless canEdit}}disabled{{/unless}}>
+        </label>
+        <label>
+          <span>{{localize "AOV_SKJADLBORG.Labels.FixedRank"}}</span>
+          <input type="number" name="fixedRank" min="1" value="{{combatantState.intent.fixedRank}}" {{#unless canEdit}}disabled{{/unless}}>
+        </label>
+      </div>
+
+      <div class="skj-field-grid">
+        <label class="skj-inline-check">
+          <input type="checkbox" name="delayEnabled" {{#if combatantState.intent.delay.enabled}}checked{{/if}} {{#unless canEdit}}disabled{{/unless}}>
+          <span>{{localize "AOV_SKJADLBORG.Labels.Delay"}}</span>
+        </label>
+        <label>
+          <span>{{localize "AOV_SKJADLBORG.Labels.DelayTarget"}}</span>
+          <input type="number" name="delayTargetDex" min="1" value="{{combatantState.intent.delay.targetDex}}" {{#unless canEdit}}disabled{{/unless}}>
+        </label>
+      </div>
+
+      <label class="skj-inline-check">
+        <input type="checkbox" name="waitEnabled" {{#if combatantState.intent.waitInterrupt.enabled}}checked{{/if}} {{#unless canEdit}}disabled{{/unless}}>
+        <span>{{localize "AOV_SKJADLBORG.Labels.WaitInterrupt"}}</span>
+      </label>
+      <input type="text" name="waitText" value="{{combatantState.intent.waitInterrupt.text}}" placeholder="{{localize 'AOV_SKJADLBORG.Labels.WaitText'}}" {{#unless canEdit}}disabled{{/unless}}>
+
+      <footer class="skj-actions">
+        <button type="button" data-action="submitIntent" {{#unless canEdit}}disabled{{/unless}}>
+          <i class="fa-solid fa-check" inert></i> {{localize "AOV_SKJADLBORG.Controls.Commit"}}
+        </button>
+        <button type="button" data-action="holdIntent" {{#unless canEdit}}disabled{{/unless}}>
+          <i class="fa-solid fa-hand" inert></i> {{localize "AOV_SKJADLBORG.Controls.Hold"}}
+        </button>
+      </footer>
+    </section>
+
+    <section class="skj-panel">
+      <h3>{{localize "AOV_SKJADLBORG.Hud.Movement"}}</h3>
+      <div class="skj-field-grid">
+        <label>
+          <span>{{localize "AOV_SKJADLBORG.Labels.MovementMode"}}</span>
+          <select name="movementMode" {{#unless canEdit}}disabled{{/unless}}>
+            {{#each movementModes}}
+              <option value="{{value}}" {{#if selected}}selected{{/if}}>{{label}}</option>
+            {{/each}}
+          </select>
+        </label>
+        <label>
+          <span>{{localize "AOV_SKJADLBORG.Labels.Distance"}}</span>
+          <input type="number" name="movementDistance" min="0" step="0.1" value="{{combatantState.movement.distance}}" {{#unless canEdit}}disabled{{/unless}}>
+        </label>
+      </div>
+      <input type="hidden" name="movementUnits" value="{{units}}">
+      <p class="skj-muted">
+        {{#if movementImmediate}}
+          {{localize "AOV_SKJADLBORG.Hud.MovementNoteImmediate"}}
+        {{else}}
+          {{localize "AOV_SKJADLBORG.Hud.MovementNote"}}
+        {{/if}}
+      </p>
+      <dl class="skj-ledger">
+        <dt>{{localize "AOV_SKJADLBORG.Labels.Status"}}</dt><dd>{{movementSummary.status}}</dd>
+        <dt>{{localize "AOV_SKJADLBORG.Labels.Waypoints"}}</dt><dd>{{movementSummary.waypointCount}}</dd>
+        <dt>{{localize "AOV_SKJADLBORG.Labels.Destination"}}</dt><dd>{{movementSummary.destination}}</dd>
+      </dl>
+      <footer class="skj-actions">
+        <button type="button" data-action="saveMovement" {{#unless canEdit}}disabled{{/unless}}>
+          <i class="fa-solid fa-ruler" inert></i> {{localize "AOV_SKJADLBORG.Controls.SaveMovement"}}
+        </button>
+        <button type="button" data-action="clearMovement" {{#unless canEdit}}disabled{{/unless}}>
+          <i class="fa-solid fa-trash" inert></i> {{localize "AOV_SKJADLBORG.Controls.ClearMovement"}}
+        </button>
+      </footer>
+    </section>
+
+    <section class="skj-panel">
+      <h3>{{localize "AOV_SKJADLBORG.Hud.DexLedger"}}</h3>
+      {{#if combatantState.dexLedger}}
+        <dl class="skj-ledger">
+          <dt>{{localize "AOV_SKJADLBORG.Labels.BaseDex"}}</dt><dd>{{combatantState.dexLedger.baseDex}}</dd>
+          <dt>{{localize "AOV_SKJADLBORG.Labels.Int"}}</dt><dd>{{combatantState.dexLedger.int}}</dd>
+          <dt>{{localize "AOV_SKJADLBORG.Labels.MovePenalty"}}</dt><dd>{{combatantState.dexLedger.movementPenalty}}</dd>
+          <dt>{{localize "AOV_SKJADLBORG.Labels.FinalDex"}}</dt><dd>{{combatantState.dexLedger.finalDex}}</dd>
+        </dl>
+      {{else}}
+        <p class="skj-muted">
+          {{#if movementImmediate}}
+            {{localize "AOV_SKJADLBORG.Hud.NoLedgerImmediate"}}
+          {{else}}
+            {{localize "AOV_SKJADLBORG.Hud.NoLedger"}}
+          {{/if}}
+        </p>
+      {{/if}}
+      <footer class="skj-actions">
+        <button type="button" data-action="incrementReaction" {{#unless canEdit}}disabled{{/unless}}>
+          <i class="fa-solid fa-shield" inert></i> {{localize "AOV_SKJADLBORG.Controls.AddReaction"}}
+        </button>
+        <button type="button" data-action="decrementReaction" {{#unless canEdit}}disabled{{/unless}}>
+          <i class="fa-solid fa-minus" inert></i> {{localize "AOV_SKJADLBORG.Controls.RemoveReaction"}}
+        </button>
+      </footer>
+    </section>
+
+    {{#if isGM}}
+      <section class="skj-panel">
+        <h3>{{localize "AOV_SKJADLBORG.Hud.Resolution"}}</h3>
+        {{#if queue.length}}
+          <ol class="skj-queue">
+            {{#each queue}}
+              <li class="{{status}}">
+                <strong>{{actorName}}</strong>
+                <span>{{label}} / {{localize "AOV_SKJADLBORG.Labels.Dex"}} {{dex}} / {{localize "AOV_SKJADLBORG.Labels.Int"}} {{int}}</span>
+                <div>
+                  <button type="button" data-action="activateAction" data-action-id="{{id}}">{{localize "AOV_SKJADLBORG.Controls.Activate"}}</button>
+                  <button type="button" data-action="resolveAction" data-action-id="{{id}}">{{localize "AOV_SKJADLBORG.Controls.Resolve"}}</button>
+                  <button type="button" data-action="skipAction" data-action-id="{{id}}">{{localize "AOV_SKJADLBORG.Controls.Skip"}}</button>
+                  <button type="button" data-action="carryoverAction" data-action-id="{{id}}">{{localize "AOV_SKJADLBORG.Controls.Carryover"}}</button>
+                </div>
+              </li>
+            {{/each}}
+          </ol>
+        {{else}}
+          <p class="skj-muted">{{localize "AOV_SKJADLBORG.Hud.NoQueue"}}</p>
+        {{/if}}
+      </section>
+    {{/if}}
+  {{else}}
+    <p class="skj-muted">{{localize "AOV_SKJADLBORG.Warnings.NoCombatant"}}</p>
+  {{/if}}
+</section>

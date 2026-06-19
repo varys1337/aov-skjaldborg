@@ -1,0 +1,498 @@
+{
+  "AOV_SKJADLBORG": {
+    "Settings": {
+      "Enabled": {
+        "Name": "Enable Skjaldborg full combat workflow",
+        "Hint": "Adds Statement, Movement, Resolution, and Bookkeeping workflow automation to AoV combats."
+      },
+      "RequireAllCommit": {
+        "Name": "Require all capable combatants to commit",
+        "Hint": "Optional strict mode. When enabled, Statement cannot advance until every capable combatant has committed or held an intent. Disabled by default so the GM may advance freely."
+      },
+      "MovementRounding": {
+        "Name": "Movement DEX penalty rounding",
+        "Hint": "How partial 3 m / 10 ft movement units are converted into DEX penalties.",
+        "Ceil": "Round up",
+        "Floor": "Round down",
+        "Nearest": "Nearest"
+      },
+      "MovementTickDelay": {
+        "Name": "Movement tick delay",
+        "Hint": "Delay in milliseconds between Skjaldborg movement checkpoints during the v13 compatibility movement phase."
+      },
+      "Reach": {
+        "Short": {
+          "Name": "Short melee reach",
+          "Hint": "Grid-unit engagement distance when unarmed or using a readied melee weapon up to 1 meter long."
+        },
+        "Medium": {
+          "Name": "Medium melee reach",
+          "Hint": "Grid-unit engagement distance for a readied melee weapon over 1 meter and up to 2 meters long."
+        },
+        "Long": {
+          "Name": "Long melee reach",
+          "Hint": "Grid-unit engagement distance for a readied melee weapon over 2 meters long."
+        }
+      },
+      "ChatReports": {
+        "Name": "Post phase reports to chat",
+        "Hint": "Creates short chat cards when phases advance and resolution queues are generated."
+      },
+      "Debug": {
+        "Name": "Debug logging",
+        "Hint": "Enable all Skjaldborg diagnostic output with one switch, including general logs and every movement-debug category at trace detail."
+      },
+      "MovementDebugMenu": {
+        "Name": "Movement debugger",
+        "Label": "Configure movement debugger",
+        "Hint": "Temporary v13 diagnostics for Skjaldborg movement capture, route execution, collision, and engagement.",
+        "Title": "Skjaldborg Movement Debugger",
+        "LogSnapshot": "Log current movement state",
+        "ExportDebug": "Export last movement debug JSON",
+        "ExportCopied": "Movement debug JSON copied to clipboard and logged to the console.",
+        "ExportLogged": "Movement debug JSON logged to the console.",
+        "General": {
+          "Name": "Diagnostic output",
+          "Hint": "Movement diagnostics are GM-facing console logs only. Leave disabled outside active troubleshooting."
+        },
+        "Enabled": {
+          "Name": "Enable movement debugger",
+          "Hint": "Write structured movement diagnostics to the browser console."
+        },
+        "Level": {
+          "Name": "Movement debug level",
+          "Hint": "Summary logs key lifecycle events. Verbose adds per-context data. Trace includes full routes and checkpoints."
+        },
+        "Levels": {
+          "summary": "Summary",
+          "verbose": "Verbose",
+          "trace": "Trace"
+        },
+        "Categories": {
+          "Name": "Diagnostic categories",
+          "Hint": "Limit logging to the movement areas currently under investigation.",
+          "capture": {
+            "Name": "Capture and gating",
+            "Hint": "Intent-phase token movement capture, phase gates, ownership, and blocking decisions."
+          },
+          "socket": {
+            "Name": "Socket and sanitization",
+            "Hint": "GM-authoritative movement writes and sanitized payload shape."
+          },
+          "route": {
+            "Name": "Route normalization",
+            "Hint": "Raw route, preserved waypoints, destination, and duplicate filtering."
+          },
+          "expansion": {
+            "Name": "Waypoint expansion",
+            "Hint": "Per-segment complete-path calls and fallback checkpoint generation."
+          },
+          "run": {
+            "Name": "Movement run lifecycle",
+            "Hint": "Movement phase run start, contexts, completion, and result summaries."
+          },
+          "scheduler": {
+            "Name": "Scheduler ticks",
+            "Hint": "Per-tick context indices, submitted moves, waits, and results."
+          },
+          "collision": {
+            "Name": "Collision and reservation",
+            "Hint": "Occupied grid rectangles, reservations, blockers, and queued movement."
+          },
+          "engagement": {
+            "Name": "Engagement and reach",
+            "Hint": "Disposition checks, reach thresholds, occupied-grid separation, and engagement pair creation."
+          },
+          "stop": {
+            "Name": "Stop hooks",
+            "Hint": "moveToken/stopToken hooks, stop reasons, and distance used for stopped movement."
+          },
+          "status": {
+            "Name": "Status cleanup",
+            "Hint": "Engaged ActiveEffect synchronization and manual cleanup."
+          },
+          "dex": {
+            "Name": "DEX distance inputs",
+            "Hint": "Movement distances and path data that feed DEX penalties."
+          }
+        }
+      },
+      "ActionUiMenu": {
+        "Name": "Action interface configuration",
+        "Label": "Configure action interface",
+        "Hint": "Configure the shared quick-access circles, token action ring, and selected-actor hotbar in one client-specific submenu.",
+        "Title": "Skjaldborg Action Interface",
+        "ActionRingGroup": {
+          "Name": "Token action ring",
+          "Hint": "Control the radial action selector opened from the core Token HUD and the quick-access circles shared with the actor hotbar."
+        },
+        "ActorHotbarGroup": {
+          "Name": "Selected-actor hotbar",
+          "Hint": "Control the actor-specific replacement hotbar shown for one unambiguous owned actor."
+        }
+      },
+      "ReportMenu": {
+        "Name": "Phase report configuration",
+        "Label": "Configure phase reports",
+        "Hint": "Choose which phases create reports and control chat visibility, recipients, and combatant detail scope.",
+        "Title": "Skjaldborg Phase Reports",
+        "Phases": {
+          "Name": "Report phases",
+          "Hint": "Post a report when entering each selected phase. Multiple phases may be selected."
+        },
+        "Delivery": {
+          "Name": "Delivery mode",
+          "Hint": "Public cards create one all-combatant message visible to everyone. Whispered delivery creates only the audience-specific private cards.",
+          "Public": "Public chat card",
+          "Whisper": "Whispered chat card"
+        },
+        "Recipients": {
+          "Name": "Whisper recipients",
+          "Hint": "Used only for whispered delivery. Gamemasters receive one full report. Including players creates a separate scoped player report that is not shown in the gamemaster chat log.",
+          "Gm": "Gamemasters only",
+          "GmAndPlayers": "Gamemasters and players"
+        },
+        "Scope": {
+          "Name": "Player report scope",
+          "Hint": "Applies only to the player whisper when recipients include players. GM reports always include all capable combatants. Public reports include all combatants. GM-private intent text is never included.",
+          "All": "All capable combatants",
+          "PlayerOwned": "Player-owned combatants only"
+        }
+      },
+      "ActionRing": {
+        "Name": "Enable token action ring",
+        "Hint": "Adds a Crucible Tongs-style action ring to the core Token HUD. It always mirrors the represented actor's configured quick-access circles, including during Skjaldborg combat."
+      },
+      "ActionRingMaxItems": {
+        "Name": "Quick-access circles",
+        "Hint": "Sets 6 to 12 visible quick-access circles for both the selected-actor hotbar and the token action ring. Assignments hidden by a lower count are preserved."
+      },
+      "ActorHotbar": {
+        "Name": "Enable actor hotbar",
+        "Hint": "Shows a selected-actor hotbar with resources, customizable quick access, Skjaldborg intent controls, sheet-derived statistics, history and family, skills, magic, equipment, effects, and macros."
+      },
+      "ReplaceCoreHotbar": {
+        "Name": "Replace the core macro hotbar",
+        "Hint": "Hide the core macro hotbar while the custom actor hotbar has an owned actor. Macros remain available on the Macros tab."
+      },
+      "ActorHotbarScale": {
+        "Name": "Actor hotbar scale",
+        "Hint": "Scales the complete actor hotbar for this client."
+      },
+      "ActorHotbarActionWidth": {
+        "Name": "Actor action-bar maximum width",
+        "Hint": "Sets the maximum width of the named actor-action lists and user macro grid."
+      },
+      "ActorHotbarPosition": {
+        "Name": "Actor hotbar position",
+        "Label": "Reset position",
+        "Hint": "Return the draggable actor hotbar to its default position above the core hotbar."
+      },
+      "ActorHotbarOpacity": {
+        "Name": "Actor hotbar resting opacity",
+        "Hint": "Sets the hotbar opacity while it is idle. Hovering, focusing an input, or dragging temporarily restores full opacity."
+      },
+      "ActionUiTheme": {
+        "Name": "Action interface visual theme",
+        "Hint": "Choose the Age of Vikings textured presentation or the previous classic Crucible-style presentation for the token action ring and actor hotbar.",
+        "Aov": "Age of Vikings",
+        "Classic": "Classic"
+      },
+      "PhaseStructureMenu": {
+        "Name": "Combat phase structure",
+        "Label": "Configure combat phases",
+        "Hint": "Choose which Skjaldborg phases appear in each logical combat round, or apply the optional Streamlined Combat structure.",
+        "Title": "Skjaldborg Combat Phase Structure",
+        "Intro": "The selected phases are shown in canonical order. Disabled phases are skipped visibly, while required movement, resolution preparation, bookkeeping, and round-reset automation is preserved at the appropriate boundary.",
+        "Phases": {
+          "Name": "Phases present in each round",
+          "Hint": "At least one phase must remain enabled. The default tactical structure uses all four phases.",
+          "intent": {
+            "Hint": "Participants declare and commit actions and planned movement before acting."
+          },
+          "movement": {
+            "Hint": "All predeclared nonengaged movement routes execute together before resolution."
+          },
+          "resolution": {
+            "Hint": "Actions, missiles, spells, reactions, and the DEX-ordered queue are resolved."
+          },
+          "bookkeeping": {
+            "Hint": "Round outcomes are finalized and prepared for application before the next round."
+          }
+        },
+        "Standard": "Use all four phases",
+        "Streamlined": "Use Streamlined Combat",
+        "StreamlinedTitle": "Streamlined Combat",
+        "StreamlinedHint": "The streamlined preset keeps Resolution as the visible DEX countdown. Declarations and movement are handled immediately when announced, while bookkeeping is finalized immediately after each resolved outcome."
+      },
+      "CombatTrackingMenu": {
+        "Name": "Combat tracking",
+        "Label": "Configure combat tracking",
+        "Hint": "Configure phase validation, movement DEX rounding and timing, and melee engagement reach in one GM-only submenu.",
+        "Title": "Skjaldborg Combat Tracking",
+        "Intro": "These world settings control how strictly the tracker validates declarations and how movement contributes to DEX and engagement. Phase navigation itself remains GM-authoritative.",
+        "Navigation": {
+          "Name": "Phase navigation",
+          "Hint": "The all-intents requirement is optional. With it disabled, the GM may leave Statement even when some combatants have not declared an action."
+        },
+        "Movement": {
+          "Name": "Movement and DEX",
+          "Hint": "Configure movement penalty rounding and the delay between simultaneous movement checkpoints."
+        },
+        "Reach": {
+          "Name": "Melee engagement reach",
+          "Hint": "Set the grid-unit contact distance used for short, medium, and long readied melee weapons."
+        }
+      }
+    },
+    "Phases": {
+      "intent": "Statement",
+      "movement": "Movement",
+      "resolution": "Resolution",
+      "bookkeeping": "Bookkeeping"
+    },
+    "RoundLabel": "Round {round}: {phase}",
+    "Controls": {
+      "Enable": "Enable",
+      "Disable": "Disable",
+      "OpenHud": "Open combat HUD",
+      "Commit": "Commit",
+      "Hold": "Hold",
+      "SaveMovement": "Save Manual Distance",
+      "ClearMovement": "Clear Movement",
+      "AddReaction": "Add Reaction",
+      "RemoveReaction": "Remove Reaction",
+      "Activate": "Activate",
+      "Resolve": "Resolve",
+      "Skip": "Skip",
+      "Carryover": "Carry Over",
+      "PhaseNavigation": "Skjaldborg combat phases",
+      "OpenActionRing": "Open action ring",
+      "Close": "Close"
+    },
+    "Hud": {
+      "Title": "Skjaldborg",
+      "Intent": "Statement of Intent",
+      "Movement": "Movement",
+      "MovementNote": "Drag a combatant token during Statement to declare its route. The token stays in place until the Movement phase.",
+      "DexLedger": "DEX Ledger",
+      "NoLedger": "DEX is calculated when the GM advances from Movement to Resolution.",
+      "Resolution": "Resolution Queue",
+      "NoQueue": "No resolution queue has been built yet.",
+      "MovementNoteImmediate": "Drag the combatant token to announce movement. The route is captured and executed immediately after the GM persists it.",
+      "NoLedgerImmediate": "DEX is calculated immediately when the action is announced and refreshed after immediate movement completes."
+    },
+    "Labels": {
+      "Action": "Action",
+      "PublicIntent": "Public intent",
+      "PrivateIntent": "GM-private intent",
+      "RuneCarryover": "Rune script carries over",
+      "SplitCount": "Split attacks",
+      "FixedRank": "Fixed DEX rank",
+      "Delay": "Delay",
+      "DelayTarget": "Delay to DEX",
+      "WaitInterrupt": "Wait to interrupt",
+      "WaitText": "Trigger or condition",
+      "Movement": "Movement",
+      "MovementMode": "Movement mode",
+      "Distance": "Distance",
+      "Dex": "DEX",
+      "Int": "INT",
+      "Move": "Move",
+      "MovePenalty": "Move penalty",
+      "BaseDex": "Base DEX",
+      "FinalDex": "Final DEX",
+      "Reactions": "Reactions",
+      "Status": "Status",
+      "Waypoints": "Waypoints",
+      "Destination": "Destination"
+    },
+    "ActionCategories": {
+      "attack": "Attack",
+      "missile": "Missile",
+      "magic": "Magic",
+      "defend": "Defend",
+      "retreat": "Retreat",
+      "knockback": "Knockback",
+      "flee": "Flee",
+      "wait": "Wait",
+      "delay": "Delay",
+      "other": "Other"
+    },
+    "IntentStatus": {
+      "uncommitted": "Open",
+      "committed": "Committed",
+      "held": "Held"
+    },
+    "Movement": {
+      "None": "No movement",
+      "Planned": "Planned movement",
+      "Retreat": "Retreat",
+      "Flee": "Flee"
+    },
+    "MovementStatus": {
+      "none": "No plan",
+      "planned": "Planned",
+      "executing": "Moving",
+      "completed": "Completed",
+      "stopped": "Stopped",
+      "failed": "Failed"
+    },
+    "Dex": {
+      "DrawWeapon": "Draw weapon (-5)",
+      "SheatheWeapon": "Sheathe weapon (-5)",
+      "Surprised": "Surprised (-5)",
+      "FullMove": "Full movement only",
+      "Movement": "Movement",
+      "CarryoverDexZero": "DEX rank was reduced to 0 or below.",
+      "CarryoverShort": "Next round"
+    },
+    "Actions": {
+      "Carryover": "Carry over",
+      "SplitLabel": "Split attack {index}/{count}"
+    },
+    "Chat": {
+      "Initialized": "Skjaldborg combat initialized",
+      "PhaseAdvanced": "Skjaldborg phase advanced",
+      "SimultaneousGroups": "{count} simultaneous group(s) require GM confirmation.",
+      "Combatant": "Combatant",
+      "BaseDex": "Base DEX",
+      "DexChanges": "DEX changes",
+      "FinalDex": "Final DEX",
+      "Initiative": "Initiative",
+      "ResolutionQueue": "Resolution queue",
+      "NoCombatants": "No combatants match this report scope.",
+      "None": "None",
+      "FullMovementRule": "Full movement only sets final DEX to 0.",
+      "FixedRankRule": "Fixed DEX rank: {value}.",
+      "DelayRule": "Delayed to DEX {value}.",
+      "PreventedRule": "Final DEX is 0 or below; the action carries over."
+    },
+    "MovementAutomation": {
+      "Engaged": "Engaged",
+      "Blocked": "Blocked",
+      "PlanCaptured": "Movement plan captured.",
+      "EngagedCannotMove": "This combatant is engaged and cannot declare ordinary movement.",
+      "MoveFailed": "Movement could not be completed."
+    },
+    "Diagnostics": {
+      "Passed": "Skjaldborg diagnostics passed.",
+      "Failed": "Skjaldborg diagnostics found {count} issue(s). See the console table for details."
+    },
+    "Warnings": {
+      "GmOnly": "Only a GM can perform this combat control.",
+      "NoGm": "No active GM is available to receive the combat request.",
+      "SocketTimeout": "The active GM did not acknowledge the combat request.",
+      "NoCombat": "No active combat is available for this control.",
+      "NotOwner": "You do not control this combatant.",
+      "StaleDocument": "This combat state changed after the HUD rendered. Reopen or refresh the HUD and try again.",
+      "InvalidPhase": "That phase transition is not legal from the current phase.",
+      "MovementRunning": "Movement automation is still resolving. Wait for movement to complete before advancing.",
+      "MovementPlansPending": "Cannot begin Movement: the plans for {names} are still synchronizing or unfinished. Wait for the movement-plan confirmation, or clear and plan those routes again.",
+      "UnknownMovementPlan": "one or more combatants",
+      "NoCombatant": "Select or activate a combatant first.",
+      "Uncommitted": "Cannot advance: these combatants have not committed or held intent: {names}",
+      "FormUnavailable": "The Skjaldborg combat HUD form is unavailable.",
+      "ItemUnavailable": "That actor item is no longer available.",
+      "ActionFailed": "The selected action could not be completed. See the browser console for details.",
+      "ResourceUpdateFailed": "The actor resource could not be updated. See the browser console for details.",
+      "StatUnavailable": "That actor statistic is no longer available.",
+      "WeaponMustBeCarried": "Only a carried weapon can be drawn.",
+      "SelectCarriedWeapon": "Select a carried weapon to draw.",
+      "ActorUnavailable": "The represented actor is unavailable.",
+      "AtLeastOnePhase": "At least one combat phase must remain enabled. Resolution has been retained as the safety fallback.",
+      "DisabledPhase": "That phase is disabled in the current combat phase structure.",
+      "MovementDraftsSkipped": "The following combatants still have unfinished movement drafts; those drafts will not execute: {names}"
+    },
+    "ActionRing": {
+      "IntentHint": "Click to commit. Shift-click or right-click for details.",
+      "ItemHint": "Click to use. Right-click opens Item details when available.",
+      "QuickAccessHint": "Click to use a quick-access action. Right-click opens Item details when available."
+    },
+    "ActorHotbar": {
+      "Navigation": "Actor hotbar sections",
+      "HitPoints": "Hit Points",
+      "MagicPoints": "Magic Points",
+      "LockedMagic": "{locked} locked / {max} total",
+      "Phase": "Current Skjaldborg phase",
+      "Tabs": {
+        "Combat": "Combat and intent",
+        "Skills": "Skills",
+        "Magic": "Rune scripts, Seiðr, and powers",
+        "Macros": "User macros",
+        "Stats": "Statistics",
+        "Equip": "Equipment",
+        "HistoryFamily": "History and family"
+      },
+      "EmptyMacro": "Empty macro slot {slot}",
+      "NoCombatActions": "No combat actions are available.",
+      "NoSkills": "No skills are available.",
+      "NoMagic": "No rune scripts, Seiðr spells, or powers are available.",
+      "Move": "Right-drag portrait to move actor hotbar",
+      "Groups": {
+        "OtherSkills": "Other skills",
+        "OtherMagic": "Other magic and powers",
+        "Characteristics": "Characteristics",
+        "SocialStats": "Status and reputation",
+        "Identity": "Identity and social information",
+        "Histories": "History",
+        "Family": "Family",
+        "Thralls": "Thralls",
+        "Farms": "Farms"
+      },
+      "ActiveEffects": "Active effects",
+      "NoStats": "No rollable actor statistics are available.",
+      "NoEquipment": "No weapons, gear, or armour are available.",
+      "EquipmentHeaders": {
+        "Item": "Item",
+        "Percentage": "%",
+        "Damage": "Damage",
+        "DamageBonus": "DB",
+        "Enc": "ENC",
+        "HP": "HP",
+        "Quantity": "Qty",
+        "Status": "Eqd",
+        "Range": "Range",
+        "Location": "Location",
+        "AP": "AP",
+        "MQ": "MQ"
+      },
+      "QuickAccess": {
+        "Empty": "Empty quick-access slot",
+        "DropHint": "Drop an actor-hotbar action here.",
+        "RemoveHint": "Right-click to remove from quick access.",
+        "PortraitDropHint": "Drop an actor-hotbar action on the portrait to assign it to the first empty quick-access slot.",
+        "Full": "All visible quick-access circles are occupied. Drop directly onto a circle to replace or swap it, or increase the circle count in settings."
+      },
+      "NoHistoryFamily": "No history, family, passion, devotion, thrall, or farm records are available.",
+      "UnavailableDocument": "Unavailable document",
+      "Collapse": "Collapse action panels",
+      "Expand": "Expand action panels"
+    },
+    "Tracker": {
+      "IntentCategory": "Declared action: {category}",
+      "MovementPlan": "Movement: {status}; {distance} {units}; {waypoints} route point(s)",
+      "DelayTo": "Delayed to DEX {dex}",
+      "WaitingFor": "Waiting to interrupt: {condition}",
+      "EngagedWith": "Engaged with {names}",
+      "ReadiedWeapon": "Readied weapon: {weapon}",
+      "ActionsRemaining": "{count} unresolved action(s)",
+      "SimultaneousGroup": "Member of a simultaneous resolution group"
+    },
+    "StatusEffects": {
+      "Engaged": "Engaged"
+    },
+    "Weapons": {
+      "WeaponToDraw": "Weapon to draw",
+      "CurrentlyReadied": "Currently readied",
+      "NoCarriedWeapons": "No carried weapons",
+      "None": "None",
+      "Draw": "Draw",
+      "Sheathe": "Sheathe",
+      "Drop": "Drop",
+      "DrawHint": "Ready the selected carried weapon and reduce initiative by 5 DEX.",
+      "SheatheHint": "Sheathe the currently readied weapon and reduce initiative by 5 DEX.",
+      "DropHint": "Clear the currently readied weapon without changing initiative."
+    }
+  }
+}

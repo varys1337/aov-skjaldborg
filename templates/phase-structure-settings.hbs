@@ -1,0 +1,24 @@
+<div class="skj-phase-structure-settings-form">
+  <p class="hint">{{localize "AOV_SKJADLBORG.Settings.PhaseStructureMenu.Intro"}}</p>
+
+  <fieldset>
+    <legend>{{localize "AOV_SKJADLBORG.Settings.PhaseStructureMenu.Phases.Name"}}</legend>
+    <p class="hint">{{localize "AOV_SKJADLBORG.Settings.PhaseStructureMenu.Phases.Hint"}}</p>
+    <div class="skj-phase-structure-grid">
+      {{#each phases}}
+        <label class="skj-phase-structure-option">
+          <input type="checkbox" name="{{name}}" value="true" data-dtype="Boolean" {{checked checked}}>
+          <span>
+            <strong>{{label}}</strong>
+            <small>{{hint}}</small>
+          </span>
+        </label>
+      {{/each}}
+    </div>
+  </fieldset>
+
+  <aside class="notification info">
+    <p><strong>{{localize "AOV_SKJADLBORG.Settings.PhaseStructureMenu.StreamlinedTitle"}}</strong></p>
+    <p>{{localize "AOV_SKJADLBORG.Settings.PhaseStructureMenu.StreamlinedHint"}}</p>
+  </aside>
+</div>
