@@ -1,30 +1,5 @@
 # Age of Vikings - Skjadlborg
 
-[![CI](https://github.com/varys1337/aov-skjaldborg/actions/workflows/ci.yml/badge.svg)](https://github.com/varys1337/aov-skjaldborg/actions/workflows/ci.yml)
-[![Latest Release](https://img.shields.io/github/v/release/varys1337/aov-skjaldborg)](https://github.com/varys1337/aov-skjaldborg/releases/latest)
-
-Foundry VTT module for full Age of Vikings combat-round workflow support.
-
-## Installation
-
-In Foundry VTT, open **Add-on Modules → Install Module**, paste the following manifest URL, and select **Install**:
-
-```text
-https://github.com/varys1337/aov-skjaldborg/releases/latest/download/module.json
-```
-
-For manual installation, download `aov-skjadlborg.zip` from the latest GitHub Release and extract it as `Data/modules/aov-skjadlborg`. The module folder name must remain identical to the manifest ID.
-
-## Automated builds and releases
-
-- Every push and pull request runs syntax checks, the complete test suite, manifest validation, and a clean packaging build. The resulting CI artifact is retained for 14 days.
-- Pushing a matching semantic tag such as `v0.2.35` automatically creates a GitHub Release and uploads the installable ZIP, release manifest, and SHA-256 checksums.
-- Version synchronization and the exact publishing commands are documented in [RELEASING.md](RELEASING.md).
-
-Release 0.2.35 targets Foundry VTT v13.351 with Age of Vikings 13.29. Movement, status effects, Actor flags, dialogs, and Combat document workflows use documented v13 APIs.
-
-This module is intentionally module-only. It decorates the existing Age of Vikings combat tracker and stores workflow state in module flags; it does not replace the AoV system combat classes or change actor/item schemas.
-
 ## 0.2.35 phase-control freedom and automatic Movement completion
 
 - Fixes the AppV2 preset handlers in **Combat phase structure** by calling the class-owned persistence helper while retaining the clicked application instance for rerendering.
@@ -56,12 +31,6 @@ This module is intentionally module-only. It decorates the existing Age of Vikin
 - Rejects unknown socket senders and requires an actual GM requester for workflow-global controls such as phase advancement.
 - Keeps the 0.2.25 authoritative Foundry route source and the existing one-checkpoint-per-tick scheduler unchanged.
 - See `docs/player-movement-authority-fix.md` for the complete failure chain, API rationale, and live validation procedure.
-
-
-
-
-
-
 
 ## 0.2.32 Age of Vikings reaction accent
 
@@ -174,62 +143,18 @@ This module is intentionally module-only. It decorates the existing Age of Vikin
 - Uses a dedicated compact grid seam for the collapse control instead of an absolute overlay.
 - Keeps workflow pills in the actor column on every tab and removes the duplicate combat-body copy.
 - Constrains every tab body to the configured action width and routes overflow into the existing body scroll regions.
-
-## Action Ring And Actor Hotbar
-
-Version 0.2.17 keeps the selected-actor hotbar on one fixed AppV2 tab shell, preserves the portrait/workflow column across every tab, compacts the collapse seam, and bounds all right-side bodies to the configured action width.
-
 - The actor hotbar is a fixed viewport overlay with a dedicated drag handle. Its client position is persisted in the hidden `actorHotbarPosition` setting and can be reset from **Configure action interface**.
 - The Combat tab contains only the ten Skjaldborg intent categories in a tighter five-column by two-row grid. Its fixed-height stage centers the intent controls while every tab keeps the same navigation origin. The portrait ring exposes 6 to 12 client-configured quick-access circles. Existing carried weapons remain as the initial compatibility fallback until the actor customizes the slots, and assignments outside the current visible count remain preserved.
 - Skills are displayed as named, score-bearing controls grouped by AoV skill category in three compact desktop columns. Rune scripts, Seidur, and NPC powers use the same three-column layout by Item type. Passions and Devotions are grouped with History and Family in a dedicated sheet-derived tab. Right-click still opens the owned Item sheet and same-section drag ordering is preserved.
 - The workflow indicators beneath the portrait use a deterministic two-by-two grid: phase and declaration status in the first column, final DEX and reactions in the second. The move handle follows the detailed-HUD control in the navigation row.
 - The User Macros tab is rendered only when **Replace the core macro hotbar** is enabled.
 - HP and MP are editable in place. MP updates `system.mp.value`. Character HP is reconciled through actor-owned Wound Items and NPC HP through `system.npcDmg` on actor-owned Hit Location Items because AoV derives `system.hp.value` from those documents during data preparation.
-
-The module includes two frame-less ApplicationV2 surfaces adapted from the interaction model of Crucible Tongs without bundling Crucible system assets:
-
 - The core Token HUD gains an action-ring control. The ring always mirrors the represented actor's configured quick-access actions in the same order and within the same 6 to 12 circle limit as the actor hotbar. Quick-access intent entries remain usable when the represented token is participating in an enabled Skjaldborg combat.
 - Standard intent categories commit a clean default declaration through the existing GM-authoritative socket. Wait and Delay always open the detailed combat HUD because those declarations require extra data. Shift-click or right-click opens details for any intent.
 - Multiple controlled tokens intentionally suppress the actor hotbar to prevent ambiguous rolls. A single controlled token, the assigned user character, or a player-owned character/NPC is used in that order.
+- The detailed combat HUD remains available from the Token HUD by right-clicking the action-ring control and from the gear button on the actor hotbar.
 
-The detailed combat HUD remains available from the Token HUD by right-clicking the action-ring control and from the gear button on the actor hotbar.
-
-## Development Install
-
-Run this from the module directory to link the workspace into Foundry's local module folder:
-
-```powershell
-.\tools\install-dev-link.ps1
-```
-
-The script creates `Data/modules/aov-skjadlborg` as a symbolic link or junction to this workspace. It refuses to overwrite an existing real module folder.
-
-For a portable v13.351 test build, use copy mode when the source and Foundry data folders are on different drives:
-
-```powershell
-.\tools\install-dev-link.ps1 -FoundryDataPath F:\FVTT13\Data -InstallMode Copy -Replace
-```
-
-## Developer Checks
-
-Use Node.js 20 or newer from the module directory:
-
-```powershell
-npm ci
-npm run ci
-npm run build
-```
-
-`npm run ci` performs syntax checks, runs every `tests/*.test.mjs` file, and validates the module manifest and release metadata. `npm run build` creates a runtime-only Foundry package in `dist/` without including tests, documentation sources, development tools, or `node_modules`.
-
-Live Foundry verification is covered in [docs/manual-testing-live-foundry.md](docs/manual-testing-live-foundry.md).
-
-## Phase Reports
-
-The GM-facing AppV2 report submenu selects any combination of Statement, Movement, Resolution, and Bookkeeping entry reports. Reports default to a full all-combatant whisper for GMs. Public reports always contain all capable combatants. When player whispers are enabled, the module creates a separate player card whose DEX detail scope may include all capable combatants or only player-owned combatants. The player card remains a separate private message, and the module suppresses it from GM chat rendering so each audience sees only its own report card.
-
-
-## 0.2.7 actor hotbar update
+## 0.2.16 actor hotbar update
 
 - Combat intent uses the actor-left/actions-right composition shown in the approved mockup.
 - Workflow indicators move beneath the combat intent grid only on the Combat tab.
@@ -237,7 +162,7 @@ The GM-facing AppV2 report submenu selects any combination of Statement, Movemen
 - Added a client-scoped actor hotbar resting-opacity setting from 0 to 100 in increments of 5.
 
 
-## 0.2.8 actor hotbar visual alignment
+## 0.2.15 actor hotbar visual alignment
 
 - Removed the translucent container surface behind Statistics, Skills and Passions, Magic, and Macros while preserving the individual action controls.
 - Restored the Combat navigation row to the same fixed origin used by every other tab.
@@ -246,7 +171,7 @@ The GM-facing AppV2 report submenu selects any combination of Statement, Movemen
 
 
 
-## 0.2.16 compact collapse, centered intents, and stable XP checks
+## 0.2.14 compact collapse, centered intents, and stable XP checks
 
 - Reserves a dedicated seam for the collapse control so it no longer covers the first column of any active tab body.
 - Vertically centers the collapse control against the complete expanded right-side surface.
@@ -254,7 +179,7 @@ The GM-facing AppV2 report submenu selects any combination of Statement, Movemen
 - Centers the navigation icons over the currently rendered tab body, independently of the active-effect strip.
 - Makes the token action ring always resolve the actor's configured quick-access entries, including during Skjaldborg combat.
 
-## 0.2.14 shared quick access, view-state persistence, and XP controls
+## 0.2.13 shared quick access, view-state persistence, and XP controls
 
 - Reworks **Quick-access circles** into one client setting with a validated range of 6 to 12. The same count controls the portrait HUD and the out-of-combat token ring.
 - Keeps a twelve-entry actor flag capacity so lowering the visible count never deletes hidden assignments.
@@ -264,7 +189,7 @@ The GM-facing AppV2 report submenu selects any combination of Statement, Movemen
 - Preserves the active AppV2 tab and per-tab scroll offsets across drag, collapse, expand, setting, and document-triggered rerenders.
 - Adds direct XP check controls for Skill and Passion Items. The checkbox updates the owned Item and suppresses row drag start when clicked.
 
-## 0.2.13 legibility, selectable theme, and compact mode
+## 0.2.12 legibility, selectable theme, and compact mode
 
 - Slightly increases hotbar text and label sizes while retaining fixed control heights, ellipsis handling, and bounded scroll regions.
 - Adds a client-scoped visual-theme choice: **Age of Vikings** keeps the lightstone/darkstone surfaces, while **Classic** restores the earlier Crucible-style brown presentation.
@@ -272,21 +197,21 @@ The GM-facing AppV2 report submenu selects any combination of Statement, Movemen
 - Adds a small collapse control beside the actor core. Collapsed mode hides the tab header, effects, and action content while leaving HP, MP, the portrait, quick-access slots, and workflow pills available.
 - Collapse state is persisted per client and remains independent of actor data.
 
-## 0.2.12 history, family, portrait drop, and AoV theme
+## 0.2.11 history, family, portrait drop, and AoV theme
 
 - The central portrait becomes an explicit drag target while an internal hotbar action is being dragged. Dropping there assigns the action to the first empty quick-access slot; direct circle drops still replace or swap assignments.
 - Statistics now mirrors the AoV Stats sheet with characteristic source columns, Reputation, Status, Species, Homeland, Social Rank, and Vadmal. Non-rollable values are informational and do not create a second editing path.
 - Added a History and Family tab containing Passions, Devotions, History records, Family, Thralls, and Farms. Passions no longer appear in Skills and Devotions no longer appear in Magic.
 - Non-transparent action controls use the AoV lightstone or darkstone chat-card texture and automatically follow Foundry light and dark themes.
 
-## 0.2.11 quick-access visual refinement
+## 0.2.10 quick-access visual refinement
 
 - Empty portrait quick-access positions remain valid drop targets but are fully invisible while idle.
 - The portrait ring uses a larger 192px stage and a 75px slot radius, keeping all six circles outside the portrait artwork.
 - The actor core and action column share a deterministic bottom edge; workflow pills occupy the remaining lower space without overlapping the ring.
 - HP and MP use a symmetric three-column value layout so the separator is centered within each resource card.
 
-## 0.2.10 quick-access portrait ring
+## 0.2.01 quick-access portrait ring
 
 - HP and MP values are centered vertically and horizontally inside their editable resource cards.
 - The six portrait circles are persistent actor quick-access slots stored in `flags.aov-skjadlborg.actorHotbarQuickAccess`.
@@ -295,7 +220,7 @@ The GM-facing AppV2 report submenu selects any combination of Statement, Movemen
 - Right-clicking an occupied portrait slot removes that assignment.
 - Actors without a saved quick-access configuration retain equipped weapons as a reversible compatibility fallback.
 
-## 0.2.9 actor-hotbar refinement
+## 0.2.00 actor-hotbar refinement
 
 - Aligns the tab-header row with the HP and MP cards on every tab.
 - Reduces portrait equipment circles by roughly ten percent and adds clear spacing before workflow indicators.
