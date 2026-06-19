@@ -1,0 +1,9 @@
+Delete this obsolete repository file after applying the overlay:
+
+  tools/run-tests.mjs
+
+PowerShell:
+  Remove-Item tools/run-tests.mjs
+
+Git Bash / Linux / macOS:
+  rm tools/run-tests.mjs

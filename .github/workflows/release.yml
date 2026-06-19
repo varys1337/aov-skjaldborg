@@ -32,7 +32,7 @@ jobs:
       - name: Install development tooling
         run: npm ci
 
-      - name: Run validation and tests
+      - name: Run validation
         run: npm run ci
 
       - name: Build tagged release assets
