@@ -1,6 +1,6 @@
 {
   "name": "aov-skjaldborg",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "Development, validation, packaging, and release automation for the Age of Vikings - Skjaldborg Foundry VTT module.",
   "type": "module",

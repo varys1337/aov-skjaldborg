@@ -3,7 +3,7 @@
   "type": "module",
   "title": "Age of Vikings - Skjaldborg",
   "description": "Full combat round workflow automation plus token action ring and selected-actor hotbar for Age of Vikings on Foundry VTT v14. Includes disposition-consistent actor-HUD interaction highlights, a targeted AoV v14 message-mode compatibility fix for initiative rolling, configurable tactical or streamlined combat phases, optional simultaneous live initiative during Planning with a turnless first-round start, phase-staged DEX projection based on actual travelled distance, manual GM current-turn selection, free GM phase navigation, automatic Movement-to-Resolution continuation, acknowledged player movement planning, ordered GM-authoritative plan persistence, phase chat cards ranked by Final DEX and INT, unified debug logging, configurable combat tracking and melee reach, pre-combat actor intent declarations, active-combat-only canvas intent markers with custom Other tooltips, Grapple intent support, engagement stopping, readied-weapon reach and initiative automation, deterministic round progression, and live Foundry v14 validation diagnostics.",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "compatibility": {
     "minimum": "14.363",
     "verified": "14.364"
@@ -41,7 +41,7 @@
   "socket": true,
   "url": "https://github.com/varys1337/aov-skjaldborg",
   "manifest": "https://github.com/varys1337/aov-skjaldborg/releases/latest/download/module.json",
-  "download": "https://github.com/varys1337/aov-skjaldborg/releases/download/v0.3.0/aov-skjaldborg.zip",
+  "download": "https://github.com/varys1337/aov-skjaldborg/releases/download/v0.3.1/aov-skjaldborg.zip",
   "readme": "https://github.com/varys1337/aov-skjaldborg/blob/main/README.md",
   "bugs": "https://github.com/varys1337/aov-skjaldborg/issues",
   "changelog": "https://github.com/varys1337/aov-skjaldborg/releases",
