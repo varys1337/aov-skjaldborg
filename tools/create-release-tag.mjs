@@ -9,12 +9,22 @@ const manifest = JSON.parse(readFileSync(join(root, "module.json"), "utf8"));
 const currentVersion = manifest.version;
 const semver = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 const useCurrentVersion = process.argv.includes("--current-version");
+const requireClean = process.argv.includes("--require-clean");
 const subject = git(["log", "-1", "--pretty=%s"]);
 const releaseMatch = subject.match(/^Release\s+v?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)$/i);
 
 if (!useCurrentVersion && !releaseMatch) process.exit(0);
 
 const requestedVersion = useCurrentVersion ? currentVersion : releaseMatch[1];
+
+if (requireClean) {
+  const status = git(["status", "--porcelain"]);
+  if (status) {
+    console.error("Refusing to create a release tag while the Git working tree has pending changes.");
+    process.exit(1);
+  }
+}
+
 if (!semver.test(requestedVersion)) {
   console.error(`Cannot create a release tag from invalid version: ${requestedVersion}`);
   process.exit(1);
