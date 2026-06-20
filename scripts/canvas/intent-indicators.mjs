@@ -1,6 +1,6 @@
 import { ACTION_CATEGORIES, INTENT_STATUS } from "../constants.mjs";
 import { AoVAdapter } from "../adapter/aov-adapter.mjs";
-import { getCombatantState } from "../combat/state.mjs";
+import { getCombatState, getCombatantState } from "../combat/state.mjs";
 import { prepareIntentActions } from "../ui/action-catalog.mjs";
 
 const INDICATOR_LAYER_ID = "skj-token-intent-layer";
@@ -29,7 +29,7 @@ let lastViewportSignature = "";
 /**
  * Resolve or create the fixed viewport layer used by token intent indicators.
  *
- * Foundry v13 exposes Canvas#clientCoordinatesFromCanvas for converting a
+ * Foundry v14 exposes Canvas#clientCoordinatesFromCanvas for converting a
  * scene-local point to viewport coordinates. Keeping the markers in a fixed
  * DOM layer lets them reuse the Action HUD's Font Awesome classes and Foundry
  * tooltip service without coupling them to movement automation.
@@ -267,7 +267,13 @@ export function refreshTokenIntentIndicators() {
   rebuildFrame = 0;
   const layer = ensureIndicatorLayer();
   const combat = game.combat;
-  if (!layer || !AoVAdapter.isAoVWorld() || !AoVAdapter.enabledSetting || !combat) {
+  if (
+    !layer
+    || !AoVAdapter.isAoVWorld()
+    || !AoVAdapter.enabledSetting
+    || !combat?.started
+    || !getCombatState(combat).enabled
+  ) {
     clearTokenIntentIndicators();
     return;
   }
@@ -292,8 +298,12 @@ export function refreshTokenIntentIndicators() {
     marker.dataset.combatantId = combatant.id;
     marker.dataset.tokenId = token.id;
     marker.dataset.actionCategory = category;
-    marker.setAttribute("data-tooltip", action.name);
-    marker.setAttribute("aria-label", action.name);
+    const publicText = category === ACTION_CATEGORIES.OTHER
+      ? String(state.intent?.publicText ?? "").trim()
+      : "";
+    const tooltip = publicText ? `${action.name}: ${publicText}` : action.name;
+    marker.setAttribute("data-tooltip", tooltip);
+    marker.setAttribute("aria-label", tooltip);
     marker.setAttribute("role", "img");
     marker.innerHTML = `<i class="${action.icon}" inert></i>`;
     layer.append(marker);
@@ -342,7 +352,7 @@ function updateIndicatorTokenReference(token) {
 }
 
 /**
- * Register Foundry v13 canvas and document hooks for visual intent markers.
+ * Register Foundry v14 canvas and document hooks for visual intent markers.
  *
  * @returns {void}
  */

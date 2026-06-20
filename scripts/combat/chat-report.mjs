@@ -6,6 +6,7 @@ import {
   REPORT_SCOPE
 } from "../constants.mjs";
 import { AoVAdapter } from "../adapter/aov-adapter.mjs";
+import { createModuleChatMessage } from "../compat/chat-message.mjs";
 import { computeDexLedger } from "./dex-ledger.mjs";
 import { getCombatantState, phaseLabelKey } from "./state.mjs";
 
@@ -59,7 +60,11 @@ function tooltip(lines) {
  *
  * @param {Combat} combat Foundry Combat document.
  * @param {string} scope Combatant detail scope for this specific message.
- * @returns {{combatantId: string, actorName: string, baseDex: number, finalDex: number, modifierTotal: string, baseDexTooltip: string, modifierTooltip: string, finalDexTooltip: string, preventedThisRound: boolean, modifiers: {label: string, value: string}[], rules: string[]}[]}
+ * Rows are ordered exactly as the phase begins: highest Final DEX first,
+ * then highest INT as the AoV tie-breaker, followed by deterministic name/id
+ * fallbacks so every recipient sees the same ranking.
+ *
+ * @returns {{combatantId: string, actorName: string, baseDex: number, int: number, finalDex: number, modifierTotal: string, baseDexTooltip: string, modifierTooltip: string, finalDexTooltip: string, preventedThisRound: boolean, modifiers: {label: string, value: string}[], rules: string[]}[]}
  */
 export function buildDexReportRows(combat, scope = REPORT_SCOPE.ALL) {
   const rows = [];
@@ -70,32 +75,38 @@ export function buildDexReportRows(combat, scope = REPORT_SCOPE.ALL) {
     const ledger = combatantState.dexLedger ?? computeDexLedger(combatant, combatantState);
     const rules = [];
     if (combatantState.intent?.modifiers?.fullMove) {
-      rules.push(game.i18n.localize("AOV_SKJADLBORG.Chat.FullMovementRule"));
+      rules.push(game.i18n.localize("AOV_SKJALDBORG.Chat.FullMovementRule"));
     }
     if (Number.isFinite(ledger.fixedRank)) {
-      rules.push(game.i18n.format("AOV_SKJADLBORG.Chat.FixedRankRule", { value: ledger.fixedRank }));
+      rules.push(game.i18n.format("AOV_SKJALDBORG.Chat.FixedRankRule", { value: ledger.fixedRank }));
     }
     if (combatantState.intent?.delay?.enabled && Number.isFinite(Number(combatantState.intent.delay.targetDex))) {
-      rules.push(game.i18n.format("AOV_SKJADLBORG.Chat.DelayRule", { value: combatantState.intent.delay.targetDex }));
+      rules.push(game.i18n.format("AOV_SKJALDBORG.Chat.DelayRule", { value: combatantState.intent.delay.targetDex }));
     }
     if (ledger.preventedThisRound) {
-      rules.push(game.i18n.localize("AOV_SKJADLBORG.Chat.PreventedRule"));
+      rules.push(game.i18n.localize("AOV_SKJALDBORG.Chat.PreventedRule"));
     }
     const modifiers = (ledger.modifiers ?? []).map(modifier => ({
       label: game.i18n.localize(modifier.label),
       value: signed(modifier.value)
     }));
     const modifierTotal = signed(ledger.modifierTotal);
-    const baseDexLabel = game.i18n.localize("AOV_SKJADLBORG.Chat.BaseDex");
-    const dexChangesLabel = game.i18n.localize("AOV_SKJADLBORG.Chat.DexChanges");
-    const finalDexLabel = game.i18n.localize("AOV_SKJADLBORG.Chat.FinalDex");
+    const baseDexLabel = game.i18n.localize("AOV_SKJALDBORG.Chat.BaseDex");
+    const dexChangesLabel = game.i18n.localize("AOV_SKJALDBORG.Chat.DexChanges");
+    const finalDexLabel = game.i18n.localize("AOV_SKJALDBORG.Chat.FinalDex");
+    const intLabel = game.i18n.localize("AOV_SKJALDBORG.Labels.Int");
     rows.push({
       combatantId: combatant.id,
       actorName: combatant.name,
       baseDex: ledger.baseDex,
+      int: ledger.int,
       finalDex: ledger.finalDex,
       modifierTotal,
-      baseDexTooltip: tooltip([combatant.name, `${baseDexLabel}: ${ledger.baseDex}`]),
+      baseDexTooltip: tooltip([
+        combatant.name,
+        `${baseDexLabel}: ${ledger.baseDex}`,
+        `${intLabel}: ${ledger.int}`
+      ]),
       modifierTooltip: tooltip([
         `${dexChangesLabel}: ${modifierTotal}`,
         ...modifiers.map(modifier => `${modifier.label}: ${modifier.value}`),
@@ -106,6 +117,7 @@ export function buildDexReportRows(combat, scope = REPORT_SCOPE.ALL) {
         `${baseDexLabel}: ${ledger.baseDex}`,
         `${dexChangesLabel}: ${modifierTotal}`,
         `${finalDexLabel}: ${ledger.finalDex}`,
+        `${intLabel}: ${ledger.int}`,
         ...rules
       ]),
       preventedThisRound: ledger.preventedThisRound,
@@ -113,7 +125,12 @@ export function buildDexReportRows(combat, scope = REPORT_SCOPE.ALL) {
       rules
     });
   }
-  return rows;
+  return rows.sort((a, b) => (
+    (b.finalDex - a.finalDex)
+    || (b.int - a.int)
+    || a.actorName.localeCompare(b.actorName, game.i18n.lang)
+    || a.combatantId.localeCompare(b.combatantId)
+  ));
 }
 
 /**
@@ -161,26 +178,21 @@ export function getReportRecipientIds() {
  *
  * @param {Combat} combat Foundry Combat document.
  * @param {import("../types.mjs").SkjaldborgCombatState} state Current combat state.
- * @param {string} messageKey Localization key for the report heading.
  * @param {string} scope Combatant detail scope for this message.
  * @returns {Promise<string>}
  */
-async function renderReportContent(combat, state, messageKey, scope) {
-  const combatants = buildDexReportRows(combat, scope);
-  const includedIds = new Set(combatants.map(row => row.combatantId));
-  const queue = (state.resolutionQueue ?? []).filter(action => includedIds.has(action.combatantId));
-  const groupIds = new Set(queue.map(action => action.groupId).filter(Boolean));
-  const groups = (state.simultaneousGroups ?? []).filter(group => groupIds.has(group.id));
+async function renderReportContent(combat, state, scope) {
+  const phase = game.i18n.localize(phaseLabelKey(state.phase));
+  const reportTitle = game.i18n.format("AOV_SKJALDBORG.Chat.ReportTitle", {
+    round: state.logicalRound,
+    phase
+  });
 
   return foundry.applications.handlebars.renderTemplate(
-    "modules/aov-skjadlborg/templates/phase-report.hbs",
+    "modules/aov-skjaldborg/templates/phase-report.hbs",
     {
-      message: game.i18n.localize(messageKey),
-      phase: game.i18n.localize(phaseLabelKey(state.phase)),
-      logicalRound: state.logicalRound,
-      combatants,
-      queue,
-      groups
+      reportTitle,
+      combatants: buildDexReportRows(combat, scope)
     }
   );
 }
@@ -190,16 +202,15 @@ async function renderReportContent(combat, state, messageKey, scope) {
  *
  * @param {Combat} combat Foundry Combat document.
  * @param {import("../types.mjs").SkjaldborgCombatState} state Current combat state.
- * @param {string} messageKey Localization key for the report heading.
  * @param {string} scope Combatant detail scope for this message.
  * @param {string[]} whisper User ids. Empty means public.
  * @param {string} audience Diagnostic audience label.
  * @returns {Promise<ChatMessage|null>}
  */
-async function createReportMessage(combat, state, messageKey, scope, whisper, audience) {
+async function createReportMessage(combat, state, scope, whisper, audience) {
   if (audience !== "public" && !whisper.length) return null;
-  const content = await renderReportContent(combat, state, messageKey, scope);
-  return ChatMessage.create({
+  const content = await renderReportContent(combat, state, scope);
+  return createModuleChatMessage({
     speaker: ChatMessage.getSpeaker({ scene: canvas.scene }),
     content,
     blind: false,
@@ -214,7 +225,7 @@ async function createReportMessage(combat, state, messageKey, scope, whisper, au
         scope
       }
     }
-  });
+  }, { applyDefaultMode: false });
 }
 
 
@@ -228,7 +239,7 @@ let chatReportHooksRegistered = false;
 /**
  * Resolve the pending chat-message HTMLElement defensively.
  *
- * Foundry v13 documents renderChatMessageHTML as providing an HTMLElement, but
+ * Foundry v14 documents renderChatMessageHTML as providing an HTMLElement, but
  * accepting an array-like wrapper here keeps the compatibility guard harmless
  * if another integration proxies the hook argument.
  *
@@ -266,7 +277,7 @@ function suppressPlayerReportForGm(message, html) {
   if (!element) return;
   element.hidden = true;
   element.setAttribute("aria-hidden", "true");
-  element.classList?.add?.("aov-skjadlborg-hidden-report");
+  element.classList?.add?.("aov-skjaldborg-hidden-report");
   element.style?.setProperty?.("display", "none", "important");
 }
 
@@ -301,22 +312,20 @@ export function registerChatReportHooks() {
  *
  * @param {Combat} combat Foundry Combat document.
  * @param {import("../types.mjs").SkjaldborgCombatState} state Current combat state.
- * @param {string} messageKey Localization key for the report heading.
  * @returns {Promise<ChatMessage|ChatMessage[]|null>}
  */
-export async function createPhaseReport(combat, state, messageKey) {
+export async function createPhaseReport(combat, state) {
   if (!game.user?.isGM || !shouldPostPhaseReport(state.phase)) return null;
 
   const delivery = game.settings.get(MODULE_ID, "reportDelivery");
   if (delivery === REPORT_DELIVERY.PUBLIC) {
-    return createReportMessage(combat, state, messageKey, REPORT_SCOPE.ALL, [], "public");
+    return createReportMessage(combat, state, REPORT_SCOPE.ALL, [], "public");
   }
 
   const messages = [];
   const gmMessage = await createReportMessage(
     combat,
     state,
-    messageKey,
     REPORT_SCOPE.ALL,
     getGmRecipientIds(),
     "gm"
@@ -329,7 +338,6 @@ export async function createPhaseReport(combat, state, messageKey) {
     const playerMessage = await createReportMessage(
       combat,
       state,
-      messageKey,
       Object.values(REPORT_SCOPE).includes(playerScope) ? playerScope : REPORT_SCOPE.PLAYER_OWNED,
       getPlayerRecipientIds(),
       "players"

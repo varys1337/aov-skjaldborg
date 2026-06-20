@@ -12,10 +12,13 @@ import {
   REPORT_PHASE_SETTING_KEYS,
   REPORT_RECIPIENTS,
   REPORT_SCOPE,
-  ROUNDING_POLICIES
+  ROUNDING_POLICIES,
+  V14_MIGRATION_VERSION
 } from "./constants.mjs";
+import { getCombatState, getCombatantState, setCombatState, setCombatantState } from "./combat/state.mjs";
 import { ActionUiSettings } from "./apps/action-ui-settings.mjs";
 import { CombatTrackingSettings } from "./apps/combat-tracking-settings.mjs";
+import { MovementDebugSettings } from "./apps/movement-debug-settings.mjs";
 import { ReportSettings } from "./apps/report-settings.mjs";
 import { PhaseStructureSettings } from "./apps/phase-structure-settings.mjs";
 import { debug } from "./logger.mjs";
@@ -27,55 +30,64 @@ import { debug } from "./logger.mjs";
  */
 export function registerSettings() {
   game.settings.registerMenu(MODULE_ID, "actionUiConfiguration", {
-    name: "AOV_SKJADLBORG.Settings.ActionUiMenu.Name",
-    label: "AOV_SKJADLBORG.Settings.ActionUiMenu.Label",
-    hint: "AOV_SKJADLBORG.Settings.ActionUiMenu.Hint",
+    name: "AOV_SKJALDBORG.Settings.ActionUiMenu.Name",
+    label: "AOV_SKJALDBORG.Settings.ActionUiMenu.Label",
+    hint: "AOV_SKJALDBORG.Settings.ActionUiMenu.Hint",
     icon: "fa-solid fa-hand-fist",
     type: ActionUiSettings,
     restricted: false
   });
 
   game.settings.registerMenu(MODULE_ID, "combatTrackingConfiguration", {
-    name: "AOV_SKJADLBORG.Settings.CombatTrackingMenu.Name",
-    label: "AOV_SKJADLBORG.Settings.CombatTrackingMenu.Label",
-    hint: "AOV_SKJADLBORG.Settings.CombatTrackingMenu.Hint",
+    name: "AOV_SKJALDBORG.Settings.CombatTrackingMenu.Name",
+    label: "AOV_SKJALDBORG.Settings.CombatTrackingMenu.Label",
+    hint: "AOV_SKJALDBORG.Settings.CombatTrackingMenu.Hint",
     icon: "fa-solid fa-list-check",
     type: CombatTrackingSettings,
     restricted: true
   });
 
+  game.settings.registerMenu(MODULE_ID, "movementDebugConfiguration", {
+    name: "AOV_SKJALDBORG.Settings.MovementDebugMenu.Name",
+    label: "AOV_SKJALDBORG.Settings.MovementDebugMenu.Label",
+    hint: "AOV_SKJALDBORG.Settings.MovementDebugMenu.Hint",
+    icon: "fa-solid fa-bug",
+    type: MovementDebugSettings,
+    restricted: true
+  });
+
   game.settings.registerMenu(MODULE_ID, "phaseStructureConfiguration", {
-    name: "AOV_SKJADLBORG.Settings.PhaseStructureMenu.Name",
-    label: "AOV_SKJADLBORG.Settings.PhaseStructureMenu.Label",
-    hint: "AOV_SKJADLBORG.Settings.PhaseStructureMenu.Hint",
+    name: "AOV_SKJALDBORG.Settings.PhaseStructureMenu.Name",
+    label: "AOV_SKJALDBORG.Settings.PhaseStructureMenu.Label",
+    hint: "AOV_SKJALDBORG.Settings.PhaseStructureMenu.Hint",
     icon: "fa-solid fa-list-ol",
     type: PhaseStructureSettings,
     restricted: true
   });
 
   game.settings.register(MODULE_ID, "enableActionRing", {
-    name: "AOV_SKJADLBORG.Settings.ActionRing.Name",
-    hint: "AOV_SKJADLBORG.Settings.ActionRing.Hint",
+    name: "AOV_SKJALDBORG.Settings.ActionRing.Name",
+    hint: "AOV_SKJALDBORG.Settings.ActionRing.Hint",
     scope: "client",
     config: false,
     type: Boolean,
     default: ACTION_UI_DEFAULTS.enableActionRing,
     onChange: enabled => {
-      if (!enabled) void game.aovSkjadlborg?.ui?.closeActionRing?.();
+      if (!enabled) void game.aovSkjaldborg?.ui?.closeActionRing?.();
     }
   });
 
   game.settings.register(MODULE_ID, "actionRingMaxItems", {
-    name: "AOV_SKJADLBORG.Settings.ActionRingMaxItems.Name",
-    hint: "AOV_SKJADLBORG.Settings.ActionRingMaxItems.Hint",
+    name: "AOV_SKJALDBORG.Settings.ActionRingMaxItems.Name",
+    hint: "AOV_SKJALDBORG.Settings.ActionRingMaxItems.Hint",
     scope: "client",
     config: false,
     type: Number,
     range: ACTION_UI_LIMITS.actionRingMaxItems,
     default: ACTION_UI_DEFAULTS.actionRingMaxItems,
     onChange: () => {
-      game.aovSkjadlborg?.ui?.refreshActorHotbar?.();
-      game.aovSkjadlborg?.ui?.refreshActionRing?.();
+      game.aovSkjaldborg?.ui?.refreshActorHotbar?.();
+      game.aovSkjaldborg?.ui?.refreshActionRing?.();
     }
   });
 
@@ -88,76 +100,76 @@ export function registerSettings() {
   });
 
   game.settings.register(MODULE_ID, "enableActorHotbar", {
-    name: "AOV_SKJADLBORG.Settings.ActorHotbar.Name",
-    hint: "AOV_SKJADLBORG.Settings.ActorHotbar.Hint",
+    name: "AOV_SKJALDBORG.Settings.ActorHotbar.Name",
+    hint: "AOV_SKJALDBORG.Settings.ActorHotbar.Hint",
     scope: "client",
     config: false,
     type: Boolean,
     default: ACTION_UI_DEFAULTS.enableActorHotbar,
     onChange: enabled => {
-      if (enabled) game.aovSkjadlborg?.ui?.refreshActorHotbar?.();
-      else void game.aovSkjadlborg?.ui?.closeActorHotbar?.();
+      if (enabled) game.aovSkjaldborg?.ui?.refreshActorHotbar?.();
+      else void game.aovSkjaldborg?.ui?.closeActorHotbar?.();
     }
   });
 
   game.settings.register(MODULE_ID, "replaceCoreHotbar", {
-    name: "AOV_SKJADLBORG.Settings.ReplaceCoreHotbar.Name",
-    hint: "AOV_SKJADLBORG.Settings.ReplaceCoreHotbar.Hint",
+    name: "AOV_SKJALDBORG.Settings.ReplaceCoreHotbar.Name",
+    hint: "AOV_SKJALDBORG.Settings.ReplaceCoreHotbar.Hint",
     scope: "client",
     config: false,
     type: Boolean,
     default: ACTION_UI_DEFAULTS.replaceCoreHotbar,
-    onChange: () => game.aovSkjadlborg?.ui?.refreshActorHotbar?.()
+    onChange: () => game.aovSkjaldborg?.ui?.refreshActorHotbar?.()
   });
 
   game.settings.register(MODULE_ID, "actorHotbarScale", {
-    name: "AOV_SKJADLBORG.Settings.ActorHotbarScale.Name",
-    hint: "AOV_SKJADLBORG.Settings.ActorHotbarScale.Hint",
+    name: "AOV_SKJALDBORG.Settings.ActorHotbarScale.Name",
+    hint: "AOV_SKJALDBORG.Settings.ActorHotbarScale.Hint",
     scope: "client",
     config: false,
     type: Number,
     range: ACTION_UI_LIMITS.actorHotbarScale,
     default: ACTION_UI_DEFAULTS.actorHotbarScale,
-    onChange: () => game.aovSkjadlborg?.ui?.refreshActorHotbar?.()
+    onChange: () => game.aovSkjaldborg?.ui?.refreshActorHotbar?.()
   });
 
   game.settings.register(MODULE_ID, "actorHotbarActionWidth", {
-    name: "AOV_SKJADLBORG.Settings.ActorHotbarActionWidth.Name",
-    hint: "AOV_SKJADLBORG.Settings.ActorHotbarActionWidth.Hint",
+    name: "AOV_SKJALDBORG.Settings.ActorHotbarActionWidth.Name",
+    hint: "AOV_SKJALDBORG.Settings.ActorHotbarActionWidth.Hint",
     scope: "client",
     config: false,
     type: Number,
     range: ACTION_UI_LIMITS.actorHotbarActionWidth,
     default: ACTION_UI_DEFAULTS.actorHotbarActionWidth,
-    onChange: () => game.aovSkjadlborg?.ui?.refreshActorHotbar?.()
+    onChange: () => game.aovSkjaldborg?.ui?.refreshActorHotbar?.()
   });
 
 
   game.settings.register(MODULE_ID, "actorHotbarOpacity", {
-    name: "AOV_SKJADLBORG.Settings.ActorHotbarOpacity.Name",
-    hint: "AOV_SKJADLBORG.Settings.ActorHotbarOpacity.Hint",
+    name: "AOV_SKJALDBORG.Settings.ActorHotbarOpacity.Name",
+    hint: "AOV_SKJALDBORG.Settings.ActorHotbarOpacity.Hint",
     scope: "client",
     config: false,
     type: Number,
     range: ACTION_UI_LIMITS.actorHotbarOpacity,
     default: ACTION_UI_DEFAULTS.actorHotbarOpacity,
-    onChange: () => game.aovSkjadlborg?.ui?.refreshActorHotbar?.()
+    onChange: () => game.aovSkjaldborg?.ui?.refreshActorHotbar?.()
   });
 
   game.settings.register(MODULE_ID, "actionUiTheme", {
-    name: "AOV_SKJADLBORG.Settings.ActionUiTheme.Name",
-    hint: "AOV_SKJADLBORG.Settings.ActionUiTheme.Hint",
+    name: "AOV_SKJALDBORG.Settings.ActionUiTheme.Name",
+    hint: "AOV_SKJALDBORG.Settings.ActionUiTheme.Hint",
     scope: "client",
     config: false,
     type: String,
     choices: {
-      [ACTION_UI_THEMES.AOV]: "AOV_SKJADLBORG.Settings.ActionUiTheme.Aov",
-      [ACTION_UI_THEMES.CLASSIC]: "AOV_SKJADLBORG.Settings.ActionUiTheme.Classic"
+      [ACTION_UI_THEMES.AOV]: "AOV_SKJALDBORG.Settings.ActionUiTheme.Aov",
+      [ACTION_UI_THEMES.CLASSIC]: "AOV_SKJALDBORG.Settings.ActionUiTheme.Classic"
     },
     default: ACTION_UI_DEFAULTS.actionUiTheme,
     onChange: () => {
-      game.aovSkjadlborg?.ui?.refreshActorHotbar?.();
-      game.aovSkjadlborg?.ui?.refreshActionRing?.();
+      game.aovSkjaldborg?.ui?.refreshActorHotbar?.();
+      game.aovSkjaldborg?.ui?.refreshActionRing?.();
     }
   });
 
@@ -167,7 +179,7 @@ export function registerSettings() {
     config: false,
     type: Boolean,
     default: ACTION_UI_DEFAULTS.actorHotbarCollapsed,
-    onChange: () => game.aovSkjadlborg?.ui?.refreshActorHotbar?.()
+    onChange: () => game.aovSkjaldborg?.ui?.refreshActorHotbar?.()
   });
 
   game.settings.register(MODULE_ID, "actorHotbarPosition", {
@@ -178,14 +190,14 @@ export function registerSettings() {
     default: ACTION_UI_DEFAULTS.actorHotbarPosition,
     onChange: position => {
       const hasPosition = Number.isFinite(Number(position?.left)) && Number.isFinite(Number(position?.top));
-      if (hasPosition) game.aovSkjadlborg?.ui?.refreshActorHotbar?.();
-      else game.aovSkjadlborg?.ui?.resetActorHotbarPosition?.();
+      if (hasPosition) game.aovSkjaldborg?.ui?.refreshActorHotbar?.();
+      else game.aovSkjaldborg?.ui?.resetActorHotbarPosition?.();
     }
   });
 
   game.settings.register(MODULE_ID, "enabled", {
-    name: "AOV_SKJADLBORG.Settings.Enabled.Name",
-    hint: "AOV_SKJADLBORG.Settings.Enabled.Hint",
+    name: "AOV_SKJALDBORG.Settings.Enabled.Name",
+    hint: "AOV_SKJALDBORG.Settings.Enabled.Hint",
     scope: "world",
     config: true,
     type: Boolean,
@@ -195,9 +207,24 @@ export function registerSettings() {
     }
   });
 
+  game.settings.register(MODULE_ID, "dynamicPlanningInitiative", {
+    name: "AOV_SKJALDBORG.Settings.DynamicPlanningInitiative.Name",
+    hint: "AOV_SKJALDBORG.Settings.DynamicPlanningInitiative.Hint",
+    scope: "world",
+    config: false,
+    type: Boolean,
+    default: false,
+    onChange: () => {
+      if (game.user?.isGM) {
+        void game.aovSkjaldborg?.phase?.reconcilePlanningTurnMode?.(game.combat);
+      }
+      ui.combat?.render?.();
+    }
+  });
+
   game.settings.register(MODULE_ID, "requireAllCommit", {
-    name: "AOV_SKJADLBORG.Settings.RequireAllCommit.Name",
-    hint: "AOV_SKJADLBORG.Settings.RequireAllCommit.Hint",
+    name: "AOV_SKJALDBORG.Settings.RequireAllCommit.Name",
+    hint: "AOV_SKJALDBORG.Settings.RequireAllCommit.Hint",
     scope: "world",
     config: false,
     type: Boolean,
@@ -205,7 +232,7 @@ export function registerSettings() {
     onChange: value => {
       const combat = game.combat;
       if (game.user?.isGM && combat?.getFlag?.(MODULE_ID, "combatState")?.enabled) {
-        void game.aovSkjadlborg?.phase?.synchronizeRequireAllCommit?.(combat, value === true);
+        void game.aovSkjaldborg?.phase?.synchronizeRequireAllCommit?.(combat, value === true);
       }
       ui.combat?.render?.();
     }
@@ -213,7 +240,7 @@ export function registerSettings() {
 
   for (const phase of PHASE_ORDER) {
     game.settings.register(MODULE_ID, PHASE_STRUCTURE_SETTING_KEYS[phase], {
-      name: `AOV_SKJADLBORG.Phases.${phase}`,
+      name: `AOV_SKJALDBORG.Phases.${phase}`,
       scope: "world",
       config: false,
       type: Boolean,
@@ -223,22 +250,22 @@ export function registerSettings() {
   }
 
   game.settings.register(MODULE_ID, "movementRounding", {
-    name: "AOV_SKJADLBORG.Settings.MovementRounding.Name",
-    hint: "AOV_SKJADLBORG.Settings.MovementRounding.Hint",
+    name: "AOV_SKJALDBORG.Settings.MovementRounding.Name",
+    hint: "AOV_SKJALDBORG.Settings.MovementRounding.Hint",
     scope: "world",
     config: false,
     type: String,
     choices: {
-      [ROUNDING_POLICIES.CEIL]: "AOV_SKJADLBORG.Settings.MovementRounding.Ceil",
-      [ROUNDING_POLICIES.FLOOR]: "AOV_SKJADLBORG.Settings.MovementRounding.Floor",
-      [ROUNDING_POLICIES.NEAREST]: "AOV_SKJADLBORG.Settings.MovementRounding.Nearest"
+      [ROUNDING_POLICIES.CEIL]: "AOV_SKJALDBORG.Settings.MovementRounding.Ceil",
+      [ROUNDING_POLICIES.FLOOR]: "AOV_SKJALDBORG.Settings.MovementRounding.Floor",
+      [ROUNDING_POLICIES.NEAREST]: "AOV_SKJALDBORG.Settings.MovementRounding.Nearest"
     },
     default: ROUNDING_POLICIES.CEIL
   });
 
   game.settings.register(MODULE_ID, "movementTickDelayMs", {
-    name: "AOV_SKJADLBORG.Settings.MovementTickDelay.Name",
-    hint: "AOV_SKJADLBORG.Settings.MovementTickDelay.Hint",
+    name: "AOV_SKJALDBORG.Settings.MovementTickDelay.Name",
+    hint: "AOV_SKJALDBORG.Settings.MovementTickDelay.Hint",
     scope: "world",
     config: false,
     type: Number,
@@ -247,8 +274,8 @@ export function registerSettings() {
   });
 
   game.settings.register(MODULE_ID, "shortReachGridUnits", {
-    name: "AOV_SKJADLBORG.Settings.Reach.Short.Name",
-    hint: "AOV_SKJADLBORG.Settings.Reach.Short.Hint",
+    name: "AOV_SKJALDBORG.Settings.Reach.Short.Name",
+    hint: "AOV_SKJALDBORG.Settings.Reach.Short.Hint",
     scope: "world",
     config: false,
     type: Number,
@@ -257,8 +284,8 @@ export function registerSettings() {
   });
 
   game.settings.register(MODULE_ID, "mediumReachGridUnits", {
-    name: "AOV_SKJADLBORG.Settings.Reach.Medium.Name",
-    hint: "AOV_SKJADLBORG.Settings.Reach.Medium.Hint",
+    name: "AOV_SKJALDBORG.Settings.Reach.Medium.Name",
+    hint: "AOV_SKJALDBORG.Settings.Reach.Medium.Hint",
     scope: "world",
     config: false,
     type: Number,
@@ -267,8 +294,8 @@ export function registerSettings() {
   });
 
   game.settings.register(MODULE_ID, "longReachGridUnits", {
-    name: "AOV_SKJADLBORG.Settings.Reach.Long.Name",
-    hint: "AOV_SKJADLBORG.Settings.Reach.Long.Hint",
+    name: "AOV_SKJALDBORG.Settings.Reach.Long.Name",
+    hint: "AOV_SKJALDBORG.Settings.Reach.Long.Hint",
     scope: "world",
     config: false,
     type: Number,
@@ -277,9 +304,9 @@ export function registerSettings() {
   });
 
   game.settings.registerMenu(MODULE_ID, "reportConfiguration", {
-    name: "AOV_SKJADLBORG.Settings.ReportMenu.Name",
-    label: "AOV_SKJADLBORG.Settings.ReportMenu.Label",
-    hint: "AOV_SKJADLBORG.Settings.ReportMenu.Hint",
+    name: "AOV_SKJALDBORG.Settings.ReportMenu.Name",
+    label: "AOV_SKJALDBORG.Settings.ReportMenu.Label",
+    hint: "AOV_SKJALDBORG.Settings.ReportMenu.Hint",
     icon: "fa-solid fa-message-lines",
     type: ReportSettings,
     restricted: true
@@ -287,8 +314,8 @@ export function registerSettings() {
 
   // Retained as a hidden migration source for worlds created before 0.1.9.
   game.settings.register(MODULE_ID, "chatReports", {
-    name: "AOV_SKJADLBORG.Settings.ChatReports.Name",
-    hint: "AOV_SKJADLBORG.Settings.ChatReports.Hint",
+    name: "AOV_SKJALDBORG.Settings.ChatReports.Name",
+    hint: "AOV_SKJALDBORG.Settings.ChatReports.Hint",
     scope: "world",
     config: false,
     type: Boolean,
@@ -297,7 +324,7 @@ export function registerSettings() {
 
   for (const phase of PHASE_ORDER) {
     game.settings.register(MODULE_ID, REPORT_PHASE_SETTING_KEYS[phase], {
-      name: `AOV_SKJADLBORG.Phases.${phase}`,
+      name: `AOV_SKJALDBORG.Phases.${phase}`,
       scope: "world",
       config: false,
       type: Boolean,
@@ -306,37 +333,37 @@ export function registerSettings() {
   }
 
   game.settings.register(MODULE_ID, "reportDelivery", {
-    name: "AOV_SKJADLBORG.Settings.ReportMenu.Delivery.Name",
+    name: "AOV_SKJALDBORG.Settings.ReportMenu.Delivery.Name",
     scope: "world",
     config: false,
     type: String,
     choices: {
-      [REPORT_DELIVERY.PUBLIC]: "AOV_SKJADLBORG.Settings.ReportMenu.Delivery.Public",
-      [REPORT_DELIVERY.WHISPER]: "AOV_SKJADLBORG.Settings.ReportMenu.Delivery.Whisper"
+      [REPORT_DELIVERY.PUBLIC]: "AOV_SKJALDBORG.Settings.ReportMenu.Delivery.Public",
+      [REPORT_DELIVERY.WHISPER]: "AOV_SKJALDBORG.Settings.ReportMenu.Delivery.Whisper"
     },
     default: REPORT_DELIVERY.WHISPER
   });
 
   game.settings.register(MODULE_ID, "reportWhisperRecipients", {
-    name: "AOV_SKJADLBORG.Settings.ReportMenu.Recipients.Name",
+    name: "AOV_SKJALDBORG.Settings.ReportMenu.Recipients.Name",
     scope: "world",
     config: false,
     type: String,
     choices: {
-      [REPORT_RECIPIENTS.GM]: "AOV_SKJADLBORG.Settings.ReportMenu.Recipients.Gm",
-      [REPORT_RECIPIENTS.GM_AND_PLAYERS]: "AOV_SKJADLBORG.Settings.ReportMenu.Recipients.GmAndPlayers"
+      [REPORT_RECIPIENTS.GM]: "AOV_SKJALDBORG.Settings.ReportMenu.Recipients.Gm",
+      [REPORT_RECIPIENTS.GM_AND_PLAYERS]: "AOV_SKJALDBORG.Settings.ReportMenu.Recipients.GmAndPlayers"
     },
     default: REPORT_RECIPIENTS.GM
   });
 
   game.settings.register(MODULE_ID, "reportCombatantScope", {
-    name: "AOV_SKJADLBORG.Settings.ReportMenu.Scope.Name",
+    name: "AOV_SKJALDBORG.Settings.ReportMenu.Scope.Name",
     scope: "world",
     config: false,
     type: String,
     choices: {
-      [REPORT_SCOPE.ALL]: "AOV_SKJADLBORG.Settings.ReportMenu.Scope.All",
-      [REPORT_SCOPE.PLAYER_OWNED]: "AOV_SKJADLBORG.Settings.ReportMenu.Scope.PlayerOwned"
+      [REPORT_SCOPE.ALL]: "AOV_SKJALDBORG.Settings.ReportMenu.Scope.All",
+      [REPORT_SCOPE.PLAYER_OWNED]: "AOV_SKJALDBORG.Settings.ReportMenu.Scope.PlayerOwned"
     },
     default: REPORT_SCOPE.PLAYER_OWNED
   });
@@ -350,8 +377,8 @@ export function registerSettings() {
   });
 
   game.settings.register(MODULE_ID, "debug", {
-    name: "AOV_SKJADLBORG.Settings.Debug.Name",
-    hint: "AOV_SKJADLBORG.Settings.Debug.Hint",
+    name: "AOV_SKJALDBORG.Settings.Debug.Name",
+    hint: "AOV_SKJALDBORG.Settings.Debug.Hint",
     scope: "world",
     config: true,
     type: Boolean,
@@ -359,7 +386,7 @@ export function registerSettings() {
   });
 
   game.settings.register(MODULE_ID, "movementDebugEnabled", {
-    name: "AOV_SKJADLBORG.Settings.MovementDebugMenu.Enabled.Name",
+    name: "AOV_SKJALDBORG.Settings.MovementDebugMenu.Enabled.Name",
     scope: "world",
     config: false,
     type: Boolean,
@@ -367,19 +394,19 @@ export function registerSettings() {
   });
 
   game.settings.register(MODULE_ID, "movementDebugLevel", {
-    name: "AOV_SKJADLBORG.Settings.MovementDebugMenu.Level.Name",
+    name: "AOV_SKJALDBORG.Settings.MovementDebugMenu.Level.Name",
     scope: "world",
     config: false,
     type: String,
     choices: Object.fromEntries(Object.values(MOVEMENT_DEBUG_LEVELS).map(level => [
       level,
-      `AOV_SKJADLBORG.Settings.MovementDebugMenu.Levels.${level}`
+      `AOV_SKJALDBORG.Settings.MovementDebugMenu.Levels.${level}`
     ])),
     default: MOVEMENT_DEBUG_LEVELS.SUMMARY
   });
 
   game.settings.register(MODULE_ID, "movementDebugCategories", {
-    name: "AOV_SKJADLBORG.Settings.MovementDebugMenu.Categories.Name",
+    name: "AOV_SKJALDBORG.Settings.MovementDebugMenu.Categories.Name",
     scope: "world",
     config: false,
     type: Object,
@@ -408,6 +435,22 @@ export function registerSettings() {
     config: false,
     type: Boolean,
     default: false
+  });
+
+  game.settings.register(MODULE_ID, "v14MigrationVersion", {
+    name: "Foundry v14 migration version",
+    scope: "world",
+    config: false,
+    type: Number,
+    default: 0
+  });
+
+  game.settings.register(MODULE_ID, "v14MigrationLastRun", {
+    name: "Foundry v14 migration last run",
+    scope: "world",
+    config: false,
+    type: String,
+    default: ""
   });
 }
 
@@ -487,4 +530,38 @@ export async function migrateUnifiedDebugSetting() {
     game.settings.set(MODULE_ID, "movementDebugEnabled", false),
     game.settings.set(MODULE_ID, "debugSettingsMigrated", true)
   ]);
+}
+
+/**
+ * Apply the conservative v14 world migration marker.
+ *
+ * This does not rewrite Actor or Item schemas. It only normalizes existing
+ * module Combat and Combatant flag payloads through the current defaults and
+ * records that this world has crossed the v14 upgrade boundary.
+ *
+ * @returns {Promise<void>}
+ */
+export async function migrateV14WorldState() {
+  if (!game.user?.isGM) return;
+  const version = Number(game.settings.get(MODULE_ID, "v14MigrationVersion")) || 0;
+  if (version >= V14_MIGRATION_VERSION) return;
+
+  const writes = [];
+  for (const combat of Array.from(game.combats ?? [])) {
+    if (combat?.getFlag?.(MODULE_ID, "combatState")) {
+      writes.push(setCombatState(combat, getCombatState(combat)));
+    }
+    for (const combatant of Array.from(combat?.combatants ?? [])) {
+      if (combatant?.getFlag?.(MODULE_ID, "combatantState")) {
+        writes.push(setCombatantState(combatant, getCombatantState(combatant)));
+      }
+    }
+  }
+
+  await Promise.all(writes);
+  await Promise.all([
+    game.settings.set(MODULE_ID, "v14MigrationVersion", V14_MIGRATION_VERSION),
+    game.settings.set(MODULE_ID, "v14MigrationLastRun", new Date().toISOString())
+  ]);
+  debug(`Migrated Skjaldborg world state to v14 migration version ${V14_MIGRATION_VERSION}.`);
 }

@@ -37,6 +37,22 @@ function sortQueue(queue) {
 }
 
 /**
+ * Return whether a projected initiative materially differs from the value
+ * already stored on the embedded Combatant. Avoiding no-op writes prevents a
+ * completed Movement projection from firing a second identical update when
+ * Resolution immediately builds its action queue.
+ *
+ * @param {Combatant} combatant Foundry Combatant document.
+ * @param {number|null} projectedInitiative Projected AoV DEX.INT initiative.
+ * @returns {boolean}
+ */
+function requiresInitiativeUpdate(combatant, projectedInitiative) {
+  if (!Number.isFinite(projectedInitiative)) return false;
+  const current = Number(combatant?.initiative);
+  return !Number.isFinite(current) || Math.abs(current - projectedInitiative) > 0.000001;
+}
+
+/**
  * Rebuild exact-DEX simultaneous groups for a queue.
  *
  * @param {import("../types.mjs").SkjaldborgResolutionAction[]} queue Resolution queue.
@@ -157,7 +173,7 @@ export async function buildResolutionQueue(combat, { announcedOnly = false } = {
       scheduledActions: actions,
       activeGroupId: null
     }));
-    if (Number.isFinite(ledger.projectedInitiative)) {
+    if (requiresInitiativeUpdate(combatant, ledger.projectedInitiative)) {
       initiativeUpdates.push({ _id: combatant.id, initiative: ledger.projectedInitiative });
     }
   }
@@ -172,6 +188,47 @@ export async function buildResolutionQueue(combat, { announcedOnly = false } = {
   }
 
   return { queue, simultaneousGroups, carryover };
+}
+
+/**
+ * Apply the Movement-stage DEX projection after every planned token has reached
+ * a terminal movement state. At this point each movement distance represents
+ * measured travel rather than a declared route, so the tracker can safely be
+ * re-ranked before Resolution begins.
+ *
+ * This operation updates only the per-combatant DEX ledger and displayed AoV
+ * initiative. Resolution actions are built separately when Resolution starts,
+ * leaving a clean boundary for later Resolution hooks or rules effects.
+ *
+ * @param {Combat} combat Foundry Combat document.
+ * @returns {Promise<import("../types.mjs").SkjaldborgDexLedger[]>} Applied ledgers.
+ */
+export async function applyMovementDexResults(combat) {
+  const ledgers = [];
+  const initiativeUpdates = [];
+  const combatantUpdates = [];
+
+  for (const combatant of combat?.combatants ?? []) {
+    if (!AoVAdapter.isCombatantCapable(combatant)) continue;
+    const state = getCombatantState(combatant);
+    const ledger = computeDexLedger(combatant, state, { includeMovementPenalty: true });
+    ledgers.push(ledger);
+    combatantUpdates.push(updateCombatantState(combatant, { dexLedger: ledger }));
+    if (requiresInitiativeUpdate(combatant, ledger.projectedInitiative)) {
+      initiativeUpdates.push({ _id: combatant.id, initiative: ledger.projectedInitiative });
+    }
+  }
+
+  await Promise.all(combatantUpdates);
+  if (initiativeUpdates.length && game.user?.isGM) {
+    await combat.updateEmbeddedDocuments("Combatant", initiativeUpdates, {
+      turnEvents: false,
+      combatTurn: combat.turn,
+      [MODULE_ID]: { movementDexProjection: true }
+    });
+  }
+
+  return ledgers;
 }
 
 /**
@@ -227,7 +284,7 @@ export function refreshImmediateResolutionActions(combat, combatant, { preserveS
       activeGroupId: null
     });
 
-    if (Number.isFinite(ledger.projectedInitiative) && game.user?.isGM) {
+    if (requiresInitiativeUpdate(combatant, ledger.projectedInitiative) && game.user?.isGM) {
       await combat.updateEmbeddedDocuments("Combatant", [{
         _id: combatant.id,
         initiative: ledger.projectedInitiative

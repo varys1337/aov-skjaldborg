@@ -1,15 +1,17 @@
-import { MODULE_ID } from "../constants.mjs";
+import { ACTION_CATEGORIES, MODULE_ID } from "../constants.mjs";
 import { AoVAdapter } from "../adapter/aov-adapter.mjs";
 import { error } from "../logger.mjs";
-import { CombatHUD } from "./combat-hud.mjs";
+import { getCombatantState } from "../combat/state.mjs";
 import {
   commitIntentCategory,
   executeActorItem,
   executeActorStat,
   executeMacro,
+  getActorPreparedIntent,
   isSkjaldborgCombatActive,
   openActorItem,
-  prepareActorQuickAccess
+  prepareActorQuickAccess,
+  promptOtherIntentText
 } from "../ui/action-catalog.mjs";
 
 const { ApplicationV2, HandlebarsApplicationMixin } = foundry.applications.api;
@@ -30,8 +32,8 @@ export class ActionRing extends HandlebarsApplicationMixin(ApplicationV2) {
   static BUTTON_GAP = 10;
 
   static DEFAULT_OPTIONS = {
-    id: "aov-skjadlborg-action-ring",
-    classes: ["aov-skjadlborg", "skj-action-ring-app"],
+    id: "aov-skjaldborg-action-ring",
+    classes: ["aov-skjaldborg", "skj-action-ring-app"],
     window: {
       frame: false
     },
@@ -43,7 +45,7 @@ export class ActionRing extends HandlebarsApplicationMixin(ApplicationV2) {
 
   static PARTS = {
     ring: {
-      template: "modules/aov-skjadlborg/templates/action-ring.hbs"
+      template: "modules/aov-skjaldborg/templates/action-ring.hbs"
     }
   };
 
@@ -159,10 +161,19 @@ export class ActionRing extends HandlebarsApplicationMixin(ApplicationV2) {
 
     const metrics = this._ringMetrics(actions.length);
     this._diameter = metrics.diameter;
+    const displayedIntent = isSkjaldborgCombatActive(this.combat) && this.combatant
+      ? getCombatantState(this.combatant).intent
+      : getActorPreparedIntent(this.actor);
     this._actions = actions.map((action, index) => {
       const position = this._calculatePosition(index, actions.length, metrics);
+      const tooltip = action.kind === "intent"
+        && action.id === ACTION_CATEGORIES.OTHER
+        && displayedIntent?.publicText
+        ? `${action.name}: ${displayedIntent.publicText}`
+        : (action.tooltip ?? action.name);
       return {
         ...action,
+        tooltip,
         style: `left: ${position.x}px; top: ${position.y}px;`
       };
     });
@@ -173,7 +184,7 @@ export class ActionRing extends HandlebarsApplicationMixin(ApplicationV2) {
       actorName: this.actor?.name ?? "",
       diameter: metrics.diameter,
       center: metrics.center,
-      hint: game.i18n.localize("AOV_SKJADLBORG.ActionRing.QuickAccessHint")
+      hint: game.i18n.localize("AOV_SKJALDBORG.ActionRing.QuickAccessHint")
     };
   }
 
@@ -306,10 +317,7 @@ export class ActionRing extends HandlebarsApplicationMixin(ApplicationV2) {
    * @returns {Promise<unknown|null>}
    */
   async _openDetails(kind, actionId) {
-    if (kind === "intent" && this.combatant && this.combat) {
-      await ActionRing.closeAll();
-      return CombatHUD.showForCombatant(this.combatant, this.combat, { initialActionCategory: actionId });
-    }
+    if (kind === "intent") return null;
     if (kind === "item") {
       await ActionRing.closeAll();
       return openActorItem(this.actor, actionId);
@@ -331,14 +339,17 @@ export class ActionRing extends HandlebarsApplicationMixin(ApplicationV2) {
     const actionId = target.dataset.actionId;
 
     if (kind === "intent") {
-      if (!isSkjaldborgCombatActive(this.combat) || !this.combatant) {
-        ui.notifications.warn(game.i18n.localize("AOV_SKJADLBORG.Warnings.NoCombatant"));
-        return null;
+      let publicText = "";
+      if (actionId === ACTION_CATEGORIES.OTHER) {
+        const currentText = isSkjaldborgCombatActive(this.combat) && this.combatant
+          ? getCombatantState(this.combatant).intent?.publicText
+          : getActorPreparedIntent(this.actor)?.publicText;
+        const entered = await promptOtherIntentText(currentText ?? "");
+        if (entered === null) return null;
+        publicText = entered;
       }
-      const descriptor = this._actions.find(action => action.kind === kind && action.id === actionId);
-      if (event.shiftKey || descriptor?.requiresDetails) return this._openDetails(kind, actionId);
       await ActionRing.closeAll();
-      return commitIntentCategory(this.combatant, this.combat, actionId);
+      return commitIntentCategory(this.actor, this.combatant, this.combat, actionId, { publicText });
     }
 
     if (kind === "item") {
@@ -390,7 +401,7 @@ export function registerActionRingHooks() {
     const configControl = element.querySelector('button[data-action="config"]');
     if (!(configControl instanceof HTMLButtonElement)) return;
 
-    const label = game.i18n.localize("AOV_SKJADLBORG.Controls.OpenActionRing");
+    const label = game.i18n.localize("AOV_SKJALDBORG.Controls.OpenActionRing");
     const control = document.createElement("button");
     control.type = "button";
     control.className = configControl.className;

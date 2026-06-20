@@ -38,7 +38,7 @@ function actorItem(actor, itemId) {
 /**
  * Return whether an Age of Vikings weapon is immediately available to draw.
  *
- * AoV 13.29 uses equipStatus 1/2/3 for carried/packed/stored. The module keeps
+ * AoV uses equipStatus 1/2/3 for carried/packed/stored. The module keeps
  * "carried" and "readied" distinct: a carried weapon may be selected and then
  * explicitly drawn, while packed or stored weapons are not valid draw targets.
  *
@@ -126,7 +126,7 @@ export async function setReadiedWeapon(actor, weaponId) {
   if (!actor) throw new Error("Actor unavailable.");
   const item = actorItem(actor, weaponId);
   if (!isCarriedWeapon(item)) {
-    throw new Error(game.i18n.localize("AOV_SKJADLBORG.Warnings.WeaponMustBeCarried"));
+    throw new Error(game.i18n.localize("AOV_SKJALDBORG.Warnings.WeaponMustBeCarried"));
   }
   return actor.setFlag(MODULE_ID, READIED_WEAPON_FLAG, item.id);
 }
@@ -167,7 +167,7 @@ export async function reconcileReadiedWeapon(actor) {
 }
 
 /**
- * Register v13 document lifecycle reconciliation for module-managed weapon state.
+ * Register v14 document lifecycle reconciliation for module-managed weapon state.
  *
  * @returns {void}
  */

@@ -1,25 +1,33 @@
 <div class="skj-combat-tracking-settings-form">
-  <p class="hint">{{localize "AOV_SKJADLBORG.Settings.CombatTrackingMenu.Intro"}}</p>
+  <p class="hint">{{localize "AOV_SKJALDBORG.Settings.CombatTrackingMenu.Intro"}}</p>
 
   <fieldset>
-    <legend>{{localize "AOV_SKJADLBORG.Settings.CombatTrackingMenu.Navigation.Name"}}</legend>
-    <p class="hint">{{localize "AOV_SKJADLBORG.Settings.CombatTrackingMenu.Navigation.Hint"}}</p>
+    <legend>{{localize "AOV_SKJALDBORG.Settings.CombatTrackingMenu.Navigation.Name"}}</legend>
+    <p class="hint">{{localize "AOV_SKJALDBORG.Settings.CombatTrackingMenu.Navigation.Hint"}}</p>
 
     <div class="form-group">
-      <label>{{localize "AOV_SKJADLBORG.Settings.RequireAllCommit.Name"}}</label>
+      <label>{{localize "AOV_SKJALDBORG.Settings.DynamicPlanningInitiative.Name"}}</label>
+      <div class="form-fields">
+        <input type="checkbox" name="dynamicPlanningInitiative" value="true" data-dtype="Boolean" {{checked dynamicPlanningInitiative}}>
+      </div>
+      <p class="hint">{{localize "AOV_SKJALDBORG.Settings.DynamicPlanningInitiative.Hint"}}</p>
+    </div>
+
+    <div class="form-group">
+      <label>{{localize "AOV_SKJALDBORG.Settings.RequireAllCommit.Name"}}</label>
       <div class="form-fields">
         <input type="checkbox" name="requireAllCommit" value="true" data-dtype="Boolean" {{checked requireAllCommit}}>
       </div>
-      <p class="hint">{{localize "AOV_SKJADLBORG.Settings.RequireAllCommit.Hint"}}</p>
+      <p class="hint">{{localize "AOV_SKJALDBORG.Settings.RequireAllCommit.Hint"}}</p>
     </div>
   </fieldset>
 
   <fieldset>
-    <legend>{{localize "AOV_SKJADLBORG.Settings.CombatTrackingMenu.Movement.Name"}}</legend>
-    <p class="hint">{{localize "AOV_SKJADLBORG.Settings.CombatTrackingMenu.Movement.Hint"}}</p>
+    <legend>{{localize "AOV_SKJALDBORG.Settings.CombatTrackingMenu.Movement.Name"}}</legend>
+    <p class="hint">{{localize "AOV_SKJALDBORG.Settings.CombatTrackingMenu.Movement.Hint"}}</p>
 
     <div class="form-group">
-      <label>{{localize "AOV_SKJADLBORG.Settings.MovementRounding.Name"}}</label>
+      <label>{{localize "AOV_SKJALDBORG.Settings.MovementRounding.Name"}}</label>
       <div class="form-fields">
         <select name="movementRounding">
           {{#each roundingChoices}}
@@ -27,44 +35,44 @@
           {{/each}}
         </select>
       </div>
-      <p class="hint">{{localize "AOV_SKJADLBORG.Settings.MovementRounding.Hint"}}</p>
+      <p class="hint">{{localize "AOV_SKJALDBORG.Settings.MovementRounding.Hint"}}</p>
     </div>
 
     <div class="form-group">
-      <label>{{localize "AOV_SKJADLBORG.Settings.MovementTickDelay.Name"}}</label>
+      <label>{{localize "AOV_SKJALDBORG.Settings.MovementTickDelay.Name"}}</label>
       <div class="form-fields">
         <input type="number" name="movementTickDelayMs" value="{{movementTickDelayMs}}" min="{{limits.movementTickDelayMs.min}}" max="{{limits.movementTickDelayMs.max}}" step="{{limits.movementTickDelayMs.step}}" data-dtype="Number">
       </div>
-      <p class="hint">{{localize "AOV_SKJADLBORG.Settings.MovementTickDelay.Hint"}}</p>
+      <p class="hint">{{localize "AOV_SKJALDBORG.Settings.MovementTickDelay.Hint"}}</p>
     </div>
   </fieldset>
 
   <fieldset>
-    <legend>{{localize "AOV_SKJADLBORG.Settings.CombatTrackingMenu.Reach.Name"}}</legend>
-    <p class="hint">{{localize "AOV_SKJADLBORG.Settings.CombatTrackingMenu.Reach.Hint"}}</p>
+    <legend>{{localize "AOV_SKJALDBORG.Settings.CombatTrackingMenu.Reach.Name"}}</legend>
+    <p class="hint">{{localize "AOV_SKJALDBORG.Settings.CombatTrackingMenu.Reach.Hint"}}</p>
 
     <div class="form-group">
-      <label>{{localize "AOV_SKJADLBORG.Settings.Reach.Short.Name"}}</label>
+      <label>{{localize "AOV_SKJALDBORG.Settings.Reach.Short.Name"}}</label>
       <div class="form-fields">
         <input type="number" name="shortReachGridUnits" value="{{shortReachGridUnits}}" min="{{limits.reach.min}}" max="{{limits.reach.max}}" step="{{limits.reach.step}}" data-dtype="Number">
       </div>
-      <p class="hint">{{localize "AOV_SKJADLBORG.Settings.Reach.Short.Hint"}}</p>
+      <p class="hint">{{localize "AOV_SKJALDBORG.Settings.Reach.Short.Hint"}}</p>
     </div>
 
     <div class="form-group">
-      <label>{{localize "AOV_SKJADLBORG.Settings.Reach.Medium.Name"}}</label>
+      <label>{{localize "AOV_SKJALDBORG.Settings.Reach.Medium.Name"}}</label>
       <div class="form-fields">
         <input type="number" name="mediumReachGridUnits" value="{{mediumReachGridUnits}}" min="{{limits.reach.min}}" max="{{limits.reach.max}}" step="{{limits.reach.step}}" data-dtype="Number">
       </div>
-      <p class="hint">{{localize "AOV_SKJADLBORG.Settings.Reach.Medium.Hint"}}</p>
+      <p class="hint">{{localize "AOV_SKJALDBORG.Settings.Reach.Medium.Hint"}}</p>
     </div>
 
     <div class="form-group">
-      <label>{{localize "AOV_SKJADLBORG.Settings.Reach.Long.Name"}}</label>
+      <label>{{localize "AOV_SKJALDBORG.Settings.Reach.Long.Name"}}</label>
       <div class="form-fields">
         <input type="number" name="longReachGridUnits" value="{{longReachGridUnits}}" min="{{limits.reach.min}}" max="{{limits.reach.max}}" step="{{limits.reach.step}}" data-dtype="Number">
       </div>
-      <p class="hint">{{localize "AOV_SKJADLBORG.Settings.Reach.Long.Hint"}}</p>
+      <p class="hint">{{localize "AOV_SKJALDBORG.Settings.Reach.Long.Hint"}}</p>
     </div>
   </fieldset>
 </div>

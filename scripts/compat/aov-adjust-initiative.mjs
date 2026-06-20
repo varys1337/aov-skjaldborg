@@ -7,6 +7,38 @@ const DISMISS_GUARD_MARKER = Symbol.for(`${MODULE_ID}.aovAdjustInitiativeDismiss
 const WEAPON_PATCH_MARKER = Symbol.for(`${MODULE_ID}.aovAdjustInitiativeWeaponIntegration`);
 
 /**
+ * Describe the current AoV tracker integration state without mutating the
+ * tracker class.
+ *
+ * @returns {{hasTrackerClass: boolean, hasAdjustInit: boolean, hasAdjDex: boolean, weaponPatchInstalled: boolean, dismissGuardInstalled: boolean, status: string}}
+ */
+export function getAdjustInitiativeIntegrationStatus() {
+  const trackerClass = CONFIG?.ui?.combat;
+  const adjustInit = trackerClass?.prototype?.adjustInit;
+  const adjDex = trackerClass?.adjDex;
+  const hasTrackerClass = typeof trackerClass === "function";
+  const hasAdjustInit = typeof adjustInit === "function";
+  const hasAdjDex = typeof adjDex === "function";
+  const weaponPatchInstalled = !!adjustInit?.[WEAPON_PATCH_MARKER];
+  const dismissGuardInstalled = !!adjDex?.[DISMISS_GUARD_MARKER];
+  let status = "ready";
+  if (!hasTrackerClass) status = "tracker-class-unavailable";
+  else if (!hasAdjustInit) status = "adjust-init-unavailable";
+  else if (!hasAdjDex) status = "adj-dex-unavailable";
+  else if (weaponPatchInstalled && dismissGuardInstalled) status = "patched";
+  else if (weaponPatchInstalled) status = "weapon-patched";
+  else if (dismissGuardInstalled) status = "dismiss-guarded";
+  return {
+    hasTrackerClass,
+    hasAdjustInit,
+    hasAdjDex,
+    weaponPatchInstalled,
+    dismissGuardInstalled,
+    status
+  };
+}
+
+/**
  * Determine whether an error is the known AoV Adjust Initiative dismissal bug.
  *
  * @param {unknown} exception Candidate error.
@@ -57,7 +89,7 @@ export function installAdjustInitiativeDismissGuard() {
 
 /**
  * Convert a DialogV2 input result into a finite adjustment amount while
- * preserving AoV 13.29's original action values.
+ * preserving AoV's original action values.
  *
  * @param {object} result Dialog result.
  * @param {number} initiative Current initiative.
@@ -92,7 +124,7 @@ export async function promptAdjustInitiative(combatant) {
   const weaponState = prepareReadiedWeaponState(actor);
   const cardLabel = `${game.i18n.localize("AOV.Combat.combatant")}: ${combatant.name} [${combatant.initiative}]`;
   const content = await foundry.applications.handlebars.renderTemplate(
-    "modules/aov-skjadlborg/templates/adjust-initiative-weapon.hbs",
+    "modules/aov-skjaldborg/templates/adjust-initiative-weapon.hbs",
     {
       cardLabel,
       weaponState,
@@ -101,7 +133,7 @@ export async function promptAdjustInitiative(combatant) {
   );
 
   const result = await foundry.applications.api.DialogV2.input({
-    classes: ["aov", "item", "aov-skjadlborg", "skj-weapon-adjust-dialog"],
+    classes: ["aov", "item", "aov-skjaldborg", "skj-weapon-adjust-dialog"],
     window: { title: game.i18n.localize("AOV.Combat.adjInit") },
     content,
     rejectClose: false,
@@ -114,7 +146,7 @@ export async function promptAdjustInitiative(combatant) {
   const action = String(result.action ?? "");
   const weaponId = action === "draw" ? String(result.weaponId ?? "") : null;
   if (action === "draw" && !weaponId) {
-    ui.notifications.warn(game.i18n.localize("AOV_SKJADLBORG.Warnings.SelectCarriedWeapon"));
+    ui.notifications.warn(game.i18n.localize("AOV_SKJALDBORG.Warnings.SelectCarriedWeapon"));
     return null;
   }
 
@@ -126,7 +158,7 @@ export async function promptAdjustInitiative(combatant) {
 }
 
 /**
- * Replace AoV 13.29's tracker click handler with a module-compatible extension.
+ * Replace AoV's tracker click handler with a module-compatible extension.
  *
  * The system remains authoritative for the tracker surface. This patch changes
  * only the click workflow so Draw Weapon can choose and persist one carried
@@ -164,7 +196,7 @@ export function installAdjustInitiativeWeaponIntegration() {
       });
     } catch (exception) {
       error("Failed to adjust AoV initiative with weapon automation.", exception);
-      ui.notifications.error(game.i18n.localize("AOV_SKJADLBORG.Warnings.ActionFailed"));
+      ui.notifications.error(game.i18n.localize("AOV_SKJALDBORG.Warnings.ActionFailed"));
       return null;
     }
   };

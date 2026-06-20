@@ -17,10 +17,12 @@
 
 /**
  * @typedef {object} SkjaldborgCombatantState
+ * @property {string} version Module state schema version.
  * @property {SkjaldborgIntent} intent Current declaration made by the combatant owner or GM.
- * @property {SkjaldborgMovementPlan} movement Recorded Foundry v13 movement plan summary.
+ * @property {SkjaldborgMovementPlan} movement Recorded Foundry v14 movement plan summary.
  * @property {SkjaldborgEngagementState} engagement Current close-combat engagement state.
  * @property {SkjaldborgDexLedger|null} dexLedger Last calculated DEX ledger.
+ * @property {SkjaldborgPlanningInitiative} planningInitiative Live Planning initiative tracking state.
  * @property {SkjaldborgResolutionAction[]} scheduledActions Actions created for this combatant.
  * @property {number} reactionCount Number of parry/dodge reactions used in the logical round.
  * @property {string} gmNotes Optional GM note text.
@@ -72,6 +74,16 @@
  * @property {string} reason Machine-readable engagement reason.
  */
 
+
+/**
+ * @typedef {object} SkjaldborgPlanningInitiative
+ * @property {number|null} logicalRound Logical round for which the live projection is valid.
+ * @property {number|null} baselineInitiative AoV DEX.INT initiative at the start of Planning.
+ * @property {number} externalAdjustment DEX-rank delta introduced outside the declaration ledger.
+ * @property {number|null} projectedInitiative Last initiative projected or observed in the tracker.
+ * @property {number} updatedAt Epoch timestamp of the latest live Planning update.
+ */
+
 /**
  * @typedef {object} SkjaldborgDexLedger
  * @property {string} combatantId Combatant document id.
@@ -79,9 +91,10 @@
  * @property {number} baseDex Actor base DEX used for the calculation.
  * @property {number} int Actor INT used for tiebreaking.
  * @property {number} mov Actor movement allowance used for display and validation.
- * @property {number} distance Recorded movement distance.
- * @property {number} movementUnits 3 m / 10 ft movement units after rounding.
- * @property {number} movementPenalty DEX penalty from movement.
+ * @property {number} distance DEX-eligible measured travelled distance; zero until movement reaches a terminal state.
+ * @property {number} movementUnits Eligible travelled 3 m / 10 ft movement units after rounding; zero before terminal movement.
+ * @property {number} movementPenalty DEX penalty from terminal measured movement; zero while only planned or executing.
+ * @property {number} planningAdjustment External DEX adjustment captured during live Planning.
  * @property {{label: string, value: number}[]} modifiers Individual DEX modifiers.
  * @property {number} modifierTotal Sum of modifier values.
  * @property {number|null} fixedRank Optional fixed DEX rank.

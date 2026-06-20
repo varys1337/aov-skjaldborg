@@ -4,10 +4,14 @@
  * Keep this file dependency-free so other modules can import stable IDs and enum
  * values without triggering Foundry document or application work during init.
  */
-export const MODULE_ID = "aov-skjadlborg";
+export const MODULE_ID = "aov-skjaldborg";
 export const SOCKET_NAME = `module.${MODULE_ID}`;
 
-export const MODULE_VERSION = "0.2.35";
+export const MODULE_VERSION = "0.3.0-alpha.10";
+export const MINIMUM_FOUNDRY_VERSION = "14.363";
+export const VERIFIED_FOUNDRY_VERSION = "14.364";
+export const MINIMUM_AOV_VERSION = "14.1";
+export const V14_MIGRATION_VERSION = 1;
 
 
 export const ACTION_UI_THEMES = Object.freeze({
@@ -84,11 +88,11 @@ export const REPORT_PHASE_SETTING_KEYS = Object.freeze({
 export const ACTION_CATEGORIES = Object.freeze({
   ATTACK: "attack",
   MISSILE: "missile",
-  MAGIC: "magic",
-  DEFEND: "defend",
-  RETREAT: "retreat",
   KNOCKBACK: "knockback",
-  FLEE: "flee",
+  GRAPPLE: "grapple",
+  DEFEND: "defend",
+  MAGIC: "magic",
+  RETREAT: "retreat",
   WAIT: "wait",
   DELAY: "delay",
   OTHER: "other"

@@ -20,11 +20,18 @@ import { enqueueCombatantWrite } from "./combat/authoritative-write-queue.mjs";
 import { startMovementPhase } from "./combat/movement-controller.mjs";
 import { shouldExecuteMovementImmediately, shouldQueueResolutionImmediately } from "./combat/phase-structure.mjs";
 import { refreshImmediateResolutionActions } from "./combat/resolution-queue.mjs";
+import {
+  captureExternalPlanningInitiativeChange,
+  refreshPlanningInitiative
+} from "./combat/planning-initiative.mjs";
 
 const SOCKET_REQUEST_TIMEOUT_MS = 10000;
 const SOCKET_MESSAGE_REQUEST = "request";
 const SOCKET_MESSAGE_RESPONSE = "response";
+const SOCKET_SCHEMA_VERSION = 1;
+const PROCESSED_REQUEST_TTL_MS = 60000;
 const pendingSocketRequests = new Map();
+const processedSocketRequests = new Map();
 
 /**
  * Select the first active GM to receive a player request.
@@ -33,6 +40,31 @@ const pendingSocketRequests = new Map();
  */
 function firstActiveGm() {
   return game.users.find(u => u.active && u.isGM) ?? null;
+}
+
+/**
+ * Identify stale document write failures without relying on error subclasses
+ * that would not survive socket serialization.
+ *
+ * @param {unknown} message Candidate message.
+ * @returns {boolean}
+ */
+function isStaleDocumentMessage(message) {
+  return String(message ?? "") === game.i18n.localize("AOV_SKJALDBORG.Warnings.StaleDocument");
+}
+
+/**
+ * Build player-facing timeout feedback based on the GM originally selected for
+ * the request.
+ *
+ * @param {string|null} gmId Expected GM User id.
+ * @returns {string}
+ */
+function socketTimeoutMessage(gmId) {
+  const currentGm = firstActiveGm();
+  if (!currentGm) return game.i18n.localize("AOV_SKJALDBORG.Warnings.NoGm");
+  if (gmId && currentGm.id !== gmId) return game.i18n.localize("AOV_SKJALDBORG.Warnings.GmChanged");
+  return game.i18n.localize("AOV_SKJALDBORG.Warnings.SocketTimeout");
 }
 
 /**
@@ -56,7 +88,7 @@ function requestingUser(userId) {
  * @returns {void}
  */
 function assertGmRequest(user) {
-  if (!user?.isGM) throw new Error(game.i18n.localize("AOV_SKJADLBORG.Warnings.GmOnly"));
+  if (!user?.isGM) throw new Error(game.i18n.localize("AOV_SKJALDBORG.Warnings.GmOnly"));
 }
 
 /**
@@ -81,6 +113,26 @@ function emitSocketResponse(request, response) {
 }
 
 /**
+ * Return whether the GM has already processed a socket request.
+ *
+ * @param {object} message Socket request envelope.
+ * @returns {boolean}
+ */
+function isDuplicateRequest(message) {
+  const requestId = String(message?.requestId ?? "");
+  const from = String(message?.from ?? "");
+  if (!requestId || !from) return false;
+  const now = Date.now();
+  for (const [key, timestamp] of processedSocketRequests) {
+    if ((now - Number(timestamp)) > PROCESSED_REQUEST_TTL_MS) processedSocketRequests.delete(key);
+  }
+  const key = `${from}:${requestId}`;
+  if (processedSocketRequests.has(key)) return true;
+  processedSocketRequests.set(key, now);
+  return false;
+}
+
+/**
  * Resolve or reject a pending player-to-GM request.
  *
  * @param {object} message Socket response.
@@ -94,7 +146,18 @@ export function handleSocketResponse(message) {
   pendingSocketRequests.delete(message.requestId);
   globalThis.clearTimeout(pending.timeout);
   if (message.ok) pending.resolve(true);
-  else pending.reject(new Error(cleanString(message.error, 1000) || game.i18n.localize("AOV_SKJADLBORG.Warnings.ActionFailed")));
+  else {
+    const errorMessage = cleanString(message.error, 1000) || game.i18n.localize("AOV_SKJALDBORG.Warnings.ActionFailed");
+    if (isStaleDocumentMessage(errorMessage)) {
+      ui.notifications.warn(errorMessage);
+      debug("Rejected stale socket request.", {
+        requestId: message.requestId,
+        from: message.from,
+        to: message.to
+      });
+    }
+    pending.reject(new Error(errorMessage));
+  }
   return true;
 }
 
@@ -134,6 +197,7 @@ function cleanPositiveNumber(value) {
 function cleanActionCategory(value) {
   const category = cleanString(value, 40);
   if (!category) return ACTION_CATEGORIES.ATTACK;
+  if (category === "flee") return ACTION_CATEGORIES.RETREAT;
   return Object.values(ACTION_CATEGORIES).includes(category) ? category : ACTION_CATEGORIES.OTHER;
 }
 
@@ -167,7 +231,7 @@ function cleanResolutionStatus(value) {
  */
 function cleanPhase(value) {
   if (value === "" || value === null || value === undefined) return null;
-  if (!PHASE_ORDER.includes(value)) throw new Error(game.i18n.localize("AOV_SKJADLBORG.Warnings.InvalidPhase"));
+  if (!PHASE_ORDER.includes(value)) throw new Error(game.i18n.localize("AOV_SKJALDBORG.Warnings.InvalidPhase"));
   return value;
 }
 
@@ -261,7 +325,7 @@ export function sanitizeMovementPayload(payload = {}) {
  */
 function assertCombatantAccess(user, combatant) {
   if (!AoVAdapter.canUserControlCombatant(user, combatant)) {
-    throw new Error(game.i18n.localize("AOV_SKJADLBORG.Warnings.NotOwner"));
+    throw new Error(game.i18n.localize("AOV_SKJALDBORG.Warnings.NotOwner"));
   }
 }
 
@@ -272,7 +336,7 @@ function assertCombatantAccess(user, combatant) {
  * @returns {void}
  */
 function assertCombat(combat) {
-  if (!combat) throw new Error(game.i18n.localize("AOV_SKJADLBORG.Warnings.NoCombat"));
+  if (!combat) throw new Error(game.i18n.localize("AOV_SKJALDBORG.Warnings.NoCombat"));
 }
 
 /**
@@ -286,7 +350,7 @@ function assertFreshCombat(payload, combat) {
   if (!payload.expectedCombatUpdatedAt || !combat) return;
   const current = combat.getFlag(MODULE_ID, "combatState")?.updatedAt;
   if (current && Number(payload.expectedCombatUpdatedAt) !== Number(current)) {
-    throw new Error(game.i18n.localize("AOV_SKJADLBORG.Warnings.StaleDocument"));
+    throw new Error(game.i18n.localize("AOV_SKJALDBORG.Warnings.StaleDocument"));
   }
 }
 
@@ -301,7 +365,7 @@ function assertFreshCombatant(payload, combatant) {
   if (!payload.expectedCombatantUpdatedAt || !combatant) return;
   const current = combatant.getFlag(MODULE_ID, "combatantState")?.updatedAt;
   if (current && Number(payload.expectedCombatantUpdatedAt) !== Number(current)) {
-    throw new Error(game.i18n.localize("AOV_SKJADLBORG.Warnings.StaleDocument"));
+    throw new Error(game.i18n.localize("AOV_SKJALDBORG.Warnings.StaleDocument"));
   }
 }
 
@@ -329,7 +393,7 @@ function cleanInitiativeAdjustment(value) {
  */
 export async function applyInitiativeAndWeaponAction(combatant, payload) {
   const actor = combatant?.actor;
-  if (!actor) throw new Error(game.i18n.localize("AOV_SKJADLBORG.Warnings.ActorUnavailable"));
+  if (!actor) throw new Error(game.i18n.localize("AOV_SKJALDBORG.Warnings.ActorUnavailable"));
 
   const action = ["draw", "sheathe", "none"].includes(payload.weaponAction)
     ? payload.weaponAction
@@ -346,9 +410,15 @@ export async function applyInitiativeAndWeaponAction(combatant, payload) {
     }
 
     if (!Number.isFinite(initiative)) return actor;
-    return await combatant.update({
-      initiative: Number((initiative - amount).toFixed(2))
+    const nextInitiative = Number((initiative - amount).toFixed(2));
+    const updated = await combatant.update({
+      initiative: nextInitiative
+    }, {
+      [MODULE_ID]: { planningExternalHandled: true }
     });
+    const ledger = await captureExternalPlanningInitiativeChange(combatant, { initiative: nextInitiative });
+    if (ledger) await PhaseController.clearCurrentTurn(combatant.parent, "planning-initiative-update");
+    return updated;
   } catch (exception) {
     try {
       if (previousWeaponId) await setReadiedWeapon(actor, previousWeaponId);
@@ -376,13 +446,23 @@ export function registerSocket() {
       return;
     }
     if (!game.user.isGM) return;
+    if (message?.type && message.type !== SOCKET_MESSAGE_REQUEST) return;
 
     void handleSocketRequest(message).then(() => {
       emitSocketResponse(message, { ok: true });
     }).catch(err => {
-      warn(err);
-      emitSocketResponse(message, { ok: false, error: err?.message ?? String(err) });
-      ui.notifications.error(err.message);
+      const errorMessage = err?.message ?? String(err);
+      if (isStaleDocumentMessage(errorMessage)) {
+        debug("Rejected stale socket request on GM.", {
+          action: message?.action,
+          requestId: message?.requestId,
+          from: message?.from
+        });
+      } else {
+        warn(err);
+        ui.notifications.error(errorMessage);
+      }
+      emitSocketResponse(message, { ok: false, error: errorMessage });
     });
   });
 }
@@ -397,22 +477,26 @@ export function registerSocket() {
 export async function requestGm(action, payload = {}) {
   const message = {
     type: SOCKET_MESSAGE_REQUEST,
+    schemaVersion: SOCKET_SCHEMA_VERSION,
     action,
     payload,
     from: game.user.id,
     to: firstActiveGm()?.id,
-    requestId: foundry.utils.randomID()
+    requestId: foundry.utils.randomID(),
+    sentAt: Date.now()
   };
 
   if (game.user.isGM) return handleSocketRequest(message);
   if (!message.to) {
-    ui.notifications.warn(game.i18n.localize("AOV_SKJADLBORG.Warnings.NoGm"));
+    ui.notifications.warn(game.i18n.localize("AOV_SKJALDBORG.Warnings.NoGm"));
     return null;
   }
   return new Promise((resolve, reject) => {
     const timeout = globalThis.setTimeout(() => {
       pendingSocketRequests.delete(message.requestId);
-      reject(new Error(game.i18n.localize("AOV_SKJADLBORG.Warnings.SocketTimeout")));
+      const errorMessage = socketTimeoutMessage(message.to);
+      ui.notifications.warn(errorMessage);
+      reject(new Error(errorMessage));
     }, SOCKET_REQUEST_TIMEOUT_MS);
     pendingSocketRequests.set(message.requestId, { resolve, reject, timeout, gmId: message.to });
     try {
@@ -433,6 +517,14 @@ export async function requestGm(action, payload = {}) {
  */
 export async function handleSocketRequest(message) {
   debug("socket request", message);
+  if (message?.type && message.type !== SOCKET_MESSAGE_REQUEST) {
+    throw new Error(`Invalid ${MODULE_ID} socket message type.`);
+  }
+  if (message?.schemaVersion && Number(message.schemaVersion) !== SOCKET_SCHEMA_VERSION) {
+    throw new Error(`Unsupported ${MODULE_ID} socket schema version.`);
+  }
+  if (!message?.requestId) throw new Error(`Rejected ${MODULE_ID} socket request without a request id.`);
+  if (isDuplicateRequest(message)) return { duplicate: true };
   const user = requestingUser(message?.from);
   const payload = message?.payload ?? {};
   const combat = AoVAdapter.getCombatById(payload.combatId);
@@ -466,6 +558,7 @@ export async function handleSocketRequest(message) {
       return enqueueCombatantWrite(combat?.id, combatant?.id, async () => {
         assertFreshCombatant(payload, combatant);
         const updated = await updateCombatantState(combatant, { intent: sanitizeIntentPayload(payload.intent) });
+        await refreshPlanningInitiative(combat, combatant);
         if (shouldQueueResolutionImmediately()) {
           await refreshImmediateResolutionActions(combat, combatant);
         }
@@ -478,6 +571,7 @@ export async function handleSocketRequest(message) {
         const updated = await updateCombatantState(combatant, {
           intent: { ...getCombatantState(combatant).intent, status: "held" }
         });
+        await refreshPlanningInitiative(combat, combatant);
         if (shouldQueueResolutionImmediately()) {
           await refreshImmediateResolutionActions(combat, combatant);
         }
@@ -561,6 +655,9 @@ export async function handleSocketRequest(message) {
       const persisted = getCombatantState(combatant).movement;
       const combatPhase = getCombatState(combat).phase;
       const sameRevision = Number(persisted?.routeRevision ?? 0) === Number(incoming.routeRevision ?? 0);
+      if (incoming.draft !== true && sameRevision) {
+        await refreshPlanningInitiative(combat, combatant);
+      }
       if (
         incoming.draft !== true
         && sameRevision
@@ -599,6 +696,7 @@ export async function handleSocketRequest(message) {
             draft: false
           }
         });
+        await refreshPlanningInitiative(combat, combatant);
         if (shouldQueueResolutionImmediately()) {
           await refreshImmediateResolutionActions(combat, combatant, { preserveStatus: true });
         }

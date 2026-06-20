@@ -3,9 +3,10 @@ import { warn } from "../logger.mjs";
 import { getCombatantState, updateCombatantState } from "./state.mjs";
 import { movementDebug, movementDebugWarn } from "./movement-debugger.mjs";
 
-const ENGAGED_EFFECT_NAME = "AOV_SKJADLBORG.StatusEffects.Engaged";
+const ENGAGED_EFFECT_NAME = "AOV_SKJALDBORG.StatusEffects.Engaged";
 const ENGAGED_EFFECT_ICON = "icons/svg/combat.svg";
 let engagementEffectSyncDepth = 0;
+let statusEffectMode = "unknown";
 
 /**
  * Return the configured Engaged status-effect definition.
@@ -23,7 +24,7 @@ export function engagedStatusEffectConfig() {
 /**
  * Register the module-owned Engaged status with Foundry's status-effect catalog.
  *
- * Foundry v13 exposes configured status effects through CONFIG.statusEffects.
+ * Foundry v14 exposes configured status effects through CONFIG.statusEffects.
  * AoV and other packages can replace that catalog during init, so registration
  * is deliberately idempotent and repeated at init, setup, and ready.
  *
@@ -31,13 +32,27 @@ export function engagedStatusEffectConfig() {
  */
 export function registerEngagedStatusEffect() {
   const config = engagedStatusEffectConfig();
-  const effects = CONFIG?.statusEffects;
+  let effects = CONFIG?.statusEffects;
 
-  // Defensive compatibility with the v13 record shape and collection-like
-  // test doubles. The official v13 API defines an id-keyed record, but using
-  // set() when present prevents a silent non-enumerable property on a Map.
+  if (!effects) {
+    try {
+      CONFIG.statusEffects = {};
+      effects = CONFIG.statusEffects;
+      statusEffectMode = "module-fallback";
+    }
+    catch (err) {
+      statusEffectMode = "disabled";
+      warn("Unable to initialize CONFIG.statusEffects for the Engaged status fallback", err);
+      return null;
+    }
+  }
+
+  // Defensive compatibility with object and collection-like shapes. The v14
+  // catalog is expected to be an id-keyed object; using set() when present
+  // prevents a silent non-enumerable property on a Map-like value.
   if (effects && typeof effects.set === "function") {
     effects.set(ENGAGED_STATUS_ID, config);
+    statusEffectMode = "native";
     return config;
   }
 
@@ -45,13 +60,17 @@ export function registerEngagedStatusEffect() {
     const index = effects.findIndex(effect => effect?.id === ENGAGED_STATUS_ID);
     if (index >= 0) effects.splice(index, 1, config);
     else effects.push(config);
+    statusEffectMode = "module-fallback";
     return config;
   }
 
   if (effects && typeof effects === "object") {
     try {
       effects[ENGAGED_STATUS_ID] = config;
-      if (effects[ENGAGED_STATUS_ID]?.id === ENGAGED_STATUS_ID) return config;
+      if (effects[ENGAGED_STATUS_ID]?.id === ENGAGED_STATUS_ID) {
+        if (statusEffectMode === "unknown") statusEffectMode = "native";
+        return config;
+      }
     }
     catch (_err) {
       // Fall through to replacing a non-extensible catalog.
@@ -60,11 +79,40 @@ export function registerEngagedStatusEffect() {
 
   try {
     CONFIG.statusEffects = { ...(effects ?? {}), [ENGAGED_STATUS_ID]: config };
+    statusEffectMode = "module-fallback";
   }
   catch (err) {
+    statusEffectMode = "disabled";
     warn("Unable to register the Engaged status effect in CONFIG.statusEffects", err);
+    return null;
   }
   return config;
+}
+
+/**
+ * Return the current status-effect compatibility mode.
+ *
+ * @returns {"unknown"|"native"|"module-fallback"|"disabled"}
+ */
+export function getEngagedStatusEffectMode() {
+  return statusEffectMode;
+}
+
+/**
+ * Whether this runtime can mirror engagement into Actor ActiveEffects.
+ *
+ * @param {Actor|object|null} actor Candidate Actor.
+ * @returns {boolean}
+ */
+function canMirrorEngagementEffect(actor) {
+  if (statusEffectMode === "disabled") return false;
+  if (!actor) return false;
+  return typeof CONFIG?.ActiveEffect?.documentClass === "function"
+    && (
+      typeof actor.toggleStatusEffect === "function"
+      || typeof actor.createEmbeddedDocuments === "function"
+      || Array.from(actor.effects ?? []).some(effect => typeof effect?.update === "function")
+    );
 }
 
 /**
@@ -170,6 +218,17 @@ export async function syncEngagedStatusEffect(combatant, engagement, combat = ga
   try {
     const actor = effectActorForCombatant(combatant);
     if (!actor) return null;
+    if (!canMirrorEngagementEffect(actor)) {
+      movementDebug(MOVEMENT_DEBUG_CATEGORIES.STATUS, "sync-engaged-effect-skipped", () => ({
+        combatantId: combatant?.id ?? null,
+        actorId: actor?.id ?? null,
+        statusEffectMode,
+        hasActiveEffectClass: typeof CONFIG?.ActiveEffect?.documentClass === "function",
+        hasToggleStatusEffect: typeof actor.toggleStatusEffect === "function",
+        hasCreateEmbeddedDocuments: typeof actor.createEmbeddedDocuments === "function"
+      }), { combatId: combat?.id ?? null, combatantId: combatant?.id ?? null, level: MOVEMENT_DEBUG_LEVELS.VERBOSE });
+      return null;
+    }
 
     const effects = Array.from(actor.effects ?? []);
     const effect = effects.find(isEngagedEffect) ?? null;
@@ -217,7 +276,7 @@ export async function syncEngagedStatusEffect(combatant, engagement, combat = ga
       return effect;
     }
 
-    // Use the v13 public status API when available. This creates the same
+    // Use the public status API when available. This creates the same
     // configured effect used by the default Assign Status Effects palette.
     if (typeof actor.toggleStatusEffect === "function") {
       await actor.toggleStatusEffect(ENGAGED_STATUS_ID, { active: true });
@@ -372,6 +431,7 @@ async function clearEngagementFromEffect(effect) {
  * @returns {void}
  */
 export function registerEngagedStatusHooks() {
+  if (statusEffectMode === "disabled" || typeof CONFIG?.ActiveEffect?.documentClass !== "function") return;
   Hooks.on("deleteActiveEffect", effect => {
     if (!isEngagedEffect(effect)) return;
     void clearEngagementFromEffect(effect);

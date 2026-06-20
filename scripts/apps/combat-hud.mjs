@@ -18,11 +18,11 @@ export class CombatHUD extends HandlebarsApplicationMixin(ApplicationV2) {
   static current = null;
 
   static DEFAULT_OPTIONS = {
-    id: "aov-skjadlborg-hud",
-    classes: ["aov-skjadlborg", "skj-hud"],
+    id: "aov-skjaldborg-hud",
+    classes: ["aov-skjaldborg", "skj-hud"],
     tag: "form",
     window: {
-      title: "AOV_SKJADLBORG.Hud.Title",
+      title: "AOV_SKJALDBORG.Hud.Title",
       contentClasses: ["standard-form", "skj-hud-content"],
       resizable: true
     },
@@ -47,7 +47,7 @@ export class CombatHUD extends HandlebarsApplicationMixin(ApplicationV2) {
 
   static PARTS = {
     main: {
-      template: "modules/aov-skjadlborg/templates/combat-hud.hbs"
+      template: "modules/aov-skjaldborg/templates/combat-hud.hbs"
     }
   };
 
@@ -68,7 +68,7 @@ export class CombatHUD extends HandlebarsApplicationMixin(ApplicationV2) {
    * @returns {string}
    */
   get title() {
-    const title = game.i18n.localize("AOV_SKJADLBORG.Hud.Title");
+    const title = game.i18n.localize("AOV_SKJALDBORG.Hud.Title");
     return this.combatant ? `${title}: ${this.combatant.name}` : title;
   }
 
@@ -82,7 +82,7 @@ export class CombatHUD extends HandlebarsApplicationMixin(ApplicationV2) {
    */
   static async showForCombatant(combatant, combat = game.combat, { initialActionCategory = null } = {}) {
     if (!combatant) {
-      ui.notifications.warn(game.i18n.localize("AOV_SKJADLBORG.Warnings.NoCombatant"));
+      ui.notifications.warn(game.i18n.localize("AOV_SKJALDBORG.Warnings.NoCombatant"));
       return null;
     }
     if (this.current) await this.current.close({ force: true });
@@ -121,17 +121,17 @@ export class CombatHUD extends HandlebarsApplicationMixin(ApplicationV2) {
       phases: getEnabledPhases().map(phase => ({ value: phase, label: game.i18n.localize(phaseLabelKey(phase)), active: combatState.phase === phase })),
       actionCategories: Object.values(ACTION_CATEGORIES).map(value => ({
         value,
-        label: game.i18n.localize(`AOV_SKJADLBORG.ActionCategories.${value}`),
+        label: game.i18n.localize(`AOV_SKJALDBORG.ActionCategories.${value}`),
         selected: (this.initialActionCategory ?? combatantState?.intent?.actionCategory) === value
       })),
       movementModes: ["none", "planned", "retreat", "flee"].map(value => ({
         value,
-        label: game.i18n.localize(`AOV_SKJADLBORG.Movement.${value.charAt(0).toUpperCase()}${value.slice(1)}`),
+        label: game.i18n.localize(`AOV_SKJALDBORG.Movement.${value.charAt(0).toUpperCase()}${value.slice(1)}`),
         selected: combatantState?.movement?.mode === value
       })),
       movementImmediate: shouldExecuteMovementImmediately(combatState.phase),
       movementSummary: {
-        status: game.i18n.localize(`AOV_SKJADLBORG.MovementStatus.${combatantState?.movement?.planStatus ?? "none"}`),
+        status: game.i18n.localize(`AOV_SKJALDBORG.MovementStatus.${combatantState?.movement?.planStatus ?? "none"}`),
         waypointCount: combatantState?.movement?.waypoints?.length ?? 0,
         destination: combatantState?.movement?.destination
           ? `${combatantState.movement.destination.x}, ${combatantState.movement.destination.y}`
@@ -153,7 +153,7 @@ export class CombatHUD extends HandlebarsApplicationMixin(ApplicationV2) {
     if (this.element instanceof HTMLFormElement) return this.element;
     const form = this.element?.querySelector("form");
     if (form) return form;
-    throw new Error(game.i18n.localize("AOV_SKJADLBORG.Warnings.FormUnavailable"));
+    throw new Error(game.i18n.localize("AOV_SKJALDBORG.Warnings.FormUnavailable"));
   }
 
   /**

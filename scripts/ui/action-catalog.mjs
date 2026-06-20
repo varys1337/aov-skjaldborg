@@ -4,9 +4,18 @@ import { defaultCombatantState, getCombatState, getCombatantState } from "../com
 import { requestGm } from "../socket.mjs";
 import { error } from "../logger.mjs";
 import { clearReadiedWeapon, getReadiedWeapon, getReadiedWeaponId } from "../combat/weapon-state.mjs";
+import {
+  clearActorPreparedIntent,
+  getActorPreparedIntent,
+  normalizeIntentCategory,
+  sanitizePreparedIntentText,
+  setActorPreparedIntent
+} from "../combat/prepared-intent.mjs";
+
+export { getActorPreparedIntent } from "../combat/prepared-intent.mjs";
 
 const ROLLABLE_ITEM_TYPES = new Set(["weapon", "skill", "passion"]);
-const MAGIC_ITEM_TYPES = new Set(["runescript", "seidur", "npcpower"]);
+const MAGIC_ITEM_TYPES = new Set(["rune", "runescript", "seidur", "npcpower"]);
 const HISTORY_FAMILY_ACTION_TYPES = new Set(["passion", "devotion"]);
 const EQUIPMENT_ITEM_TYPES = new Set(["weapon", "gear", "armour"]);
 export const ACTOR_HOTBAR_QUICK_SLOT_CAPACITY = ACTION_UI_LIMITS.actionRingMaxItems.max;
@@ -21,11 +30,11 @@ const EQUIPMENT_STATUS = Object.freeze({
 const ACTION_ICONS = Object.freeze({
   [ACTION_CATEGORIES.ATTACK]: "fa-solid fa-swords",
   [ACTION_CATEGORIES.MISSILE]: "fa-solid fa-crosshairs",
-  [ACTION_CATEGORIES.MAGIC]: "fa-solid fa-wand-magic-sparkles",
-  [ACTION_CATEGORIES.DEFEND]: "fa-solid fa-shield-halved",
-  [ACTION_CATEGORIES.RETREAT]: "fa-solid fa-person-walking-arrow-right",
   [ACTION_CATEGORIES.KNOCKBACK]: "fa-solid fa-people-arrows-left-right",
-  [ACTION_CATEGORIES.FLEE]: "fa-solid fa-person-running",
+  [ACTION_CATEGORIES.GRAPPLE]: "fa-solid fa-people-pulling",
+  [ACTION_CATEGORIES.DEFEND]: "fa-solid fa-shield-halved",
+  [ACTION_CATEGORIES.MAGIC]: "fa-solid fa-wand-magic-sparkles",
+  [ACTION_CATEGORIES.RETREAT]: "fa-solid fa-person-walking-arrow-right",
   [ACTION_CATEGORIES.WAIT]: "fa-solid fa-hand",
   [ACTION_CATEGORIES.DELAY]: "fa-solid fa-clock",
   [ACTION_CATEGORIES.OTHER]: "fa-solid fa-ellipsis"
@@ -81,8 +90,9 @@ function equipmentStatus(value) {
 function normalizeQuickAccessEntry(value) {
   if (!value || typeof value !== "object") return null;
   const kind = String(value.kind ?? "");
-  const id = String(value.id ?? "");
+  let id = String(value.id ?? "");
   if (!QUICK_ACCESS_ACTION_KINDS.has(kind) || !id) return null;
+  if (kind === "intent") id = normalizeIntentCategory(id);
   return { kind, id };
 }
 
@@ -193,7 +203,7 @@ export function resolveActorCombatant(actor, combat = game.combat) {
  * @returns {boolean}
  */
 export function isSkjaldborgCombatActive(combat) {
-  return !!combat && !!getCombatState(combat).enabled;
+  return !!combat?.started && !!getCombatState(combat).enabled;
 }
 
 /**
@@ -201,14 +211,58 @@ export function isSkjaldborgCombatActive(combat) {
  *
  * @returns {object[]}
  */
-export function prepareIntentActions() {
-  return Object.values(ACTION_CATEGORIES).map(category => ({
-    id: category,
-    kind: "intent",
-    icon: ACTION_ICONS[category] ?? ACTION_ICONS[ACTION_CATEGORIES.OTHER],
-    name: game.i18n.localize(`AOV_SKJADLBORG.ActionCategories.${category}`),
-    requiresDetails: [ACTION_CATEGORIES.WAIT, ACTION_CATEGORIES.DELAY].includes(category)
-  }));
+export function prepareIntentActions({ selectedCategory = null, otherText = "" } = {}) {
+  const selected = selectedCategory ? normalizeIntentCategory(selectedCategory) : null;
+  const customText = sanitizePreparedIntentText(otherText);
+  return Object.values(ACTION_CATEGORIES).map(category => {
+    const name = game.i18n.localize(`AOV_SKJALDBORG.ActionCategories.${category}`);
+    return {
+      id: category,
+      kind: "intent",
+      icon: ACTION_ICONS[category] ?? ACTION_ICONS[ACTION_CATEGORIES.OTHER],
+      name,
+      tooltip: category === ACTION_CATEGORIES.OTHER && customText
+        ? `${name}: ${customText}`
+        : name,
+      selected: selected === category
+    };
+  });
+}
+
+/**
+ * Prompt for the public text attached to an Other intent declaration.
+ *
+ * @param {string} [currentText=""] Existing public text.
+ * @returns {Promise<string|null>} Sanitized text, or null when dismissed.
+ */
+export async function promptOtherIntentText(currentText = "") {
+  const wrapper = document.createElement("div");
+  wrapper.className = "skj-other-intent-dialog";
+
+  const label = document.createElement("label");
+  const heading = document.createElement("span");
+  heading.textContent = game.i18n.localize("AOV_SKJALDBORG.IntentDialog.Label");
+  const textarea = document.createElement("textarea");
+  textarea.name = "intentText";
+  textarea.rows = 4;
+  textarea.maxLength = 500;
+  textarea.autofocus = true;
+  textarea.placeholder = game.i18n.localize("AOV_SKJALDBORG.IntentDialog.Placeholder");
+  textarea.textContent = sanitizePreparedIntentText(currentText);
+  label.append(heading, textarea);
+  wrapper.append(label);
+
+  const result = await foundry.applications.api.DialogV2.prompt({
+    window: { title: game.i18n.localize("AOV_SKJALDBORG.IntentDialog.Title") },
+    content: wrapper.outerHTML,
+    rejectClose: false,
+    modal: true,
+    ok: {
+      label: game.i18n.localize("AOV_SKJALDBORG.IntentDialog.Save"),
+      callback: (_event, button) => sanitizePreparedIntentText(button.form.elements.intentText?.value)
+    }
+  });
+  return result === null ? null : sanitizePreparedIntentText(result);
 }
 
 /**
@@ -250,6 +304,7 @@ function itemAction(item, group) {
     category: String(item.system?.category ?? ""),
     score: itemScore(item),
     prepared: !!item.system?.prepared,
+    canPrepare: ["runescript", "seidur"].includes(item.type),
     rollable: ROLLABLE_ITEM_TYPES.has(item.type),
     noXP: ["skill", "passion"].includes(item.type) && !!item.system?.noXP,
     xpCheck: ["skill", "passion"].includes(item.type) && !!item.system?.xpCheck
@@ -339,6 +394,25 @@ export function prepareActorEquipment(actor) {
   const groups = [];
   const items = Array.from(actor.items ?? []);
   const readiedWeaponId = getReadiedWeapon(actor)?.id ?? null;
+  const carriedEquipment = items.filter(item =>
+    EQUIPMENT_ITEM_TYPES.has(item.type) && Number(item.system?.equipStatus) === 1
+  );
+  const computedEncumbrance = carriedEquipment.reduce((total, item) => {
+    const quantity = item.type === "gear" ? Math.max(0, finiteNumber(item.system?.quantity) ?? 0) : 1;
+    const actual = finiteNumber(item.system?.actlEnc);
+    const base = finiteNumber(item.system?.enc) ?? 0;
+    return total + (actual ?? (base * quantity));
+  }, 0);
+  const actualEncumbrance = Math.max(0, Math.floor(computedEncumbrance));
+  const maximumEncumbrance = finiteNumber(actor.system?.maxEnc);
+  const encumbrance = {
+    actual: String(actualEncumbrance),
+    maximum: maximumEncumbrance === null ? "" : String(Math.max(0, Math.floor(maximumEncumbrance))),
+    label: maximumEncumbrance === null
+      ? String(actualEncumbrance)
+      : `${actualEncumbrance}/${Math.max(0, Math.floor(maximumEncumbrance))}`
+  };
+
   const weapons = items
     .filter(item => item.type === "weapon")
     .sort((a, b) => a.name.localeCompare(b.name, game.i18n.lang))
@@ -348,8 +422,8 @@ export function prepareActorEquipment(actor) {
       const damageBonusKey = String(item.system?.damMod ?? "");
       const damageBonus = String(item.system?.dbLabel ?? "").trim()
         || (damageBonusKey ? localizeOrFallback(`AOV.DamMod.${damageBonusKey}`, damageBonusKey) : "-");
-      const currentHp = finiteNumber(item.system?.currHP);
-      const maximumHp = finiteNumber(item.system?.maxHP);
+      const currentHp = Math.max(0, finiteNumber(item.system?.currHP) ?? 0);
+      const maximumHp = Math.max(0, finiteNumber(item.system?.maxHP) ?? 0);
       return {
         id: item.id,
         name: item.name,
@@ -358,7 +432,8 @@ export function prepareActorEquipment(actor) {
         damage: `${damage || "-"}${item.system?.special ? "*" : ""}`,
         damageBonus,
         encumbrance: String(finiteNumber(item.system?.actlEnc ?? item.system?.enc) ?? 0),
-        hitPoints: `${currentHp ?? 0}/${maximumHp ?? 0}`,
+        hitPointsCurrent: String(currentHp),
+        hitPointsMaximum: String(maximumHp),
         range: String(item.system?.weaponType ?? "") === "missile"
           ? String(finiteNumber(item.system?.range) ?? 0)
           : "-",
@@ -416,6 +491,7 @@ export function prepareActorEquipment(actor) {
       isWeapon: true,
       isGear: false,
       isArmour: false,
+      encumbrance,
       items: weapons
     });
   }
@@ -426,6 +502,7 @@ export function prepareActorEquipment(actor) {
       isWeapon: false,
       isGear: true,
       isArmour: false,
+      encumbrance,
       items: gear
     });
   }
@@ -436,6 +513,7 @@ export function prepareActorEquipment(actor) {
       isWeapon: false,
       isGear: false,
       isArmour: true,
+      encumbrance,
       items: armour
     });
   }
@@ -529,7 +607,7 @@ export function prepareActorStats(actor) {
   if (characteristics.length) {
     groups.push({
       id: "characteristics",
-      label: localizeOrFallback("AOV.characteristics", game.i18n.localize("AOV_SKJADLBORG.ActorHotbar.Groups.Characteristics")),
+      label: localizeOrFallback("AOV.characteristics", game.i18n.localize("AOV_SKJALDBORG.ActorHotbar.Groups.Characteristics")),
       isCharacteristics: true,
       actions: characteristics
     });
@@ -537,7 +615,7 @@ export function prepareActorStats(actor) {
   if (social.length) {
     groups.push({
       id: "social",
-      label: game.i18n.localize("AOV_SKJADLBORG.ActorHotbar.Groups.SocialStats"),
+      label: game.i18n.localize("AOV_SKJALDBORG.ActorHotbar.Groups.SocialStats"),
       isSocial: true,
       actions: social
     });
@@ -545,7 +623,7 @@ export function prepareActorStats(actor) {
   if (actor.type === "character") {
     groups.push({
       id: "identity",
-      label: game.i18n.localize("AOV_SKJADLBORG.ActorHotbar.Groups.Identity"),
+      label: game.i18n.localize("AOV_SKJALDBORG.ActorHotbar.Groups.Identity"),
       isIdentity: true,
       actions: [],
       entries: identity
@@ -682,11 +760,51 @@ export async function prepareActorHistoryFamily(actor) {
     families: [],
     thralls: [],
     farms: [],
+    general: {
+      hasContent: false,
+      personal: []
+    },
     dependents: 0,
     thrallCount: 0,
-    hasContent: false
+    hasContent: false,
+    hasDisplayContent: false
   };
   if (!actor) return empty;
+
+  const system = actor.system ?? {};
+  const present = value => {
+    const text = String(value ?? "").trim();
+    return text || "-";
+  };
+  const personalityKey = String(system.persType ?? "");
+  const genderKey = String(system.gender ?? "");
+  const general = {
+    hasContent: true,
+    personal: [
+      { id: "name", label: localizeOrFallback("AOV.name", "Name"), value: present(actor.name) },
+      { id: "nickname", label: localizeOrFallback("AOV.nickname", "Nickname"), value: present(system.nickname) },
+      { id: "meaning", label: localizeOrFallback("AOV.nameMeanAbbr", "Meaning"), value: present(system.nameMean) },
+      {
+        id: "personality",
+        label: localizeOrFallback("AOV.persTypeAbbr", "Personality"),
+        value: personalityKey ? localizeOrFallback(`AOV.Personality.${personalityKey}`, personalityKey) : "-"
+      },
+      { id: "spirit", label: localizeOrFallback("AOV.spiritAnAbbr", "Spirit"), value: present(system.spiritAn) },
+      {
+        id: "gender",
+        label: localizeOrFallback("AOV.genderAbbr", "Gender"),
+        value: genderKey ? localizeOrFallback(`AOV.${genderKey}`, genderKey) : "-"
+      },
+      { id: "born", label: localizeOrFallback("AOV.birthYearAbbr", "Born"), value: present(system.birthYear) },
+      { id: "age", label: localizeOrFallback("AOV.ageAbbr", "Age"), value: present(system.age) },
+      {
+        id: "features",
+        label: localizeOrFallback("AOV.distFeaturesAbbr", "Features"),
+        value: present(system.distFeatures),
+        wide: true
+      }
+    ]
+  };
 
   const items = Array.from(actor.items ?? []);
   const passionItems = items.filter(item => item.type === "passion");
@@ -758,7 +876,7 @@ export async function prepareActorHistoryFamily(actor) {
     }
 
     if (!farm) {
-      farms.push({ uuid, name: game.i18n.localize("AOV_SKJADLBORG.ActorHotbar.UnavailableDocument"), size: "-", type: "-", value: "-" });
+      farms.push({ uuid, name: game.i18n.localize("AOV_SKJALDBORG.ActorHotbar.UnavailableDocument"), size: "-", type: "-", value: "-" });
       continue;
     }
 
@@ -812,10 +930,12 @@ export async function prepareActorHistoryFamily(actor) {
     families,
     thralls,
     farms,
+    general,
     dependents: finiteNumber(actor.system?.dependents) ?? 0,
     thrallCount: livingThralls
   };
   result.hasContent = actionGroups.length > 0 || histories.length > 0 || families.length > 0 || thralls.length > 0 || farms.length > 0;
+  result.hasDisplayContent = general.hasContent || result.hasContent;
   return result;
 }
 
@@ -847,7 +967,7 @@ export async function persistActionOrder(actor, group, order) {
 export async function executeActorItem(actor, itemId, event = null) {
   const item = actor?.items?.get(itemId) ?? null;
   if (!item) {
-    ui.notifications.warn(game.i18n.localize("AOV_SKJADLBORG.Warnings.ItemUnavailable"));
+    ui.notifications.warn(game.i18n.localize("AOV_SKJALDBORG.Warnings.ItemUnavailable"));
     return null;
   }
   try {
@@ -855,7 +975,7 @@ export async function executeActorItem(actor, itemId, event = null) {
     return item.sheet?.render?.(true) ?? null;
   } catch (exception) {
     error(`Failed to execute actor item ${item.uuid}.`, exception);
-    ui.notifications.error(game.i18n.localize("AOV_SKJADLBORG.Warnings.ActionFailed"));
+    ui.notifications.error(game.i18n.localize("AOV_SKJALDBORG.Warnings.ActionFailed"));
     return null;
   }
 }
@@ -875,7 +995,7 @@ export async function toggleActorItemXpCheck(actor, itemId) {
     return await item.update({ "system.xpCheck": !item.system?.xpCheck });
   } catch (exception) {
     error(`Failed to toggle XP check for ${item.uuid}.`, exception);
-    ui.notifications.error(game.i18n.localize("AOV_SKJADLBORG.Warnings.ActionFailed"));
+    ui.notifications.error(game.i18n.localize("AOV_SKJALDBORG.Warnings.ActionFailed"));
     return null;
   }
 }
@@ -902,7 +1022,7 @@ export async function executeActorStat(actor, statId, event = null) {
     ? { property: "ability", characteristic: statId.slice(abilityPrefix.length) }
     : (["status", "reputation"].includes(statId) ? { property: statId } : null);
   if (!detail || (detail.property === "ability" && !actor.system?.abilities?.[detail.characteristic])) {
-    ui.notifications.warn(game.i18n.localize("AOV_SKJADLBORG.Warnings.StatUnavailable"));
+    ui.notifications.warn(game.i18n.localize("AOV_SKJALDBORG.Warnings.StatUnavailable"));
     return null;
   }
 
@@ -914,7 +1034,7 @@ export async function executeActorStat(actor, statId, event = null) {
     return await AOVRollType._onDetermineCheck(event ?? {}, detail, actor);
   } catch (exception) {
     error(`Failed to execute actor statistic ${statId}.`, exception);
-    ui.notifications.error(game.i18n.localize("AOV_SKJADLBORG.Warnings.ActionFailed"));
+    ui.notifications.error(game.i18n.localize("AOV_SKJALDBORG.Warnings.ActionFailed"));
     return null;
   }
 }
@@ -956,7 +1076,7 @@ export async function cycleActorEquipmentStatus(actor, itemId) {
     return result;
   } catch (exception) {
     error(`Failed to update equipment status for ${item.uuid}.`, exception);
-    ui.notifications.error(game.i18n.localize("AOV_SKJADLBORG.Warnings.ActionFailed"));
+    ui.notifications.error(game.i18n.localize("AOV_SKJALDBORG.Warnings.ActionFailed"));
     return null;
   }
 }
@@ -983,7 +1103,35 @@ export async function updateActorEquipmentQuantity(actor, itemId, value) {
     }]);
   } catch (exception) {
     error(`Failed to update equipment quantity for ${item.uuid}.`, exception);
-    ui.notifications.error(game.i18n.localize("AOV_SKJADLBORG.Warnings.ActionFailed"));
+    ui.notifications.error(game.i18n.localize("AOV_SKJALDBORG.Warnings.ActionFailed"));
+    return null;
+  }
+}
+
+/**
+ * Persist current hit points for one owned AoV weapon Item.
+ *
+ * @param {Actor} actor Actor document.
+ * @param {string} itemId Owned weapon Item id.
+ * @param {unknown} value Candidate current HP value.
+ * @returns {Promise<unknown|null>}
+ */
+export async function updateActorWeaponHitPoints(actor, itemId, value) {
+  const item = actor?.items?.get(itemId) ?? null;
+  if (!item || item.type !== "weapon") return null;
+
+  const number = finiteNumber(value);
+  if (number === null) return null;
+  const maximum = Math.max(0, finiteNumber(item.system?.maxHP) ?? 0);
+  const current = Math.min(maximum, Math.max(0, Math.trunc(number)));
+  try {
+    return await actor.updateEmbeddedDocuments("Item", [{
+      _id: item.id,
+      "system.currHP": current
+    }]);
+  } catch (exception) {
+    error(`Failed to update weapon hit points for ${item.uuid}.`, exception);
+    ui.notifications.error(game.i18n.localize("AOV_SKJALDBORG.Warnings.ActionFailed"));
     return null;
   }
 }
@@ -1001,7 +1149,7 @@ export async function executeMacro(macroId) {
     return await macro.execute();
   } catch (exception) {
     error(`Failed to execute macro ${macroId}.`, exception);
-    ui.notifications.error(game.i18n.localize("AOV_SKJADLBORG.Warnings.ActionFailed"));
+    ui.notifications.error(game.i18n.localize("AOV_SKJALDBORG.Warnings.ActionFailed"));
     return null;
   }
 }
@@ -1009,26 +1157,38 @@ export async function executeMacro(macroId) {
 /**
  * Commit a quick intent category using the module's GM-authoritative socket.
  *
- * Wait and Delay are intentionally excluded because both require additional
- * declaration data. Callers must open the detailed combat HUD for them.
+ * Before combat, the declaration is staged on the Actor. During active combat,
+ * it is written through the existing GM-authoritative Combatant socket path.
  *
- * @param {Combatant} combatant Target combatant.
- * @param {Combat} combat Target combat.
+ * @param {Actor} actor Target Actor.
+ * @param {Combatant|null} combatant Target Combatant when active.
+ * @param {Combat|null} combat Target Combat when active.
  * @param {string} category Action category.
  * @returns {Promise<unknown|null>}
  */
-export async function commitIntentCategory(combatant, combat, category) {
-  if (!combatant || !combat || !Object.values(ACTION_CATEGORIES).includes(category)) return null;
-  if ([ACTION_CATEGORIES.WAIT, ACTION_CATEGORIES.DELAY].includes(category)) return null;
+export async function commitIntentCategory(actor, combatant, combat, category, { publicText = "" } = {}) {
+  if (!actor?.isOwner) {
+    ui.notifications.warn(game.i18n.localize("AOV_SKJALDBORG.Warnings.NotOwner"));
+    return null;
+  }
+
+  const normalizedCategory = normalizeIntentCategory(category);
+  if (!isSkjaldborgCombatActive(combat) || !combatant) {
+    return setActorPreparedIntent(actor, normalizedCategory, publicText);
+  }
+
   if (!AoVAdapter.canUserControlCombatant(game.user, combatant)) {
-    ui.notifications.warn(game.i18n.localize("AOV_SKJADLBORG.Warnings.NotOwner"));
+    ui.notifications.warn(game.i18n.localize("AOV_SKJALDBORG.Warnings.NotOwner"));
     return null;
   }
 
   const combatantState = getCombatantState(combatant);
   const intent = foundry.utils.deepClone(defaultCombatantState().intent);
   intent.status = INTENT_STATUS.COMMITTED;
-  intent.actionCategory = category;
+  intent.actionCategory = normalizedCategory;
+  intent.publicText = normalizedCategory === ACTION_CATEGORIES.OTHER
+    ? sanitizePreparedIntentText(publicText)
+    : "";
 
   const result = await requestGm("submitIntent", {
     combatId: combat.id,
@@ -1036,6 +1196,7 @@ export async function commitIntentCategory(combatant, combat, category) {
     expectedCombatantUpdatedAt: combatantState.updatedAt,
     intent
   });
+  await clearActorPreparedIntent(actor);
   ui.combat?.render?.();
   return result;
 }

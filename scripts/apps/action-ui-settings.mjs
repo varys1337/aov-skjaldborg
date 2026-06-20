@@ -4,6 +4,7 @@ import {
   ACTION_UI_THEMES,
   MODULE_ID
 } from "../constants.mjs";
+import { normalizeNumberSetting } from "../utils/settings.mjs";
 
 const { ApplicationV2, HandlebarsApplicationMixin } = foundry.applications.api;
 
@@ -12,8 +13,8 @@ const { ApplicationV2, HandlebarsApplicationMixin } = foundry.applications.api;
  */
 export class ActionUiSettings extends HandlebarsApplicationMixin(ApplicationV2) {
   static DEFAULT_OPTIONS = {
-    classes: ["aov-skjadlborg", "skj-action-ui-settings"],
-    id: "aov-skjadlborg-action-ui-settings",
+    classes: ["aov-skjaldborg", "skj-action-ui-settings"],
+    id: "aov-skjaldborg-action-ui-settings",
     actions: {
       reset: ActionUiSettings.onResetDefaults,
       resetPosition: ActionUiSettings.onResetHotbarPosition
@@ -29,13 +30,13 @@ export class ActionUiSettings extends HandlebarsApplicationMixin(ApplicationV2) 
     },
     tag: "form",
     window: {
-      title: "AOV_SKJADLBORG.Settings.ActionUiMenu.Title",
+      title: "AOV_SKJALDBORG.Settings.ActionUiMenu.Title",
       contentClasses: ["standard-form", "skj-action-ui-settings-content"]
     }
   };
 
   static PARTS = {
-    form: { template: "modules/aov-skjadlborg/templates/action-ui-settings.hbs" },
+    form: { template: "modules/aov-skjaldborg/templates/action-ui-settings.hbs" },
     footer: { template: "templates/generic/form-footer.hbs" }
   };
 
@@ -75,12 +76,12 @@ export class ActionUiSettings extends HandlebarsApplicationMixin(ApplicationV2) 
     return [
       {
         value: ACTION_UI_THEMES.AOV,
-        label: game.i18n.localize("AOV_SKJADLBORG.Settings.ActionUiTheme.Aov"),
+        label: game.i18n.localize("AOV_SKJALDBORG.Settings.ActionUiTheme.Aov"),
         selected: current === ACTION_UI_THEMES.AOV
       },
       {
         value: ACTION_UI_THEMES.CLASSIC,
-        label: game.i18n.localize("AOV_SKJADLBORG.Settings.ActionUiTheme.Classic"),
+        label: game.i18n.localize("AOV_SKJALDBORG.Settings.ActionUiTheme.Classic"),
         selected: current === ACTION_UI_THEMES.CLASSIC
       }
     ];
@@ -136,24 +137,24 @@ export class ActionUiSettings extends HandlebarsApplicationMixin(ApplicationV2) 
     const data = foundry.utils.expandObject(formData.object ?? {});
     const values = {
       enableActionRing: data.enableActionRing === true,
-      actionRingMaxItems: normalizeNumber(
+      actionRingMaxItems: normalizeNumberSetting(
         data.actionRingMaxItems,
         ACTION_UI_DEFAULTS.actionRingMaxItems,
         ACTION_UI_LIMITS.actionRingMaxItems
       ),
       enableActorHotbar: data.enableActorHotbar === true,
       replaceCoreHotbar: data.replaceCoreHotbar === true,
-      actorHotbarScale: normalizeNumber(
+      actorHotbarScale: normalizeNumberSetting(
         data.actorHotbarScale,
         ACTION_UI_DEFAULTS.actorHotbarScale,
         ACTION_UI_LIMITS.actorHotbarScale
       ),
-      actorHotbarActionWidth: normalizeNumber(
+      actorHotbarActionWidth: normalizeNumberSetting(
         data.actorHotbarActionWidth,
         ACTION_UI_DEFAULTS.actorHotbarActionWidth,
         ACTION_UI_LIMITS.actorHotbarActionWidth
       ),
-      actorHotbarOpacity: normalizeNumber(
+      actorHotbarOpacity: normalizeNumberSetting(
         data.actorHotbarOpacity,
         ACTION_UI_DEFAULTS.actorHotbarOpacity,
         ACTION_UI_LIMITS.actorHotbarOpacity
@@ -167,21 +168,4 @@ export class ActionUiSettings extends HandlebarsApplicationMixin(ApplicationV2) 
       game.settings.set(MODULE_ID, key, value)
     )));
   }
-}
-
-/**
- * Coerce a numeric settings value to its supported range and step.
- *
- * @param {unknown} value Submitted value.
- * @param {number} fallback Default value.
- * @param {{min: number, max: number, step: number}} limits Numeric constraints.
- * @returns {number}
- */
-function normalizeNumber(value, fallback, limits) {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return fallback;
-  const clamped = Math.min(limits.max, Math.max(limits.min, numeric));
-  const stepped = limits.min + Math.round((clamped - limits.min) / limits.step) * limits.step;
-  const decimals = String(limits.step).split(".")[1]?.length ?? 0;
-  return Number(stepped.toFixed(decimals));
 }

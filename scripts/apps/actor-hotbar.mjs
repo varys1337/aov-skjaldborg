@@ -1,9 +1,10 @@
-import { MODULE_ID } from "../constants.mjs";
+import { ACTION_CATEGORIES, INTENT_STATUS, MODULE_ID } from "../constants.mjs";
 import { AoVAdapter } from "../adapter/aov-adapter.mjs";
 import { getCombatState, getCombatantState } from "../combat/state.mjs";
 import { error } from "../logger.mjs";
 import { requestGm } from "../socket.mjs";
 import { clearReadiedWeapon, getReadiedWeaponId, prepareReadiedWeaponState, setReadiedWeapon } from "../combat/weapon-state.mjs";
+import { createModuleChatMessage } from "../compat/chat-message.mjs";
 import { CombatHUD } from "./combat-hud.mjs";
 import {
   ACTOR_HOTBAR_QUICK_SLOT_CAPACITY,
@@ -12,6 +13,7 @@ import {
   executeActorItem,
   executeActorStat,
   executeMacro,
+  getActorPreparedIntent,
   getQuickAccessCircleCount,
   isSkjaldborgCombatActive,
   openActorItem,
@@ -23,20 +25,40 @@ import {
   prepareActorHistoryFamily,
   prepareActorStats,
   prepareIntentActions,
+  promptOtherIntentText,
   resolveActorCombatant,
+  resolveActorToken,
   resolveHotbarActor,
   toggleActorItemXpCheck,
-  updateActorEquipmentQuantity
+  updateActorEquipmentQuantity,
+  updateActorWeaponHitPoints
 } from "../ui/action-catalog.mjs";
 
 const { ApplicationV2, HandlebarsApplicationMixin } = foundry.applications.api;
 
 const QUICK_ACCESS_DRAG_TYPE = "AOVSkjaldborgActorHotbarAction";
-const QUICK_ACCESS_DRAG_MIME = "application/x-aov-skjadlborg-action";
+const QUICK_ACCESS_DRAG_MIME = "application/x-aov-skjaldborg-action";
 const QUICK_ACCESS_SLOT_SIZE = 42;
 const QUICK_ACCESS_MIN_RADIUS = 75;
 const QUICK_ACCESS_MIN_STAGE_SIZE = 192;
 const QUICK_ACCESS_SLOT_GAP = 4;
+
+const HOTBAR_DOCKS = Object.freeze({
+  AUTO: "auto",
+  LEFT: "left",
+  RIGHT: "right",
+  TOP: "top",
+  BOTTOM: "bottom"
+});
+const EXPLICIT_HOTBAR_DOCKS = new Set([
+  HOTBAR_DOCKS.LEFT,
+  HOTBAR_DOCKS.RIGHT,
+  HOTBAR_DOCKS.TOP,
+  HOTBAR_DOCKS.BOTTOM
+]);
+const HOTBAR_DOCK_DRAG_THRESHOLD = 7;
+const HOTBAR_VIEWPORT_MARGIN = 8;
+const HOTBAR_MIN_RESPONSIVE_ACTION_WIDTH = 180;
 
 /**
  * Calculate a single-circle portrait layout for six through twelve slots.
@@ -75,6 +97,7 @@ const SKILL_CATEGORY_ORDER = Object.freeze([
 ]);
 
 const MAGIC_TYPE_ORDER = Object.freeze([
+  "rune",
   "runescript",
   "seidur",
   "npcpower",
@@ -82,9 +105,9 @@ const MAGIC_TYPE_ORDER = Object.freeze([
 ]);
 
 let hooksRegistered = false;
-let scheduled = false;
+let scheduledRenderHandle = null;
 
-const TURN_DISPOSITION_PALETTES = Object.freeze({
+const DISPOSITION_PALETTES = Object.freeze({
   friendly: Object.freeze({
     key: "friendly",
     color: "#3399ff",
@@ -111,35 +134,51 @@ const TURN_DISPOSITION_PALETTES = Object.freeze({
   }),
   secret: Object.freeze({
     key: "secret",
-    color: "#7e8792",
-    labelColor: "#b8c0ca",
+    color: "#9256d9",
+    labelColor: "#c79cff",
     labelWeight: 800,
-    glowSoft: "rgba(126, 135, 146, 0.38)",
-    glowStrong: "rgba(126, 135, 146, 0.72)"
+    glowSoft: "rgba(146, 86, 217, 0.42)",
+    glowStrong: "rgba(146, 86, 217, 0.82)"
   })
 });
 
 /**
- * Resolve the active combatant Token disposition into the requested blue,
- * yellow, or red turn-highlight palette.
+ * Resolve the selected actor's authoritative Token disposition.
  *
- * @param {Combatant|null} combatant Current Actor's Combatant document.
+ * The active Combatant Token is preferred during combat. Outside combat, the
+ * currently controlled Token, a synthetic Token, the first active Token, and
+ * finally the Actor prototype Token are considered in that order.
+ *
+ * @param {Actor|null} actor Current actor document.
+ * @param {Combatant|null} combatant Current actor Combatant document.
  * @returns {{key: string, color: string, labelColor: string, labelWeight: number, glowSoft: string, glowStrong: string}}
  */
-function resolveTurnDispositionPalette(combatant) {
-  const disposition = Number(
-    combatant?.token?.disposition
-    ?? combatant?.token?.object?.document?.disposition
-  );
+function resolveDispositionPalette(actor, combatant) {
+  const controlled = canvas?.tokens?.controlled?.find(token => {
+    const tokenActor = token.actor;
+    return tokenActor?.id === actor?.id || tokenActor?.baseActor?.id === actor?.id;
+  }) ?? null;
+  const activeToken = actor?.getActiveTokens?.(false, true)?.[0] ?? null;
+  const tokenDocument = combatant?.token?.document
+    ?? combatant?.token
+    ?? controlled?.document
+    ?? actor?.token
+    ?? activeToken?.document
+    ?? activeToken
+    ?? actor?.prototypeToken
+    ?? null;
+  const disposition = Number(tokenDocument?.disposition);
   const dispositions = globalThis.CONST?.TOKEN_DISPOSITIONS ?? {};
   const friendly = Number(dispositions.FRIENDLY ?? 1);
   const neutral = Number(dispositions.NEUTRAL ?? 0);
+  const hostile = Number(dispositions.HOSTILE ?? -1);
   const secret = Number(dispositions.SECRET ?? -2);
 
-  if (disposition === friendly) return TURN_DISPOSITION_PALETTES.friendly;
-  if (disposition === neutral) return TURN_DISPOSITION_PALETTES.neutral;
-  if (disposition === secret) return TURN_DISPOSITION_PALETTES.secret;
-  return TURN_DISPOSITION_PALETTES.hostile;
+  if (disposition === friendly) return DISPOSITION_PALETTES.friendly;
+  if (disposition === hostile) return DISPOSITION_PALETTES.hostile;
+  if (disposition === secret) return DISPOSITION_PALETTES.secret;
+  if (disposition === neutral) return DISPOSITION_PALETTES.neutral;
+  return DISPOSITION_PALETTES.neutral;
 }
 
 /**
@@ -149,7 +188,7 @@ function resolveTurnDispositionPalette(combatant) {
  * @returns {string}
  */
 function localizeSkillCategory(category) {
-  if (category === "other") return game.i18n.localize("AOV_SKJADLBORG.ActorHotbar.Groups.OtherSkills");
+  if (category === "other") return game.i18n.localize("AOV_SKJALDBORG.ActorHotbar.Groups.OtherSkills");
   const key = `AOV.skillCat.${category}`;
   const localized = game.i18n.localize(key);
   return localized === key ? category.toLocaleUpperCase(game.i18n.lang) : localized;
@@ -162,10 +201,81 @@ function localizeSkillCategory(category) {
  * @returns {string}
  */
 function localizeMagicType(itemType) {
-  if (itemType === "other") return game.i18n.localize("AOV_SKJADLBORG.ActorHotbar.Groups.OtherMagic");
+  if (itemType === "other") return game.i18n.localize("AOV_SKJALDBORG.ActorHotbar.Groups.OtherMagic");
   const key = `TYPES.Item.${itemType}`;
   const localized = game.i18n.localize(key);
   return localized === key ? itemType : localized;
+}
+
+/**
+ * Normalize a configured Token bar attribute to an Actor document path.
+ *
+ * Foundry Token configuration stores system-relative values such as `hp`,
+ * while TokenDocument#getBarAttribute may return either that value or the
+ * expanded `system.hp` path depending on the tracked attribute type.
+ *
+ * @param {unknown} attribute Configured or resolved Token bar attribute.
+ * @returns {string}
+ */
+function normalizeTrackedResourcePath(attribute) {
+  let path = String(attribute ?? "").trim();
+  if (!path) return "";
+  if (path.startsWith("actor.")) path = path.slice("actor.".length);
+  if (!path.startsWith("system.")) path = `system.${path}`;
+  return path;
+}
+
+/**
+ * Identify AoV resources that require system-specific write semantics.
+ *
+ * @param {string} attribute Normalized Actor path.
+ * @returns {"hp"|"mp"|"generic"}
+ */
+function trackedResourceKind(attribute) {
+  const relative = String(attribute ?? "")
+    .replace(/^system\./, "")
+    .replace(/\.value$/, "");
+  if (relative === "hp") return "hp";
+  if (relative === "mp") return "mp";
+  return "generic";
+}
+
+/**
+ * Produce a readable label for an arbitrary Token bar resource.
+ *
+ * @param {string} attribute Normalized Actor path.
+ * @param {string} barName Token bar slot name.
+ * @returns {string}
+ */
+function trackedResourceLabel(attribute, barName) {
+  const kind = trackedResourceKind(attribute);
+  if (kind === "hp") return game.i18n.localize("AOV_SKJALDBORG.ActorHotbar.HitPoints");
+  if (kind === "mp") return game.i18n.localize("AOV_SKJALDBORG.ActorHotbar.MagicPoints");
+
+  const segments = String(attribute ?? "")
+    .replace(/^system\./, "")
+    .replace(/\.value$/, "")
+    .split(".")
+    .filter(Boolean);
+  const leaf = segments.at(-1) ?? barName;
+  const localizationKey = `AOV.${leaf}`;
+  const localized = game.i18n.localize(localizationKey);
+  if (localized !== localizationKey) return localized;
+  return leaf
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, character => character.toLocaleUpperCase(game.i18n.lang));
+}
+
+/**
+ * Convert an unknown Token bar number to a finite display value.
+ *
+ * @param {unknown} value Candidate number.
+ * @param {number} [fallback=0] Fallback number.
+ * @returns {number}
+ */
+function finiteResourceNumber(value, fallback = 0) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
 }
 
 /**
@@ -207,8 +317,8 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
   static current = null;
 
   static DEFAULT_OPTIONS = {
-    id: "aov-skjadlborg-actor-hotbar",
-    classes: ["aov-skjadlborg", "skj-actor-hotbar"],
+    id: "aov-skjaldborg-actor-hotbar",
+    classes: ["aov-skjaldborg", "skj-actor-hotbar"],
     window: {
       frame: false
     },
@@ -216,33 +326,41 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
       activate: ActorHotbar.onActivate,
       openActor: ActorHotbar.onOpenActor,
       openCombatHud: ActorHotbar.onOpenCombatHud,
+      createWound: ActorHotbar.onCreateWound,
+      deleteWound: ActorHotbar.onDeleteWound,
       openEquipment: ActorHotbar.onOpenEquipment,
       openItem: ActorHotbar.onOpenItem,
       openUuid: ActorHotbar.onOpenUuid,
+      rollSelectedWeapon: ActorHotbar.onRollSelectedWeapon,
+      rollWeaponAttack: ActorHotbar.onRollWeaponAttack,
+      rollWeaponDamage: ActorHotbar.onRollWeaponDamage,
       toggleReadiedWeapon: ActorHotbar.onToggleReadiedWeapon,
       dropReadiedWeapon: ActorHotbar.onDropReadiedWeapon,
       toggleEquipment: ActorHotbar.onToggleEquipment,
       toggleCollapse: ActorHotbar.onToggleCollapse,
-      toggleXp: ActorHotbar.onToggleXp
+      toggleWoundTreated: ActorHotbar.onToggleWoundTreated,
+      toggleXp: ActorHotbar.onToggleXp,
+      toggleMagicPrepared: ActorHotbar.onToggleMagicPrepared
     }
   };
 
   static PARTS = {
     hotbar: {
-      template: "modules/aov-skjadlborg/templates/actor-hotbar.hbs"
+      template: "modules/aov-skjaldborg/templates/actor-hotbar.hbs"
     }
   };
 
   static TABS = {
     sheet: {
       tabs: [
-        { id: "combat", label: "AOV_SKJADLBORG.ActorHotbar.Tabs.Combat" },
-        { id: "stats", label: "AOV_SKJADLBORG.ActorHotbar.Tabs.Stats" },
-        { id: "skills", label: "AOV_SKJADLBORG.ActorHotbar.Tabs.Skills" },
-        { id: "equip", label: "AOV_SKJADLBORG.ActorHotbar.Tabs.Equip" },
-        { id: "magic", label: "AOV_SKJADLBORG.ActorHotbar.Tabs.Magic" },
-        { id: "historyFamily", label: "AOV_SKJADLBORG.ActorHotbar.Tabs.HistoryFamily" },
-        { id: "macros", label: "AOV_SKJADLBORG.ActorHotbar.Tabs.Macros" }
+        { id: "combat", label: "AOV_SKJALDBORG.ActorHotbar.Tabs.Combat" },
+        { id: "wellbeing", label: "AOV_SKJALDBORG.ActorHotbar.Tabs.Wellbeing" },
+        { id: "stats", label: "AOV_SKJALDBORG.ActorHotbar.Tabs.Stats" },
+        { id: "skills", label: "AOV_SKJALDBORG.ActorHotbar.Tabs.Skills" },
+        { id: "equip", label: "AOV_SKJALDBORG.ActorHotbar.Tabs.Equip" },
+        { id: "magic", label: "AOV_SKJALDBORG.ActorHotbar.Tabs.Magic" },
+        { id: "historyFamily", label: "AOV_SKJALDBORG.ActorHotbar.Tabs.HistoryFamily" },
+        { id: "macros", label: "AOV_SKJALDBORG.ActorHotbar.Tabs.Macros" }
       ],
       initial: "combat"
     }
@@ -256,14 +374,21 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
     this._quickDragData = null;
     this._positionInitialized = false;
     this._positionDragAbort = null;
+    this._dockDragAbort = null;
+    this._dockPreference = HOTBAR_DOCKS.AUTO;
+    this._hotbarDock = HOTBAR_DOCKS.RIGHT;
+    this._suppressCollapseClick = false;
     this._resourceUpdatePending = false;
+    this._resourceBindings = new Map();
     this._equipmentUpdatePending = false;
+    this._weaponHpUpdatesPending = new Set();
+    this._wellbeingUpdatesPending = new Set();
     this._weaponActionPending = false;
     this._quickAccessUpdatePending = false;
     this._xpUpdatePending = false;
+    this._magicPreparationUpdatesPending = new Set();
     this._scrollPositions = new Map();
     this._renderedActorKey = null;
-    this._hotbarSide = "right";
   }
 
   /**
@@ -293,12 +418,16 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
    * @returns {void}
    */
   static scheduleRender() {
-    if (scheduled) return;
-    scheduled = true;
-    queueMicrotask(() => {
-      scheduled = false;
+    if (scheduledRenderHandle !== null) return;
+    const run = () => {
+      scheduledRenderHandle = null;
       void this.ensureRendered();
-    });
+    };
+    if (typeof globalThis.requestAnimationFrame === "function") {
+      scheduledRenderHandle = globalThis.requestAnimationFrame(run);
+    } else {
+      scheduledRenderHandle = globalThis.setTimeout(run, 16);
+    }
   }
 
   /**
@@ -321,8 +450,15 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
   static resetPosition() {
     if (!this.current?.rendered) return;
     this.current._positionInitialized = false;
-    this.current._positionAboveCoreHotbar();
+    this.current._dockPreference = HOTBAR_DOCKS.AUTO;
+    const position = this.current._positionAboveCoreHotbar();
     this.current._positionInitialized = true;
+    if (position) {
+      void game.settings.set(MODULE_ID, "actorHotbarPosition", {
+        ...position,
+        dock: HOTBAR_DOCKS.AUTO
+      });
+    }
   }
 
   /** @inheritdoc */
@@ -342,12 +478,22 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
     const prepared = prepareActorActions(this.actor);
     const combat = game.combat ?? null;
     const workflowActive = isSkjaldborgCombatActive(combat) && !!this.combatant;
-    const canControlCombatant = workflowActive
+    const canControlCombatant = this.combatant
       ? AoVAdapter.canUserControlCombatant(game.user, this.combatant)
       : false;
+    const canDeclareIntent = this.actor.isOwner && (!this.combatant || canControlCombatant);
     const combatantState = this.combatant ? getCombatantState(this.combatant) : null;
     const combatState = workflowActive ? getCombatState(combat) : null;
-    const intentActions = canControlCombatant ? prepareIntentActions() : [];
+    const preparedIntent = getActorPreparedIntent(this.actor);
+    const committedIntent = workflowActive
+      && [INTENT_STATUS.COMMITTED, INTENT_STATUS.HELD].includes(combatantState?.intent?.status);
+    const displayedIntent = committedIntent ? combatantState.intent : preparedIntent;
+    const intentActions = canDeclareIntent
+      ? prepareIntentActions({
+        selectedCategory: displayedIntent?.actionCategory ?? null,
+        otherText: displayedIntent?.publicText ?? ""
+      })
+      : [];
     const showMacroTab = game.settings.get(MODULE_ID, "replaceCoreHotbar");
     const equipmentGroups = prepareActorEquipment(this.actor);
     const weaponState = prepareReadiedWeaponState(this.actor);
@@ -356,10 +502,17 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
     const showEquipTab = equipmentGroups.length > 0;
     const historyFamily = await prepareActorHistoryFamily(this.actor);
     const showHistoryFamilyTab = this.actor.type === "character" || historyFamily.hasContent;
+    const wellbeing = AoVAdapter.prepareActorWellbeing(this.actor);
+    const showWellbeingTab = wellbeing.supported;
+    const magicGroups = prepareNamedGroups(prepared.magic, "magic");
+    const showMagicTab = magicGroups.length > 0;
+    const resources = await this._prepareResources();
 
     const activeTab = this.tabGroups?.sheet;
     const hiddenActiveTab = (!showMacroTab && activeTab === "macros")
       || (!showEquipTab && activeTab === "equip")
+      || (!showMagicTab && activeTab === "magic")
+      || (!showWellbeingTab && activeTab === "wellbeing")
       || (!showHistoryFamilyTab && activeTab === "historyFamily");
     if (hiddenActiveTab) {
       this.tabGroups.sheet = "combat";
@@ -369,7 +522,6 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
 
     const statGroups = prepareActorStats(this.actor);
     const skillGroups = prepareNamedGroups(prepared.skills, "skills");
-    const magicGroups = prepareNamedGroups(prepared.magic, "magic");
     const macroSlots = showMacroTab ? this._prepareMacroSlots() : [];
     const quickAccess = this._prepareQuickAccessSlots({
       prepared,
@@ -384,15 +536,17 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
         name: this.actor.name,
         img: this.actor.img
       },
-      resources: this._prepareResources(),
+      resources,
+      singleResource: resources.length === 1,
       quickAccessSlots: quickAccess.slots,
       quickAccessStageSize: quickAccess.stageSize,
       effects: this._prepareEffects(),
       combatActions: intentActions,
       weaponState: {
         ...weaponState,
-        currentLabel: weaponState.name || game.i18n.localize("AOV_SKJADLBORG.Weapons.None"),
+        currentLabel: weaponState.name || game.i18n.localize("AOV_SKJALDBORG.Weapons.None"),
         canManage: canManageWeapons,
+        canRoll: canManageWeapons && weaponState.carriedWeapons.length > 0,
         selectedIsReadied: !!weaponState.id && weaponState.carriedWeapons.some(weapon => weapon.selected && weapon.id === weaponState.id),
         toggleDisabled: !canManageWeapons || !weaponState.canDraw,
         dropDisabled: !canManageWeapons || !weaponState.canSheathe
@@ -402,9 +556,12 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
       magicGroups,
       equipmentGroups,
       historyFamily,
+      wellbeing,
       macroSlots,
       showMacroTab,
       showEquipTab,
+      showMagicTab,
+      showWellbeingTab,
       showHistoryFamilyTab,
       workflow: this._prepareWorkflow(combat, combatState, combatantState),
       hasCombatActions: intentActions.length > 0,
@@ -412,42 +569,144 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
       hasSkillActions: skillGroups.length > 0,
       hasMagicActions: magicGroups.length > 0,
       hasEquipment: equipmentGroups.length > 0,
-      hasHistoryFamily: historyFamily.hasContent,
-      collapsed: !!game.settings.get(MODULE_ID, "actorHotbarCollapsed")
+      hasHistoryFamily: historyFamily.hasDisplayContent,
+      collapsed: !!game.settings.get(MODULE_ID, "actorHotbarCollapsed"),
+      dock: this._hotbarDock
     };
   }
 
   /**
-   * Prepare editable HP and MP resource cards from actor document data.
+   * Resolve the Token document whose configured bars drive the resource pills.
    *
-   * @returns {object[]}
+   * A controlled canvas Token is authoritative. Combat, synthetic, active, and
+   * prototype Token documents provide deterministic fallbacks when the actor is
+   * not currently controlled on the canvas.
+   *
+   * @returns {TokenDocument|null}
    */
-  _prepareResources() {
-    const hp = this.actor.system?.hp ?? {};
-    const mp = this.actor.system?.mp ?? {};
-    const mpMax = Number(mp.max ?? 0);
-    const mpAvailable = Number(mp.availMax ?? mpMax);
-    const locked = Math.max(0, mpMax - mpAvailable);
-    return [
-      {
-        id: "hp",
-        label: game.i18n.localize("AOV_SKJADLBORG.ActorHotbar.HitPoints"),
-        value: Number(hp.value ?? 0),
-        max: Number(hp.max ?? 0),
-        accent: "#e22b32",
-        secondary: ""
-      },
-      {
-        id: "mp",
-        label: game.i18n.localize("AOV_SKJADLBORG.ActorHotbar.MagicPoints"),
-        value: Number(mp.value ?? 0),
-        max: mpAvailable,
-        accent: "#704cff",
-        secondary: locked > 0
-          ? game.i18n.format("AOV_SKJADLBORG.ActorHotbar.LockedMagic", { locked, max: mpMax })
-          : ""
-      }
+  _resolveResourceTokenDocument() {
+    const canvasToken = resolveActorToken(this.actor);
+    return canvasToken?.document
+      ?? this.combatant?.token?.document
+      ?? this.combatant?.token
+      ?? this.actor?.token
+      ?? this.actor?.prototypeToken
+      ?? null;
+  }
+
+  /**
+   * Determine the Actor update path represented by a resolved Token bar.
+   *
+   * @param {string} attribute Normalized Actor path.
+   * @param {object} barData TokenDocument#getBarAttribute result.
+   * @returns {string}
+   */
+  _trackedResourceUpdatePath(attribute, barData) {
+    if (!attribute) return "";
+    if (attribute.endsWith(".value")) return attribute;
+    const resolved = foundry.utils.getProperty(this.actor, attribute);
+    if (barData?.type === "bar" || (resolved && typeof resolved === "object" && "value" in resolved)) {
+      return `${attribute}.value`;
+    }
+    return attribute;
+  }
+
+  /**
+   * Prepare resource cards from the selected Token's configured bar1/bar2 data.
+   *
+   * HP and MP keep AoV-specific derived-value and write behaviour. In
+   * particular, MP is shown against its currently available maximum while the
+   * locked and total values remain available as secondary information.
+   *
+   * @returns {Promise<object[]>}
+   */
+  async _prepareResources() {
+    this._resourceBindings = new Map();
+    const tokenDocument = this._resolveResourceTokenDocument();
+    if (!tokenDocument || typeof tokenDocument.getBarAttribute !== "function") return [];
+
+    const slots = [
+      { barName: "bar1", fallbackAccent: "#e22b32" },
+      { barName: "bar2", fallbackAccent: "#704cff" }
     ];
+    const resourceFill = (value, maximum) => {
+      if (!(maximum > 0)) return 0;
+      return Math.min(100, Math.max(0, (value / maximum) * 100));
+    };
+    let magicPoints = null;
+    const resources = [];
+
+    for (const slot of slots) {
+      const configuredAttribute = String(tokenDocument?.[slot.barName]?.attribute ?? "").trim();
+      if (!configuredAttribute) continue;
+
+      let barData = null;
+      try {
+        barData = tokenDocument.getBarAttribute(slot.barName);
+      } catch (exception) {
+        error(`Failed to resolve ${slot.barName} for the actor hotbar.`, exception);
+      }
+      if (!barData) continue;
+
+      const attribute = normalizeTrackedResourcePath(barData.attribute ?? configuredAttribute);
+      if (!attribute) continue;
+      const kind = trackedResourceKind(attribute);
+      const hasResolvedMaximum = barData.max !== null
+        && barData.max !== undefined
+        && barData.max !== ""
+        && Number.isFinite(Number(barData.max));
+      let value = finiteResourceNumber(barData.value, 0);
+      let maximum = hasResolvedMaximum ? Math.max(0, finiteResourceNumber(barData.max, 0)) : null;
+      let secondary = "";
+
+      if (kind === "hp") {
+        const hp = AoVAdapter.prepareActorHitPoints(this.actor);
+        value = finiteResourceNumber(hp.value, value);
+        maximum = Math.max(0, finiteResourceNumber(hp.maximum, maximum ?? 0));
+      } else if (kind === "mp") {
+        magicPoints ??= await AoVAdapter.prepareActorMagicPoints(this.actor);
+        value = magicPoints.value;
+        maximum = magicPoints.available;
+        secondary = magicPoints.locked > 0
+          ? game.i18n.format("AOV_SKJALDBORG.ActorHotbar.LockedMagic", {
+            locked: magicPoints.locked,
+            max: magicPoints.total
+          })
+          : "";
+      }
+
+      const hasMaximum = Number.isFinite(maximum);
+      const editable = this.actor.isOwner && (kind === "hp" || kind === "mp" || barData.editable !== false);
+      const updatePath = this._trackedResourceUpdatePath(attribute, barData);
+      const accent = kind === "hp"
+        ? "#e22b32"
+        : kind === "mp"
+          ? "#704cff"
+          : slot.fallbackAccent;
+
+      this._resourceBindings.set(slot.barName, {
+        kind,
+        attribute,
+        updatePath,
+        editable,
+        maximum: hasMaximum ? maximum : null
+      });
+
+      resources.push({
+        id: slot.barName,
+        label: trackedResourceLabel(attribute, slot.barName),
+        value,
+        max: hasMaximum ? maximum : null,
+        hasMaximum,
+        fillPercent: resourceFill(value, maximum).toFixed(2),
+        accent,
+        secondary,
+        editable,
+        step: kind === "generic" ? "any" : "1"
+      });
+    }
+
+    return resources;
   }
 
   /**
@@ -476,8 +735,8 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
           index,
           style,
           empty: true,
-          name: game.i18n.localize("AOV_SKJADLBORG.ActorHotbar.QuickAccess.Empty"),
-          tooltip: game.i18n.localize("AOV_SKJADLBORG.ActorHotbar.QuickAccess.DropHint")
+          name: game.i18n.localize("AOV_SKJALDBORG.ActorHotbar.QuickAccess.Empty"),
+          tooltip: game.i18n.localize("AOV_SKJALDBORG.ActorHotbar.QuickAccess.DropHint")
         };
       }
 
@@ -487,7 +746,7 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
         style,
         empty: false,
         kind: entry.kind,
-        tooltip: `${action.name} - ${game.i18n.localize("AOV_SKJADLBORG.ActorHotbar.QuickAccess.RemoveHint")}`
+        tooltip: `${action.name} - ${game.i18n.localize("AOV_SKJALDBORG.ActorHotbar.QuickAccess.RemoveHint")}`
       };
     });
     return { slots, stageSize: metrics.stageSize };
@@ -524,7 +783,7 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
         slot,
         key: slot === 10 ? "0" : String(slot),
         macroId: macro?.id ?? "",
-        name: macro?.name ?? game.i18n.format("AOV_SKJADLBORG.ActorHotbar.EmptyMacro", { slot }),
+        name: macro?.name ?? game.i18n.format("AOV_SKJALDBORG.ActorHotbar.EmptyMacro", { slot }),
         img: macro?.img ?? "",
         empty: !macro
       };
@@ -548,22 +807,20 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
     const status = combatantState?.intent?.status ?? "uncommitted";
     const currentCombatantId = combat?.combatant?.id ?? combat?.current?.combatantId ?? null;
     const myTurn = active && currentCombatantId === this.combatant?.id;
-    const dispositionPalette = this.combatant
-      ? resolveTurnDispositionPalette(this.combatant)
-      : TURN_DISPOSITION_PALETTES.secret;
+    const dispositionPalette = resolveDispositionPalette(this.actor, this.combatant);
     return {
       active,
       myTurn,
       dispositionKey: dispositionPalette.key,
+      dispositionColor: dispositionPalette.color,
       dispositionLabelColor: dispositionPalette.labelColor,
       dispositionLabelWeight: dispositionPalette.labelWeight,
-      turnColor: myTurn ? dispositionPalette.color : "",
-      turnGlowSoft: myTurn ? dispositionPalette.glowSoft : "",
-      turnGlowStrong: myTurn ? dispositionPalette.glowStrong : "",
-      phase: active ? game.i18n.localize(`AOV_SKJADLBORG.Phases.${combatState.phase}`) : "",
-      category: active ? game.i18n.localize(`AOV_SKJADLBORG.ActionCategories.${category}`) : "",
+      dispositionGlowSoft: dispositionPalette.glowSoft,
+      dispositionGlowStrong: dispositionPalette.glowStrong,
+      phase: active ? game.i18n.localize(`AOV_SKJALDBORG.Phases.${combatState.phase}`) : "",
+      category: active ? game.i18n.localize(`AOV_SKJALDBORG.ActionCategories.${category}`) : "",
       status,
-      statusLabel: active ? game.i18n.localize(`AOV_SKJADLBORG.IntentStatus.${status}`) : "",
+      statusLabel: active ? game.i18n.localize(`AOV_SKJALDBORG.IntentStatus.${status}`) : "",
       dex: Number(finalDex ?? 0),
       reactions: Number(combatantState?.reactionCount ?? 0)
     };
@@ -583,8 +840,10 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
     this._applyThemeClass();
     this._applyOverlayPositioning();
     this._restoreOrInitializePosition();
+    this._activateDockDragging();
     this._activatePositionDragging();
     this._activateResourceEditing();
+    this._activateWellbeingEditing();
     this._activateEquipmentEditing();
     this._activateWeaponControls();
     this._activateContextMenus();
@@ -596,6 +855,7 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
 
   /** @inheritdoc */
   _onClose(options) {
+    this._cancelDockDrag();
     this._cancelPositionDrag();
     document.querySelector("#hotbar")?.classList.remove("skj-core-hotbar-hidden");
     if (ActorHotbar.current === this) ActorHotbar.current = null;
@@ -730,41 +990,40 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
   }
 
   /**
-   * Measure the hotbar columns in transformed viewport pixels.
+   * Measure the hotbar components in transformed viewport pixels.
    *
-   * @returns {{scale: number, collapsed: boolean, coreWidth: number, actionWidth: number, collapseWidth: number, gap: number, panelSpan: number, visiblePanelSpan: number, totalWidth: number, visibleWidth: number, height: number}}
+   * Measurements are kept independent from the current dock direction so the
+   * actor-art anchor can be translated reliably between all four layouts.
+   *
+   * @returns {{scale: number, collapsed: boolean, coreWidth: number, coreHeight: number, actionWidth: number, actionHeight: number, railThickness: number, railLength: number, gap: number}}
    */
   _layoutMetrics() {
     const scale = this._hotbarScale();
     const layout = this.element?.querySelector(".skj-hotbar-layout");
     const core = this.element?.querySelector(".skj-actor-core");
     const actions = this.element?.querySelector(".skj-actor-actions");
-    const collapse = this.element?.querySelector(".skj-hotbar-collapse-toggle");
-    const collapsed = this.element?.classList.contains("skj-hotbar-collapsed")
+    const collapsed = this.element?.querySelector(".skj-hotbar-inner")?.classList.contains("skj-hotbar-collapsed")
       || !!game.settings.get(MODULE_ID, "actorHotbarCollapsed");
     const computed = layout ? getComputedStyle(layout) : null;
-    const gap = Math.max(0, Number.parseFloat(computed?.columnGap ?? "2") || 2) * scale;
-    const coreWidth = core?.getBoundingClientRect?.().width
-      || (Number.parseFloat(computed?.getPropertyValue("--skj-quick-stage-size") ?? "192") || 192) * scale;
-    const configuredActionWidth = Number(game.settings.get(MODULE_ID, "actorHotbarActionWidth")) || 420;
-    const actionWidth = actions?.getBoundingClientRect?.().width || configuredActionWidth * scale;
-    const collapseWidth = collapse?.getBoundingClientRect?.().width || 10 * scale;
-    const rect = this.element?.getBoundingClientRect?.() ?? { height: 0 };
-    const height = rect.height || layout?.getBoundingClientRect?.().height || core?.getBoundingClientRect?.().height || 0;
-    const panelSpan = actionWidth + collapseWidth + (gap * 2);
-    const visiblePanelSpan = collapsed ? collapseWidth + gap : panelSpan;
+    const gap = Math.max(0, Number.parseFloat(computed?.gap ?? computed?.columnGap ?? "2") || 2) * scale;
+    const stageSize = Number.parseFloat(computed?.getPropertyValue("--skj-quick-stage-size") ?? "192") || 192;
+    const configuredActionWidth = Number.parseFloat(
+      this.element?.style.getPropertyValue("--skj-hotbar-effective-action-width")
+      || this.element?.style.getPropertyValue("--skj-hotbar-action-width")
+      || ""
+    ) || Number(game.settings.get(MODULE_ID, "actorHotbarActionWidth")) || 420;
+    const coreRect = core?.getBoundingClientRect?.();
+    const actionRect = actions?.getBoundingClientRect?.();
     return {
       scale,
       collapsed,
-      coreWidth,
-      actionWidth,
-      collapseWidth,
-      gap,
-      panelSpan,
-      visiblePanelSpan,
-      totalWidth: coreWidth + panelSpan,
-      visibleWidth: coreWidth + visiblePanelSpan,
-      height
+      coreWidth: coreRect?.width || stageSize * scale,
+      coreHeight: coreRect?.height || (stageSize + 64) * scale,
+      actionWidth: actionRect?.width || configuredActionWidth * scale,
+      actionHeight: actionRect?.height || (stageSize + 42) * scale,
+      railThickness: 10 * scale,
+      railLength: 42 * scale,
+      gap
     };
   }
 
@@ -780,18 +1039,21 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
   }
 
   /**
-   * Restore the saved client position or establish the default anchor once.
+   * Restore the saved client position and dock, or establish the default anchor.
    *
    * @returns {void}
    */
   _restoreOrInitializePosition() {
     if (!this.element || !this.actor) return;
     const saved = game.settings.get(MODULE_ID, "actorHotbarPosition") ?? {};
+    const savedDock = EXPLICIT_HOTBAR_DOCKS.has(saved.dock) ? saved.dock : HOTBAR_DOCKS.AUTO;
+    this._dockPreference = savedDock;
+
     if (Number.isFinite(Number(saved.left)) && Number.isFinite(Number(saved.top))) {
       this._setPositionFromAnchor({
         left: Number(saved.left),
         top: Number(saved.top)
-      });
+      }, { dockPreference: savedDock });
       this._positionInitialized = true;
       return;
     }
@@ -807,18 +1069,148 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
   /**
    * Position the custom surface directly above the core hotbar anchor.
    *
-   * @returns {void}
+   * @returns {{left: number, top: number}|null}
    */
   _positionAboveCoreHotbar() {
-    if (!this.element || !this.actor) return;
+    if (!this.element || !this.actor) return null;
     const coreHotbar = ui.hotbar?.element ?? document.querySelector("#hotbar");
-    const elementRect = this.element.getBoundingClientRect();
+    const core = this.element.querySelector(".skj-actor-core");
+    const coreRect = core?.getBoundingClientRect?.() ?? this.element.getBoundingClientRect();
     const anchorRect = coreHotbar?.getBoundingClientRect?.();
     const desiredLeft = anchorRect?.width ? anchorRect.left : 16;
     const desiredTop = anchorRect?.width
-      ? anchorRect.top - elementRect.height - 10
-      : window.innerHeight - elementRect.height - 16;
-    this._setPositionFromAnchor({ left: desiredLeft, top: desiredTop });
+      ? anchorRect.top - coreRect.height - 10
+      : window.innerHeight - coreRect.height - 16;
+    return this._setPositionFromAnchor(
+      { left: desiredLeft, top: desiredTop },
+      { dockPreference: HOTBAR_DOCKS.AUTO }
+    );
+  }
+
+  /**
+   * Restrict the action-panel width to the space available for the chosen dock.
+   *
+   * Vertical layouts can use the viewport width, while horizontal layouts
+   * reserve room for the actor art and the collapse rail.
+   *
+   * @param {"left"|"right"|"top"|"bottom"} dock Resolved dock.
+   * @returns {void}
+   */
+  _applyResponsiveActionWidth(dock) {
+    const scale = this._hotbarScale();
+    const configured = Number(game.settings.get(MODULE_ID, "actorHotbarActionWidth")) || 420;
+    const core = this.element?.querySelector(".skj-actor-core");
+    const coreWidth = core?.getBoundingClientRect?.().width || 192 * scale;
+    const gap = 2 * scale;
+    const rail = 10 * scale;
+    const viewportWidth = Math.max(0, window.innerWidth - (HOTBAR_VIEWPORT_MARGIN * 2));
+    const availablePixels = dock === HOTBAR_DOCKS.TOP || dock === HOTBAR_DOCKS.BOTTOM
+      ? viewportWidth
+      : viewportWidth - coreWidth - rail - (gap * 2);
+    const responsive = Math.min(configured, Math.max(1, availablePixels / scale));
+    this.element.style.setProperty("--skj-hotbar-effective-action-width", `${responsive}px`);
+  }
+
+  /**
+   * Choose a responsive automatic dock around the actor art.
+   *
+   * Horizontal placement remains preferred on normal desktop canvases. When
+   * neither side can accommodate a usable action panel, the larger vertical
+   * side is selected instead.
+   *
+   * @param {{left: number, top: number}} anchor Actor-core anchor.
+   * @returns {"left"|"right"|"top"|"bottom"}
+   */
+  _preferredDock(anchor) {
+    const metrics = this._layoutMetrics();
+    const margin = HOTBAR_VIEWPORT_MARGIN;
+    const minimumPanel = (Math.min(
+      Number(game.settings.get(MODULE_ID, "actorHotbarActionWidth")) || 420,
+      HOTBAR_MIN_RESPONSIVE_ACTION_WIDTH
+    ) * metrics.scale) + metrics.railThickness + (metrics.gap * 2);
+    const rightSpace = window.innerWidth - margin - (anchor.left + metrics.coreWidth);
+    const leftSpace = anchor.left - margin;
+    if (rightSpace >= minimumPanel) return HOTBAR_DOCKS.RIGHT;
+    if (leftSpace >= minimumPanel) return HOTBAR_DOCKS.LEFT;
+
+    const verticalPanel = metrics.actionHeight + metrics.railThickness + (metrics.gap * 2);
+    const bottomSpace = window.innerHeight - margin - (anchor.top + metrics.coreHeight);
+    const topSpace = anchor.top - margin;
+    if (bottomSpace >= verticalPanel || topSpace >= verticalPanel) {
+      return bottomSpace >= topSpace ? HOTBAR_DOCKS.BOTTOM : HOTBAR_DOCKS.TOP;
+    }
+
+    const horizontalBest = Math.max(leftSpace, rightSpace) / Math.max(1, minimumPanel);
+    const verticalBest = Math.max(topSpace, bottomSpace) / Math.max(1, verticalPanel);
+    if (verticalBest > horizontalBest) {
+      return bottomSpace >= topSpace ? HOTBAR_DOCKS.BOTTOM : HOTBAR_DOCKS.TOP;
+    }
+    return rightSpace >= leftSpace ? HOTBAR_DOCKS.RIGHT : HOTBAR_DOCKS.LEFT;
+  }
+
+  /**
+   * Apply orientation classes used by CSS to arrange the three hotbar regions.
+   *
+   * @param {"left"|"right"|"top"|"bottom"} dock Resolved dock.
+   * @returns {void}
+   */
+  _applyDockClass(dock) {
+    this._hotbarDock = dock;
+    for (const value of EXPLICIT_HOTBAR_DOCKS) {
+      this.element.classList.toggle(`skj-hotbar-dock-${value}`, dock === value);
+    }
+    // Retain the former side classes for selectors and third-party styling
+    // which predate four-way docking.
+    this.element.classList.toggle("skj-hotbar-side-left", dock === HOTBAR_DOCKS.LEFT);
+    this.element.classList.toggle("skj-hotbar-side-right", dock === HOTBAR_DOCKS.RIGHT);
+    this.element.dataset.hotbarDock = dock;
+  }
+
+  /**
+   * Calculate the full visible footprint relative to the actor-core anchor.
+   *
+   * @param {"left"|"right"|"top"|"bottom"} dock Resolved dock.
+   * @param {boolean} fitExpanded Include the action panel even when collapsed.
+   * @returns {{minX: number, maxX: number, minY: number, maxY: number}}
+   */
+  _layoutOffsets(dock, fitExpanded) {
+    const metrics = this._layoutMetrics();
+    const showActions = fitExpanded || !metrics.collapsed;
+
+    if (dock === HOTBAR_DOCKS.LEFT || dock === HOTBAR_DOCKS.RIGHT) {
+      const sideSpan = metrics.gap + metrics.railThickness
+        + (showActions ? metrics.gap + metrics.actionWidth : 0);
+      const height = Math.max(
+        metrics.coreHeight,
+        metrics.railLength,
+        showActions ? metrics.actionHeight : 0
+      );
+      return dock === HOTBAR_DOCKS.LEFT
+        ? { minX: -sideSpan, maxX: metrics.coreWidth, minY: 0, maxY: height }
+        : { minX: 0, maxX: metrics.coreWidth + sideSpan, minY: 0, maxY: height };
+    }
+
+    const width = Math.max(
+      metrics.coreWidth,
+      metrics.railLength,
+      showActions ? metrics.actionWidth : 0
+    );
+    const horizontalOverflow = Math.max(0, width - metrics.coreWidth) / 2;
+    const verticalSpan = metrics.gap + metrics.railThickness
+      + (showActions ? metrics.gap + metrics.actionHeight : 0);
+    return dock === HOTBAR_DOCKS.TOP
+      ? {
+        minX: -horizontalOverflow,
+        maxX: metrics.coreWidth + horizontalOverflow,
+        minY: -verticalSpan,
+        maxY: metrics.coreHeight
+      }
+      : {
+        minX: -horizontalOverflow,
+        maxX: metrics.coreWidth + horizontalOverflow,
+        minY: 0,
+        maxY: metrics.coreHeight + verticalSpan
+      };
   }
 
   /**
@@ -826,78 +1218,47 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
    *
    * @param {number} left Proposed left coordinate.
    * @param {number} top Proposed top coordinate.
-   * @param {"left"|"right"|null} [side=null] Expansion side, when known.
-   * @param {{fitExpanded?: boolean}} [options={}] Clamp against expanded or currently visible footprint.
+   * @param {"left"|"right"|"top"|"bottom"} dock Resolved dock.
+   * @param {{fitExpanded?: boolean}} [options={}] Clamp against expanded or visible footprint.
    * @returns {{left: number, top: number}}
    */
-  _clampAnchor(left, top, side = null, options = {}) {
-    const margin = 8;
-    const metrics = this._layoutMetrics();
-    const fitExpanded = options.fitExpanded ?? !metrics.collapsed;
-    const panelSpan = fitExpanded ? metrics.panelSpan : metrics.visiblePanelSpan;
-    const totalWidth = metrics.coreWidth + panelSpan;
-    let minLeft = margin;
-    let maxLeft = Math.max(margin, window.innerWidth - metrics.coreWidth - margin);
-    if (side === "right") {
-      maxLeft = Math.max(margin, window.innerWidth - totalWidth - margin);
-    } else if (side === "left") {
-      minLeft = Math.min(maxLeft, margin + panelSpan);
-    }
-    const maxTop = Math.max(margin, window.innerHeight - Math.min(metrics.height, window.innerHeight - (margin * 2)) - margin);
+  _clampAnchor(left, top, dock, options = {}) {
+    const fitExpanded = options.fitExpanded ?? !this._layoutMetrics().collapsed;
+    const offsets = this._layoutOffsets(dock, fitExpanded);
+    const margin = HOTBAR_VIEWPORT_MARGIN;
+    const minLeft = margin - offsets.minX;
+    const maxLeft = Math.max(minLeft, window.innerWidth - margin - offsets.maxX);
+    const minTop = margin - offsets.minY;
+    const maxTop = Math.max(minTop, window.innerHeight - margin - offsets.maxY);
     return {
-      left: Math.round(Math.max(margin, Math.min(left, maxLeft))),
-      top: Math.round(Math.max(margin, Math.min(top, maxTop)))
+      left: Math.round(Math.max(minLeft, Math.min(Number(left) || 0, maxLeft))),
+      top: Math.round(Math.max(minTop, Math.min(Number(top) || 0, maxTop)))
     };
   }
 
   /**
-   * Choose the action-panel side from available horizontal viewport space.
+   * Place the AppV2 root from the actor-core anchor and chosen dock.
+   *
+   * Foundry v14's public ApplicationV2#setPosition API remains the sole writer
+   * of the application root coordinates.
    *
    * @param {{left: number, top: number}} anchor Actor-core anchor.
-   * @returns {"left"|"right"}
+   * @param {{dockPreference?: string, fitExpanded?: boolean}} [options={}] Placement options.
+   * @returns {{left: number, top: number}} Persistable actor-core anchor.
    */
-  _preferredSide(anchor) {
-    const margin = 8;
-    const metrics = this._layoutMetrics();
-    const rightEdge = anchor.left + metrics.totalWidth;
-    const leftEdge = anchor.left - metrics.panelSpan;
-    if (rightEdge <= window.innerWidth - margin) return "right";
-    if (leftEdge >= margin) return "left";
-    const rightSpace = window.innerWidth - margin - (anchor.left + metrics.coreWidth);
-    const leftSpace = anchor.left - margin;
-    return leftSpace > rightSpace ? "left" : "right";
-  }
+  _setPositionFromAnchor(anchor, options = {}) {
+    const preference = options.dockPreference ?? this._dockPreference ?? HOTBAR_DOCKS.AUTO;
+    const dock = EXPLICIT_HOTBAR_DOCKS.has(preference) ? preference : this._preferredDock(anchor);
+    this._applyDockClass(dock);
+    this._applyResponsiveActionWidth(dock);
 
-  /**
-   * Apply side classes used by CSS to mirror the action panel.
-   *
-   * @param {"left"|"right"} side Expansion side.
-   * @returns {void}
-   */
-  _applySideClass(side) {
-    this._hotbarSide = side;
-    this.element.classList.toggle("skj-hotbar-side-left", side === "left");
-    this.element.classList.toggle("skj-hotbar-side-right", side !== "left");
-  }
-
-  /**
-   * Place the AppV2 root from the actor-core anchor and selected side.
-   *
-   * @param {{left: number, top: number}} anchor Actor-core anchor.
-   * @returns {{left: number, top: number}}
-   */
-  _setPositionFromAnchor(anchor) {
     const metrics = this._layoutMetrics();
-    const fitExpanded = !metrics.collapsed;
-    const coreClamped = this._clampAnchor(anchor.left, anchor.top, null, { fitExpanded: false });
-    const side = this._preferredSide(coreClamped);
-    const clamped = this._clampAnchor(coreClamped.left, coreClamped.top, side, { fitExpanded });
-    this._applySideClass(side);
-    const sideSpan = fitExpanded ? metrics.panelSpan : metrics.visiblePanelSpan;
-    const rootLeft = side === "left" ? clamped.left - sideSpan : clamped.left;
+    const fitExpanded = options.fitExpanded ?? !metrics.collapsed;
+    const clamped = this._clampAnchor(anchor.left, anchor.top, dock, { fitExpanded });
+    const offsets = this._layoutOffsets(dock, fitExpanded);
     super.setPosition({
-      left: Math.round(rootLeft),
-      top: clamped.top
+      left: Math.round(clamped.left + offsets.minX),
+      top: Math.round(clamped.top + offsets.minY)
     });
     return clamped;
   }
@@ -917,13 +1278,127 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
   }
 
   /**
-   * Keep the current hotbar position inside the resized viewport.
+   * Keep the current hotbar position and dimensions inside a resized viewport.
    *
    * @returns {void}
    */
   _clampCurrentPosition() {
     if (!this.element?.isConnected) return;
-    this._setPositionFromAnchor(this._currentAnchorPosition());
+    this._setPositionFromAnchor(this._currentAnchorPosition(), {
+      dockPreference: this._dockPreference
+    });
+  }
+
+  /**
+   * Bind primary-pointer dragging of the collapse rail to four-way docking.
+   *
+   * A normal click still toggles collapsed state. Once the pointer crosses the
+   * drag threshold, the next synthetic click is consumed and the selected dock
+   * is persisted with the actor-core anchor.
+   *
+   * @returns {void}
+   */
+  _activateDockDragging() {
+    const handle = this.element.querySelector(".skj-hotbar-collapse-toggle");
+    if (!handle) return;
+    handle.addEventListener("pointerdown", event => this._beginDockDrag(event));
+    handle.addEventListener("click", event => {
+      if (!this._suppressCollapseClick) return;
+      this._suppressCollapseClick = false;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }, { capture: true });
+  }
+
+  /**
+   * Begin dragging the collapse rail around the actor-art anchor.
+   *
+   * @param {PointerEvent} event Pointer-down event.
+   * @returns {void}
+   */
+  _beginDockDrag(event) {
+    if (event.button !== 0) return;
+    this._cancelDockDrag();
+    const startX = event.clientX;
+    const startY = event.clientY;
+    let dragged = false;
+    const abort = new AbortController();
+    this._dockDragAbort = abort;
+
+    const move = moveEvent => {
+      const distance = Math.hypot(moveEvent.clientX - startX, moveEvent.clientY - startY);
+      if (!dragged && distance < HOTBAR_DOCK_DRAG_THRESHOLD) return;
+      if (!dragged) {
+        dragged = true;
+        this.element.classList.add("skj-dock-dragging");
+      }
+      moveEvent.preventDefault();
+      moveEvent.stopPropagation();
+      const dock = this._dockFromPointer(moveEvent.clientX, moveEvent.clientY);
+      if (dock === this._dockPreference && dock === this._hotbarDock) return;
+      const anchor = this._currentAnchorPosition();
+      this._dockPreference = dock;
+      this._setPositionFromAnchor(anchor, { dockPreference: dock });
+    };
+
+    const finish = async upEvent => {
+      if (dragged) {
+        upEvent?.preventDefault?.();
+        upEvent?.stopPropagation?.();
+        this._suppressCollapseClick = true;
+        window.setTimeout(() => {
+          this._suppressCollapseClick = false;
+        }, 250);
+        const position = this._setPositionFromAnchor(this._currentAnchorPosition(), {
+          dockPreference: this._dockPreference
+        });
+        this._cancelDockDrag();
+        await game.settings.set(MODULE_ID, "actorHotbarPosition", {
+          ...position,
+          dock: this._dockPreference
+        });
+        return;
+      }
+      this._cancelDockDrag();
+    };
+
+    window.addEventListener("pointermove", move, { signal: abort.signal });
+    window.addEventListener("pointerup", finish, { once: true, signal: abort.signal });
+    window.addEventListener("pointercancel", finish, { once: true, signal: abort.signal });
+  }
+
+  /**
+   * Resolve the nearest cardinal dock from a pointer around the actor art.
+   *
+   * @param {number} clientX Pointer viewport X.
+   * @param {number} clientY Pointer viewport Y.
+   * @returns {"left"|"right"|"top"|"bottom"}
+   */
+  _dockFromPointer(clientX, clientY) {
+    const core = this.element?.querySelector(".skj-actor-core");
+    const rect = core?.getBoundingClientRect?.() ?? {
+      left: 0,
+      top: 0,
+      width: 1,
+      height: 1
+    };
+    const dx = clientX - (rect.left + (rect.width / 2));
+    const dy = clientY - (rect.top + (rect.height / 2));
+    if (Math.abs(dx) >= Math.abs(dy)) {
+      return dx < 0 ? HOTBAR_DOCKS.LEFT : HOTBAR_DOCKS.RIGHT;
+    }
+    return dy < 0 ? HOTBAR_DOCKS.TOP : HOTBAR_DOCKS.BOTTOM;
+  }
+
+  /**
+   * Cancel collapse-rail pointer listeners and visual drag state.
+   *
+   * @returns {void}
+   */
+  _cancelDockDrag() {
+    this._dockDragAbort?.abort();
+    this._dockDragAbort = null;
+    this.element?.classList.remove("skj-dock-dragging");
   }
 
   /**
@@ -969,14 +1444,19 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
       this._setPositionFromAnchor({
         left: start.left + (moveEvent.clientX - start.pointerX),
         top: start.top + (moveEvent.clientY - start.pointerY)
-      });
+      }, { dockPreference: this._dockPreference });
     };
 
     const finish = async upEvent => {
       upEvent?.preventDefault?.();
-      const position = this._setPositionFromAnchor(this._currentAnchorPosition());
+      const position = this._setPositionFromAnchor(this._currentAnchorPosition(), {
+        dockPreference: this._dockPreference
+      });
       this._cancelPositionDrag();
-      await game.settings.set(MODULE_ID, "actorHotbarPosition", position);
+      await game.settings.set(MODULE_ID, "actorHotbarPosition", {
+        ...position,
+        dock: this._dockPreference
+      });
     };
 
     window.addEventListener("pointermove", move, { signal: abort.signal });
@@ -1017,27 +1497,90 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
   }
 
   /**
-   * Persist one HP or MP edit through the AoV adapter.
+   * Persist one configured Token resource edit.
+   *
+   * HP and MP continue through the AoV adapter because both values can be
+   * derived from wound or prepared-magic state. Other tracked attributes are
+   * written directly to their resolved Actor data path.
    *
    * @param {Event} event Input change event.
    * @returns {Promise<void>}
    */
   async _commitResourceInput(event) {
     const input = event.currentTarget;
-    const resource = input.dataset.resourceInput;
-    if (!this.actor || this._resourceUpdatePending || !["hp", "mp"].includes(resource)) return;
+    const resourceId = String(input.dataset.resourceInput ?? "");
+    const binding = this._resourceBindings.get(resourceId);
+    if (!this.actor || this._resourceUpdatePending || !binding?.editable) return;
 
     const original = input.dataset.originalValue ?? input.defaultValue;
     this._resourceUpdatePending = true;
     input.disabled = true;
     try {
-      await AoVAdapter.updateActorResource(this.actor, resource, input.value);
+      if (binding.kind === "hp" || binding.kind === "mp") {
+        await AoVAdapter.updateActorResource(this.actor, binding.kind, input.value);
+      } else {
+        const requested = Number(input.value);
+        if (!Number.isFinite(requested) || !binding.updatePath) throw new Error("Invalid tracked resource value or path.");
+        const hasMaximum = binding.maximum !== null && Number.isFinite(Number(binding.maximum));
+        const maximum = hasMaximum ? Number(binding.maximum) : null;
+        const target = hasMaximum
+          ? Math.min(Math.max(0, requested), maximum)
+          : requested;
+        await this.actor.update({ [binding.updatePath]: target });
+      }
     } catch (exception) {
       input.value = original;
-      error(`Failed to update ${resource} from the actor hotbar.`, exception);
-      ui.notifications.error(game.i18n.localize("AOV_SKJADLBORG.Warnings.ResourceUpdateFailed"));
+      error(`Failed to update ${resourceId} from the actor hotbar.`, exception);
+      ui.notifications.error(game.i18n.localize("AOV_SKJALDBORG.Warnings.ResourceUpdateFailed"));
     } finally {
       this._resourceUpdatePending = false;
+      if (input.isConnected) input.disabled = !binding.editable;
+    }
+  }
+
+  /**
+   * Bind deterministic damage commits for character Wounds and NPC Hit Locations.
+   *
+   * @returns {void}
+   */
+  _activateWellbeingEditing() {
+    for (const input of this.element.querySelectorAll("[data-wellbeing-damage]")) {
+      input.addEventListener("keydown", event => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          input.blur();
+        } else if (event.key === "Escape") {
+          event.preventDefault();
+          input.value = input.dataset.originalValue ?? input.defaultValue;
+          input.blur();
+        }
+      });
+      input.addEventListener("change", event => void this._commitWellbeingDamage(event));
+    }
+  }
+
+  /**
+   * Persist one wellbeing damage edit through the AoV adapter.
+   *
+   * @param {Event} event Input change event.
+   * @returns {Promise<void>}
+   */
+  async _commitWellbeingDamage(event) {
+    const input = event.currentTarget;
+    const itemId = String(input.dataset.wellbeingDamage ?? "");
+    if (!this.actor || !itemId || this._wellbeingUpdatesPending.has(itemId)) return;
+
+    const original = input.dataset.originalValue ?? input.defaultValue;
+    this._wellbeingUpdatesPending.add(itemId);
+    input.disabled = true;
+    try {
+      await AoVAdapter.updateActorWellbeingDamage(this.actor, itemId, input.value);
+    } catch (exception) {
+      input.value = original;
+      error(`Failed to update wellbeing damage for Item ${itemId}.`, exception);
+      ui.notifications.error(game.i18n.localize("AOV_SKJALDBORG.Warnings.WellbeingUpdateFailed"));
+    } finally {
+      this._wellbeingUpdatesPending.delete(itemId);
       if (input.isConnected) input.disabled = false;
     }
   }
@@ -1049,7 +1592,7 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
    * @returns {void}
    */
   _activateEquipmentEditing() {
-    for (const input of this.element.querySelectorAll("[data-equipment-quantity]")) {
+    const bindCommitInput = (input, commit) => {
       input.addEventListener("keydown", event => {
         if (event.key === "Enter") {
           event.preventDefault();
@@ -1060,7 +1603,14 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
           input.blur();
         }
       });
-      input.addEventListener("change", event => void this._commitEquipmentQuantity(event));
+      input.addEventListener("change", event => void commit.call(this, event));
+    };
+
+    for (const input of this.element.querySelectorAll("[data-equipment-quantity]")) {
+      bindCommitInput(input, this._commitEquipmentQuantity);
+    }
+    for (const input of this.element.querySelectorAll("[data-weapon-hp]")) {
+      bindCommitInput(input, this._commitWeaponHitPoints);
     }
   }
 
@@ -1089,8 +1639,8 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
     const selectedWeaponId = String(select?.value ?? "");
     const currentWeaponId = String(getReadiedWeaponId(this.actor) ?? "");
     const isReadiedSelection = !!selectedWeaponId && selectedWeaponId === currentWeaponId;
-    const labelKey = isReadiedSelection ? "AOV_SKJADLBORG.Weapons.Sheathe" : "AOV_SKJADLBORG.Weapons.Draw";
-    const hintKey = isReadiedSelection ? "AOV_SKJADLBORG.Weapons.SheatheHint" : "AOV_SKJADLBORG.Weapons.DrawHint";
+    const labelKey = isReadiedSelection ? "AOV_SKJALDBORG.Weapons.Sheathe" : "AOV_SKJALDBORG.Weapons.Draw";
+    const hintKey = isReadiedSelection ? "AOV_SKJALDBORG.Weapons.SheatheHint" : "AOV_SKJALDBORG.Weapons.DrawHint";
     const icon = toggle.querySelector("i");
     const label = toggle.querySelector("span");
     icon?.classList.toggle("fa-hand", isReadiedSelection);
@@ -1121,7 +1671,7 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
     } catch (exception) {
       input.value = original;
       error(`Failed to update equipment quantity from the actor hotbar.`, exception);
-      ui.notifications.error(game.i18n.localize("AOV_SKJADLBORG.Warnings.ActionFailed"));
+      ui.notifications.error(game.i18n.localize("AOV_SKJALDBORG.Warnings.ActionFailed"));
     } finally {
       this._equipmentUpdatePending = false;
       if (input.isConnected) input.disabled = false;
@@ -1129,12 +1679,53 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
   }
 
   /**
-   * Bind right-click item-sheet behavior to item controls.
+   * Persist current HP for one owned weapon Item.
+   *
+   * @param {Event} event Input change event.
+   * @returns {Promise<void>}
+   */
+  async _commitWeaponHitPoints(event) {
+    const input = event.currentTarget;
+    const itemId = String(input.dataset.weaponHp ?? "");
+    if (!this.actor || !itemId || this._weaponHpUpdatesPending.has(itemId)) return;
+
+    const original = input.dataset.originalValue ?? input.defaultValue;
+    this._weaponHpUpdatesPending.add(itemId);
+    input.disabled = true;
+    try {
+      const result = await updateActorWeaponHitPoints(this.actor, itemId, input.value);
+      if (!result) input.value = original;
+    } catch (exception) {
+      input.value = original;
+      error(`Failed to update weapon hit points from the actor hotbar.`, exception);
+      ui.notifications.error(game.i18n.localize("AOV_SKJALDBORG.Warnings.ActionFailed"));
+    } finally {
+      this._weaponHpUpdatesPending.delete(itemId);
+      if (input.isConnected) input.disabled = false;
+    }
+  }
+
+  /**
+   * Bind right-click behavior for actor-owned Items.
+   *
+   * Magic and equipment cards publish their Description-tab content to chat.
+   * Other item controls retain the existing right-click-to-open-sheet behavior.
+   * Native form-field context menus are preserved for editable inputs.
    *
    * @returns {void}
    */
   _activateContextMenus() {
+    for (const control of this.element.querySelectorAll("[data-post-item-description]")) {
+      control.addEventListener("contextmenu", event => {
+        if (event.target instanceof Element && event.target.closest("input, textarea, select")) return;
+        event.preventDefault();
+        event.stopPropagation();
+        void this._postItemDescriptionToChat(control.dataset.postItemDescription);
+      });
+    }
+
     for (const control of this.element.querySelectorAll('[data-action-kind="item"]:not([data-quick-slot-index])')) {
+      if (control.closest("[data-post-item-description]")) continue;
       control.addEventListener("contextmenu", event => {
         event.preventDefault();
         event.stopPropagation();
@@ -1144,18 +1735,68 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
   }
 
   /**
-   * Temporarily disable the draggable row while an XP control is pressed.
+   * Publish one actor-owned Item's Description-tab content to chat.
+   *
+   * The rich text is enriched relative to the Item so document links, embeds,
+   * and inline rolls use the same data context as the core Item sheet.
+   *
+   * @param {string|undefined} itemId Owned Item id.
+   * @returns {Promise<ChatMessage|null>}
+   */
+  async _postItemDescriptionToChat(itemId) {
+    const item = this.actor?.items?.get(String(itemId ?? "")) ?? null;
+    if (!item) {
+      ui.notifications.warn(game.i18n.localize("AOV_SKJALDBORG.Warnings.ItemUnavailable"));
+      return null;
+    }
+
+    const rawDescription = typeof item.system?.description === "string"
+      ? item.system.description
+      : (typeof item.system?.description?.value === "string" ? item.system.description.value : "");
+    if (!rawDescription.trim()) {
+      ui.notifications.warn(game.i18n.format("AOV_SKJALDBORG.Warnings.NoItemDescription", { item: item.name }));
+      return null;
+    }
+
+    try {
+      const TextEditor = foundry.applications.ux.TextEditor.implementation;
+      const content = await TextEditor.enrichHTML(rawDescription, {
+        documents: true,
+        embeds: true,
+        links: true,
+        relativeTo: item,
+        rollData: item.getRollData?.() ?? this.actor?.getRollData?.() ?? {},
+        rolls: true,
+        secrets: Boolean(item.isOwner)
+      });
+      const typeKey = `TYPES.Item.${item.type}`;
+      const localizedType = game.i18n.localize(typeKey);
+      const typeLabel = localizedType === typeKey ? item.type : localizedType;
+
+      return await createModuleChatMessage({
+        speaker: ChatMessage.getSpeaker({ actor: this.actor }),
+        flavor: `[${typeLabel}] ${item.name}`,
+        content
+      });
+    } catch (exception) {
+      error(`Failed to publish Item ${itemId} to chat from the actor hotbar.`, exception);
+      ui.notifications.error(game.i18n.localize("AOV_SKJALDBORG.Warnings.ActionFailed"));
+      return null;
+    }
+  }
+
+  /**
+   * Temporarily disable a draggable row while a nested state toggle is pressed.
    *
    * Native dragstart targets the nearest draggable ancestor rather than
    * necessarily the nested button which initiated the pointer gesture. The
-   * temporary attribute change therefore prevents an XP click from becoming a
-   * row drag while leaving the rest of the row available for reordering and
-   * quick-access assignment.
+   * temporary attribute change therefore prevents XP and magic preparation
+   * clicks from becoming row drags while preserving row reordering elsewhere.
    *
    * @returns {void}
    */
   _activateXpToggleDragGuards() {
-    for (const toggle of this.element.querySelectorAll("[data-xp-toggle]")) {
+    for (const toggle of this.element.querySelectorAll("[data-xp-toggle], [data-magic-prepared-toggle]")) {
       toggle.addEventListener("pointerdown", () => {
         const source = toggle.closest('[draggable="true"]');
         if (!(source instanceof HTMLElement)) return;
@@ -1181,7 +1822,7 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
     const selector = "[data-quick-source][draggable=true], [data-drag-group][draggable=true], .skj-quick-slot[draggable=true]";
     for (const control of this.element.querySelectorAll(selector)) {
       control.addEventListener("dragstart", event => {
-        if (event.target instanceof Element && event.target.closest("[data-xp-toggle]")) {
+        if (event.target instanceof Element && event.target.closest("[data-xp-toggle], [data-magic-prepared-toggle]")) {
           event.preventDefault();
           event.stopPropagation();
           return;
@@ -1356,7 +1997,7 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
     const visibleCount = getQuickAccessCircleCount();
     const targetIndex = current.slice(0, visibleCount).findIndex(entry => !entry);
     if (targetIndex < 0) {
-      ui.notifications.warn(game.i18n.localize("AOV_SKJADLBORG.ActorHotbar.QuickAccess.Full"));
+      ui.notifications.warn(game.i18n.localize("AOV_SKJALDBORG.ActorHotbar.QuickAccess.Full"));
       return;
     }
     await this._assignQuickAccessPayload(payload, targetIndex, current);
@@ -1431,7 +2072,7 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
       await this.render(false);
     } catch (exception) {
       error("Failed to update actor-hotbar quick access.", exception);
-      ui.notifications.error(game.i18n.localize("AOV_SKJADLBORG.Warnings.ActionFailed"));
+      ui.notifications.error(game.i18n.localize("AOV_SKJALDBORG.Warnings.ActionFailed"));
     } finally {
       this._quickAccessUpdatePending = false;
     }
@@ -1497,7 +2138,7 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
       return result;
     } catch (exception) {
       error(`Failed to ${action} weapon from the actor hotbar.`, exception);
-      ui.notifications.error(game.i18n.localize("AOV_SKJADLBORG.Warnings.ActionFailed"));
+      ui.notifications.error(game.i18n.localize("AOV_SKJALDBORG.Warnings.ActionFailed"));
       return null;
     } finally {
       this._weaponActionPending = false;
@@ -1524,17 +2165,92 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
       return effect?.sheet?.render?.(true) ?? null;
     }
     if (kind === "intent") {
-      if (!this.combatant || !game.combat) return null;
-      if (event.shiftKey || ["wait", "delay"].includes(actionId)) {
-        return CombatHUD.showForCombatant(this.combatant, game.combat, { initialActionCategory: actionId });
+      const combat = game.combat ?? null;
+      let publicText = "";
+      if (actionId === ACTION_CATEGORIES.OTHER) {
+        const activeText = isSkjaldborgCombatActive(combat) && this.combatant
+          ? getCombatantState(this.combatant).intent?.publicText
+          : getActorPreparedIntent(this.actor)?.publicText;
+        const entered = await promptOtherIntentText(activeText ?? "");
+        if (entered === null) return null;
+        publicText = entered;
       }
-      const result = await commitIntentCategory(this.combatant, game.combat, actionId);
-      this.render(false);
+      const result = await commitIntentCategory(
+        this.actor,
+        this.combatant,
+        combat,
+        actionId,
+        { publicText }
+      );
+      await this.render(false);
       return result;
     }
     return null;
   }
 
+
+  /**
+   * Roll the weapon currently selected in the combat strip.
+   *
+   * @param {PointerEvent} event Interaction event.
+   * @returns {Promise<unknown|null>}
+   */
+  static async onRollSelectedWeapon(event) {
+    event.preventDefault();
+    const select = this.element?.querySelector?.("[data-readied-weapon-select]");
+    const weaponId = String(select?.value ?? "");
+    if (!weaponId) {
+      ui.notifications.warn(game.i18n.localize("AOV_SKJALDBORG.Warnings.SelectWeapon"));
+      return null;
+    }
+    return this._rollWeapon(weaponId, "combat", event);
+  }
+
+  /**
+   * Roll one weapon attack from the Equipment table.
+   *
+   * @param {PointerEvent} event Interaction event.
+   * @param {HTMLElement} target Action target.
+   * @returns {Promise<unknown|null>}
+   */
+  static async onRollWeaponAttack(event, target) {
+    event.preventDefault();
+    return this._rollWeapon(String(target.dataset.weaponId ?? ""), "combat", event);
+  }
+
+  /**
+   * Roll one weapon's damage through the AoV core damage workflow.
+   *
+   * @param {PointerEvent} event Interaction event.
+   * @param {HTMLElement} target Action target.
+   * @returns {Promise<unknown|null>}
+   */
+  static async onRollWeaponDamage(event, target) {
+    event.preventDefault();
+    return this._rollWeapon(String(target.dataset.weaponId ?? ""), "damage", event);
+  }
+
+  /**
+   * Execute an AoV weapon check with consistent failure reporting.
+   *
+   * @param {string} weaponId Owned weapon Item id.
+   * @param {"combat"|"damage"} property AoV check property.
+   * @param {Event} event Originating event.
+   * @returns {Promise<unknown|null>}
+   */
+  async _rollWeapon(weaponId, property, event) {
+    if (!this.actor || !weaponId) {
+      ui.notifications.warn(game.i18n.localize("AOV_SKJALDBORG.Warnings.ItemUnavailable"));
+      return null;
+    }
+    try {
+      return await AoVAdapter.rollActorWeapon(this.actor, weaponId, event, property);
+    } catch (exception) {
+      error(`Failed to roll ${property} for weapon ${weaponId}.`, exception);
+      ui.notifications.error(game.i18n.localize("AOV_SKJALDBORG.Warnings.ActionFailed"));
+      return null;
+    }
+  }
 
   /**
    * Toggle the selected carried weapon between draw and sheathe.
@@ -1547,7 +2263,7 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
     const select = this.element?.querySelector?.("[data-readied-weapon-select]");
     const weaponId = String(select?.value ?? "");
     if (!weaponId) {
-      ui.notifications.warn(game.i18n.localize("AOV_SKJADLBORG.Warnings.SelectCarriedWeapon"));
+      ui.notifications.warn(game.i18n.localize("AOV_SKJALDBORG.Warnings.SelectCarriedWeapon"));
       return null;
     }
     const currentWeaponId = String(getReadiedWeaponId(this.actor) ?? "");
@@ -1571,7 +2287,7 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
       return result;
     } catch (exception) {
       error("Failed to drop readied weapon from the actor hotbar.", exception);
-      ui.notifications.error(game.i18n.localize("AOV_SKJADLBORG.Warnings.ActionFailed"));
+      ui.notifications.error(game.i18n.localize("AOV_SKJALDBORG.Warnings.ActionFailed"));
       return null;
     } finally {
       this._weaponActionPending = false;
@@ -1599,6 +2315,36 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
       return result;
     } finally {
       this._xpUpdatePending = false;
+    }
+  }
+
+  /**
+   * Toggle a Rune Script or Seiðr Spell preparation state and immediately
+   * refresh the Magic Point maximum shown by the hotbar.
+   *
+   * @param {PointerEvent} event Interaction event.
+   * @param {HTMLElement} target Preparation control.
+   * @returns {Promise<unknown|null>}
+   */
+  static async onToggleMagicPrepared(event, target) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    const itemId = String(target.dataset.itemId ?? "");
+    if (!this.actor || !itemId || this._magicPreparationUpdatesPending.has(itemId)) return null;
+
+    this._magicPreparationUpdatesPending.add(itemId);
+    target.disabled = true;
+    target.setAttribute("aria-busy", "true");
+    try {
+      const result = await AoVAdapter.toggleActorMagicPrepared(this.actor, itemId);
+      await this.render(false);
+      return result;
+    } catch (exception) {
+      error(`Failed to toggle magic preparation for Item ${itemId}.`, exception);
+      ui.notifications.error(game.i18n.localize("AOV_SKJALDBORG.Warnings.MagicPreparationFailed"));
+      return null;
+    } finally {
+      this._magicPreparationUpdatesPending.delete(itemId);
     }
   }
 
@@ -1633,6 +2379,82 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
   }
 
   /**
+   * Create an unassigned character Wound Item or add native `npcDmg` to a
+   * selected NPC Hit Location.
+   *
+   * @param {PointerEvent} event Interaction event.
+   * @returns {Promise<Item|Document[]|null>}
+   */
+  static async onCreateWound(event) {
+    event.preventDefault();
+    try {
+      if (this.actor?.type !== "npc") return await AoVAdapter.createActorWound(this.actor);
+
+      const wellbeing = AoVAdapter.prepareActorWellbeing(this.actor);
+      const locations = wellbeing.locationList.filter(location => location.id);
+      if (!locations.length) {
+        ui.notifications.warn(game.i18n.localize("AOV_SKJALDBORG.ActorHotbar.NoHitLocations"));
+        return null;
+      }
+
+      const content = await foundry.applications.handlebars.renderTemplate(
+        "modules/aov-skjaldborg/templates/npc-wound-dialog.hbs",
+        { locations }
+      );
+      const result = await foundry.applications.api.DialogV2.input({
+        classes: ["aov", "aov-skjaldborg", "skj-npc-wound-dialog-window"],
+        window: { title: game.i18n.localize("AOV_SKJALDBORG.ActorHotbar.AddNpcWound") },
+        content,
+        rejectClose: false,
+        ok: { label: game.i18n.localize("AOV.confirm") }
+      });
+      if (!result) return null;
+      return await AoVAdapter.addActorNpcDamage(this.actor, String(result.locationId ?? ""), result.damage);
+    } catch (exception) {
+      error("Failed to create a wound from the actor hotbar.", exception);
+      ui.notifications.error(game.i18n.localize("AOV_SKJALDBORG.Warnings.WellbeingUpdateFailed"));
+      return null;
+    }
+  }
+
+  /**
+   * Toggle whether a character wound has been treated.
+   *
+   * @param {PointerEvent} event Interaction event.
+   * @param {HTMLElement} target Action target.
+   * @returns {Promise<Document[]|null>}
+   */
+  static async onToggleWoundTreated(event, target) {
+    event.preventDefault();
+    try {
+      return await AoVAdapter.toggleActorWoundTreated(this.actor, target.dataset.woundId);
+    } catch (exception) {
+      error("Failed to toggle wound treatment from the actor hotbar.", exception);
+      ui.notifications.error(game.i18n.localize("AOV_SKJALDBORG.Warnings.WellbeingUpdateFailed"));
+      return null;
+    }
+  }
+
+  /**
+   * Delete a wound on double click, matching the Age of Vikings actor sheet.
+   *
+   * @param {PointerEvent} event Interaction event.
+   * @param {HTMLElement} target Action target.
+   * @returns {Promise<Document[]|null>}
+   */
+  static async onDeleteWound(event, target) {
+    event.preventDefault();
+    if (event.detail !== 2) return null;
+    try {
+      return await AoVAdapter.deleteActorWound(this.actor, target.dataset.woundId);
+    } catch (exception) {
+      error("Failed to delete a wound from the actor hotbar.", exception);
+      ui.notifications.error(game.i18n.localize("AOV_SKJALDBORG.Warnings.WellbeingUpdateFailed"));
+      return null;
+    }
+  }
+
+  /**
    * Open a Farm Actor or embedded Thrall Item resolved by UUID.
    *
    * @param {PointerEvent} event Interaction event.
@@ -1648,7 +2470,7 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
       return document?.sheet?.render?.(true) ?? null;
     } catch (exception) {
       error(`Failed to open hotbar document ${uuid}.`, exception);
-      ui.notifications.error(game.i18n.localize("AOV_SKJADLBORG.Warnings.ActionFailed"));
+      ui.notifications.error(game.i18n.localize("AOV_SKJALDBORG.Warnings.ActionFailed"));
       return null;
     }
   }
@@ -1682,11 +2504,99 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
   /** @returns {Promise<CombatHUD|null>} */
   static onOpenCombatHud() {
     if (!this.combatant || !game.combat) {
-      ui.notifications.warn(game.i18n.localize("AOV_SKJADLBORG.Warnings.NoCombatant"));
+      ui.notifications.warn(game.i18n.localize("AOV_SKJALDBORG.Warnings.NoCombatant"));
       return null;
     }
     return CombatHUD.showForCombatant(this.combatant, game.combat);
   }
+}
+
+/**
+ * Test whether a TokenDocument represents the actor shown by the hotbar.
+ *
+ * @param {TokenDocument|null|undefined} token Token document.
+ * @returns {boolean}
+ */
+function tokenBelongsToCurrentHotbarActor(token) {
+  const currentActor = ActorHotbar.current?.actor;
+  const currentActorId = currentActor?.id ?? currentHotbarActorId();
+  if (!currentActorId) return false;
+  const tokenActor = token?.actor ?? null;
+  const baseActor = token?.baseActor ?? tokenActor?.baseActor ?? null;
+  return tokenActor?.id === currentActorId
+    || baseActor?.id === currentActorId
+    || token?.actorId === currentActorId
+    || currentActor?.token?.id === token?.id;
+}
+
+/**
+ * Resolve the actor id currently represented, or about to be represented, by
+ * the actor hotbar.
+ *
+ * @returns {string|null}
+ */
+function currentHotbarActorId() {
+  return ActorHotbar.current?.actor?.id ?? resolveHotbarActor()?.id ?? null;
+}
+
+/**
+ * Resolve the owning Actor id for Actor, Item, ActiveEffect, and nested
+ * embedded-document hook payloads.
+ *
+ * @param {Document|null|undefined} document Candidate Foundry document.
+ * @returns {string|null}
+ */
+function documentActorId(document) {
+  if (!document) return null;
+  if (document.documentName === "Actor") return document.id ?? null;
+  if (document.actor?.id) return document.actor.id;
+  const parent = document.parent ?? null;
+  if (parent?.documentName === "Actor") return parent.id ?? null;
+  if (parent?.actor?.id) return parent.actor.id;
+  if (parent?.parent?.documentName === "Actor") return parent.parent.id ?? null;
+  return null;
+}
+
+/**
+ * Test whether a document hook payload affects the selected actor.
+ *
+ * @param {Document|null|undefined} document Candidate Foundry document.
+ * @returns {boolean}
+ */
+function documentBelongsToCurrentHotbarActor(document) {
+  const currentActorId = currentHotbarActorId();
+  if (!currentActorId) return false;
+  return documentActorId(document) === currentActorId;
+}
+
+/**
+ * Test whether a Combat document may affect visible hotbar data.
+ *
+ * @param {Combat|null|undefined} combat Candidate Combat document.
+ * @returns {boolean}
+ */
+function combatAffectsCurrentHotbar(combat) {
+  const current = ActorHotbar.current;
+  const currentActorId = currentHotbarActorId();
+  if (!currentActorId) return false;
+  const combatId = combat?.id ?? null;
+  const currentCombatId = current?.combatant?.parent?.id ?? game.combat?.id ?? null;
+  return !combatId || !currentCombatId || combatId === currentCombatId;
+}
+
+/**
+ * Test whether a Combatant document may affect visible hotbar data.
+ *
+ * @param {Combatant|null|undefined} combatant Candidate Combatant document.
+ * @returns {boolean}
+ */
+function combatantAffectsCurrentHotbar(combatant) {
+  const current = ActorHotbar.current;
+  const currentActorId = currentHotbarActorId();
+  if (!currentActorId || !combatant) return false;
+  return combatant.id === current?.combatant?.id
+    || combatant.actor?.id === currentActorId
+    || combatant.token?.actor?.id === currentActorId;
 }
 
 /**
@@ -1702,33 +2612,53 @@ export function registerActorHotbarHooks() {
   Hooks.on("canvasReady", () => ActorHotbar.scheduleRender());
   Hooks.on("canvasTearDown", () => ActorHotbar.scheduleRender());
   Hooks.on("renderHotbar", () => ActorHotbar.scheduleRender());
+  Hooks.on("createToken", token => {
+    if (tokenBelongsToCurrentHotbarActor(token)) ActorHotbar.scheduleRender();
+  });
+  Hooks.on("deleteToken", token => {
+    if (tokenBelongsToCurrentHotbarActor(token)) ActorHotbar.scheduleRender();
+  });
+  Hooks.on("updateToken", (token, changes) => {
+    const changedKeys = Object.keys(changes ?? {});
+    const dispositionChanged = Object.prototype.hasOwnProperty.call(changes ?? {}, "disposition");
+    const actorChanged = ["actorId", "actorLink"].some(key => Object.prototype.hasOwnProperty.call(changes ?? {}, key));
+    const resourceBarsChanged = changedKeys.some(key => key === "bar1" || key === "bar2" || key.startsWith("bar1.") || key.startsWith("bar2."));
+    if ((dispositionChanged || actorChanged || resourceBarsChanged) && tokenBelongsToCurrentHotbarActor(token)) {
+      ActorHotbar.scheduleRender();
+    }
+  });
   Hooks.on("updateActor", actor => {
     const current = ActorHotbar.current;
     if (current?._xpUpdatePending && current.actor?.id === actor.id) return;
-    if (!current?.actor || current.actor.id === actor.id) ActorHotbar.scheduleRender();
+    if (documentBelongsToCurrentHotbarActor(actor)) ActorHotbar.scheduleRender();
   });
   Hooks.on("updateItem", item => {
     const current = ActorHotbar.current;
-    if (current?._xpUpdatePending && current.actor?.id === item.parent?.id) return;
-    if (!current?.actor || current.actor.id === item.parent?.id) ActorHotbar.scheduleRender();
+    const sameActor = documentBelongsToCurrentHotbarActor(item);
+    if (sameActor && (current?._xpUpdatePending || current?._magicPreparationUpdatesPending?.size > 0)) return;
+    if (sameActor) ActorHotbar.scheduleRender();
   });
   Hooks.on("createItem", item => {
-    if (!ActorHotbar.current?.actor || ActorHotbar.current.actor.id === item.parent?.id) ActorHotbar.scheduleRender();
+    if (documentBelongsToCurrentHotbarActor(item)) ActorHotbar.scheduleRender();
   });
   Hooks.on("deleteItem", item => {
-    if (!ActorHotbar.current?.actor || ActorHotbar.current.actor.id === item.parent?.id) ActorHotbar.scheduleRender();
+    if (documentBelongsToCurrentHotbarActor(item)) ActorHotbar.scheduleRender();
   });
   Hooks.on("createActiveEffect", effect => {
-    if (!ActorHotbar.current?.actor || ActorHotbar.current.actor.id === effect.parent?.id) ActorHotbar.scheduleRender();
+    if (documentBelongsToCurrentHotbarActor(effect)) ActorHotbar.scheduleRender();
   });
   Hooks.on("updateActiveEffect", effect => {
-    if (!ActorHotbar.current?.actor || ActorHotbar.current.actor.id === effect.parent?.id) ActorHotbar.scheduleRender();
+    if (documentBelongsToCurrentHotbarActor(effect)) ActorHotbar.scheduleRender();
   });
   Hooks.on("deleteActiveEffect", effect => {
-    if (!ActorHotbar.current?.actor || ActorHotbar.current.actor.id === effect.parent?.id) ActorHotbar.scheduleRender();
+    if (documentBelongsToCurrentHotbarActor(effect)) ActorHotbar.scheduleRender();
   });
-  Hooks.on("updateCombat", () => ActorHotbar.scheduleRender());
-  Hooks.on("updateCombatant", () => ActorHotbar.scheduleRender());
+  Hooks.on("updateCombat", combat => {
+    if (combatAffectsCurrentHotbar(combat)) ActorHotbar.scheduleRender();
+  });
+  Hooks.on("updateCombatant", combatant => {
+    if (combatantAffectsCurrentHotbar(combatant)) ActorHotbar.scheduleRender();
+  });
 
   window.addEventListener("resize", () => ActorHotbar.current?._clampCurrentPosition());
   ActorHotbar.scheduleRender();

@@ -1,6 +1,5 @@
-<article class="aov-skjadlborg-chat">
-  <h3>{{message}}</h3>
-  <p>{{localize "AOV_SKJADLBORG.RoundLabel" round=logicalRound phase=phase}}</p>
+<article class="aov-skjaldborg-chat">
+  <h3>{{reportTitle}}</h3>
 
   {{#if combatants.length}}
     <table class="skj-chat-dex-table">
@@ -12,10 +11,10 @@
       </colgroup>
       <thead>
         <tr>
-          <th>{{localize "AOV_SKJADLBORG.Chat.Combatant"}}</th>
-          <th>{{localize "AOV_SKJADLBORG.Chat.BaseDex"}}</th>
-          <th>{{localize "AOV_SKJADLBORG.Chat.DexChanges"}}</th>
-          <th>{{localize "AOV_SKJADLBORG.Chat.FinalDex"}}</th>
+          <th>{{localize "AOV_SKJALDBORG.Chat.Combatant"}}</th>
+          <th>{{localize "AOV_SKJALDBORG.Chat.BaseDex"}}</th>
+          <th>{{localize "AOV_SKJALDBORG.Chat.DexChanges"}}</th>
+          <th>{{localize "AOV_SKJALDBORG.Chat.FinalDex"}}</th>
         </tr>
       </thead>
       <tbody>
@@ -30,18 +29,6 @@
       </tbody>
     </table>
   {{else}}
-    <p class="skj-muted">{{localize "AOV_SKJADLBORG.Chat.NoCombatants"}}</p>
-  {{/if}}
-
-  {{#if groups.length}}
-    <p>{{localize "AOV_SKJADLBORG.Chat.SimultaneousGroups" count=groups.length}}</p>
-  {{/if}}
-  {{#if queue.length}}
-    <h4>{{localize "AOV_SKJADLBORG.Chat.ResolutionQueue"}}</h4>
-    <ol>
-      {{#each queue}}
-        <li>{{actorName}}: {{label}} ({{localize "AOV_SKJADLBORG.Labels.Dex"}} {{dex}}, {{localize "AOV_SKJADLBORG.Labels.Int"}} {{int}})</li>
-      {{/each}}
-    </ol>
+    <p class="skj-muted">{{localize "AOV_SKJALDBORG.Chat.NoCombatants"}}</p>
   {{/if}}
 </article>

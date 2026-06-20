@@ -374,10 +374,10 @@ export async function logMovementDebugExport(combat = game.combat) {
   console.groupEnd();
   try {
     await globalThis.navigator?.clipboard?.writeText?.(text);
-    globalThis.ui?.notifications?.info?.(game.i18n.localize("AOV_SKJADLBORG.Settings.MovementDebugMenu.ExportCopied"));
+    globalThis.ui?.notifications?.info?.(game.i18n.localize("AOV_SKJALDBORG.Settings.MovementDebugMenu.ExportCopied"));
   }
   catch (_err) {
-    globalThis.ui?.notifications?.info?.(game.i18n.localize("AOV_SKJADLBORG.Settings.MovementDebugMenu.ExportLogged"));
+    globalThis.ui?.notifications?.info?.(game.i18n.localize("AOV_SKJALDBORG.Settings.MovementDebugMenu.ExportLogged"));
   }
   return exported;
 }

@@ -20,6 +20,7 @@ import {
 } from "./movement-route.mjs";
 import { movementDebug, movementDebugWarn, newMovementDebugRunId } from "./movement-debugger.mjs";
 import { settleMovementWrites } from "./authoritative-write-queue.mjs";
+import { applyMovementDexResults } from "./resolution-queue.mjs";
 import { isMovementPlanningPhase, shouldExecuteMovementImmediately } from "./phase-structure.mjs";
 
 export { cleanMovementPoint, normalizeMovementRoute } from "./movement-route.mjs";
@@ -28,7 +29,7 @@ const activeRuns = new Map();
 const movementRunLocks = new Map();
 const activeEngagementPairs = new Map();
 const movementRulerDrafts = new Map();
-const MOVEMENT_RULER_CAPTURE_PATCH = Symbol.for("aov-skjadlborg.movement-ruler-capture");
+const MOVEMENT_RULER_CAPTURE_PATCH = Symbol.for("aov-skjaldborg.movement-ruler-capture");
 const DEFAULT_GRID_SIZE = 100;
 const DEFAULT_MOVEMENT_TICK_DELAY_MS = 250;
 const MAX_BLOCKED_TICKS = 8;
@@ -130,7 +131,7 @@ export function tokenSourceCenter(document) {
 /**
  * Resolve the occupied grid rectangle for a token top-left source point.
  *
- * The v13 compatibility movement engine uses occupied grid footprints for RAW
+ * The v14 movement engine uses occupied grid footprints for RAW
  * engagement and collision checks instead of center-to-center ruler distance.
  *
  * @param {TokenDocument|object|null} document Token document.
@@ -187,11 +188,10 @@ function gridRectsOverlap(first, second) {
 /**
  * Expand a stored movement route into stoppable grid-step checkpoints.
  *
- * Foundry v13 can only stop an active TokenDocument movement at checkpoints.
- * The public complete-path helper supplies the intermediate path positions; the
- * module marks each positional step as a checkpoint so engagement can halt at
- * the first applicable grid unit. The deterministic interpolation fallback is
- * retained only as a defensive guard for incomplete document test doubles.
+ * Foundry v14 movement can stop or pause only at checkpoint waypoints. The
+ * public complete-path helper supplies intermediate path positions; the module
+ * marks each positional step as a checkpoint so engagement can halt at the
+ * first applicable grid unit.
  *
  * @param {TokenDocument|object|null} document Token document.
  * @param {unknown[]} storedWaypoints Stored top-left movement waypoints.
@@ -436,7 +436,7 @@ export function movementRouteFromRulerData(rulerData = {}, userId = game.user?.i
 }
 
 /**
- * Read the authoritative user-authored waypoint list from a Foundry v13
+ * Read the authoritative user-authored waypoint list from a Foundry v14
  * preMoveToken operation.
  *
  * During a drag movement, TokenMovementData.pending contains only the portion
@@ -554,7 +554,7 @@ function annotateMovementPlan(plan, metadata) {
  * Read the stored module route from a combatant movement flag.
  *
  * `movement.route` is canonical. `movement.waypoints` remains a compatibility
- * alias for movement plans written by earlier v13 test builds.
+ * alias for movement plans written by earlier builds.
  *
  * @param {object|null} movement Combatant movement state.
  * @returns {object[]}
@@ -824,7 +824,7 @@ function installMovementRulerCapture(requestGm) {
     value: true
   });
 
-  prototype.refresh = function skjadlborgRefreshMovementRuler(rulerData) {
+  prototype.refresh = function skjaldborgRefreshMovementRuler(rulerData) {
     const result = originalRefresh.call(this, rulerData);
     try {
       bankRulerMovementDraft(this.token?.document ?? this.token, rulerData, requestGm);
@@ -839,7 +839,7 @@ function installMovementRulerCapture(requestGm) {
   };
 
   if (typeof originalClear === "function") {
-    prototype.clear = function skjadlborgClearMovementRuler(...args) {
+    prototype.clear = function skjaldborgClearMovementRuler(...args) {
       const document = this.token?.document ?? this.token;
       const key = movementRulerDraftKey(document);
       const draft = key ? movementRulerDrafts.get(key) : null;
@@ -860,7 +860,7 @@ function installMovementRulerCapture(requestGm) {
 }
 
 /**
- * Normalize a Foundry v13 Token movement operation into a storable module plan.
+ * Normalize a Foundry v14 Token movement operation into a storable module plan.
  *
  * The movement hook supplies movement data and operation options separately.
  * Preserve both because ctrl-authored waypoints may be exposed by either
@@ -1163,7 +1163,7 @@ export function movementCaptureDecision(document, operation = {}, combat = game.
   const actionCategory = combatantState.intent?.actionCategory;
   if (
     combatantState.engagement?.engaged
-    && ![ACTION_CATEGORIES.RETREAT, ACTION_CATEGORIES.FLEE].includes(actionCategory)
+    && ![ACTION_CATEGORIES.RETREAT, "flee"].includes(actionCategory)
   ) {
     return { capture: true, combat, combatant, reason: "engaged-blocked" };
   }
@@ -1297,7 +1297,7 @@ function activeMovementContext(combat, combatant) {
 }
 
 /**
- * Read the v13 compatibility checkpoint pacing delay.
+ * Read the checkpoint pacing delay.
  *
  * @returns {number}
  */
@@ -1531,7 +1531,7 @@ async function selectMovementTickOperations(combat, contexts) {
         remaining: context.waypoints.length - context.index
       }), { runId: run?.runId, tick: run?.tick, combatId: combat?.id, combatantId: context.combatant?.id });
       await stopMovementContext(context, "blocked");
-      await showScrollingText(context.document, game.i18n.localize("AOV_SKJADLBORG.MovementAutomation.Blocked"));
+      await showScrollingText(context.document, game.i18n.localize("AOV_SKJALDBORG.MovementAutomation.Blocked"));
     }
   }
 
@@ -1641,7 +1641,7 @@ async function engagePair(combat, first, second) {
       engagement
     }), { runId: run?.runId, tick: run?.tick, combatId: combat?.id, combatantId: combatant?.id, level: MOVEMENT_DEBUG_LEVELS.VERBOSE });
     await syncEngagedStatusEffect(combatant, engagement, combat);
-    await showScrollingText(document, game.i18n.localize("AOV_SKJADLBORG.MovementAutomation.Engaged"));
+    await showScrollingText(document, game.i18n.localize("AOV_SKJALDBORG.MovementAutomation.Engaged"));
   }));
 
   ui.combat?.render?.();
@@ -1769,6 +1769,7 @@ async function prepareCombatantMovement(combat, combatant) {
       executionWaypoints
     }), { runId: run?.runId, combatId: combat?.id, combatantId: combatant?.id });
     await markMovementStatus(combatant, MOVEMENT_PLAN_STATUS.FAILED, {
+      distance: 0,
       completedAt: Date.now(),
       stoppedReason: "unavailable"
     });
@@ -1974,12 +1975,101 @@ async function submitMovementBatch(combat, context, waypoints) {
       return { context, waypoints, moved: false };
     }
     await markMovementStatus(combatant, MOVEMENT_PLAN_STATUS.FAILED, {
+      distance: contextMovementDistance(context)
+        ?? actualMovementDistance(document, latest.movement),
       completedAt: Date.now(),
       stoppedReason: "exception"
     });
     context.status = MOVEMENT_PLAN_STATUS.FAILED;
-    ui.notifications.warn(game.i18n.localize("AOV_SKJADLBORG.MovementAutomation.MoveFailed"));
+    ui.notifications.warn(game.i18n.localize("AOV_SKJALDBORG.MovementAutomation.MoveFailed"));
     return { context, waypoints, moved: false };
+  }
+}
+
+/**
+ * Return the Scene document which can batch the provided movement operations.
+ *
+ * @param {Combat} combat Active combat.
+ * @param {{context: object, waypoints: object[]}[]} operations Movement operations.
+ * @returns {Scene|null}
+ */
+function sceneForMovementBatch(combat, operations) {
+  const scene = combat?.scene ?? canvas.scene ?? null;
+  if (typeof scene?.moveTokens !== "function") return null;
+  if (!operations.length) return null;
+  return operations.every(({ context }) => {
+    const documentScene = context?.document?.parent ?? null;
+    return !documentScene || !scene?.id || documentScene.id === scene.id;
+  }) ? scene : null;
+}
+
+/**
+ * Submit one simultaneous v14 Scene#moveTokens operation and normalize results
+ * to the same shape as individual TokenDocument#move calls.
+ *
+ * @param {Combat} combat Active combat.
+ * @param {{context: object, waypoints: object[]}[]} operations Movement operations.
+ * @returns {Promise<{context: object, waypoints: object[], moved: boolean}[]>}
+ */
+async function submitSceneMovementBatch(combat, operations) {
+  const scene = sceneForMovementBatch(combat, operations);
+  if (!scene) return Promise.all(operations.map(({ context, waypoints }) => submitMovementBatch(combat, context, waypoints)));
+  const run = activeRuns.get(combat?.id);
+  const instructions = {};
+  for (const { context, waypoints } of operations) {
+    const tokenId = context?.document?.id ?? context?.document?._id;
+    if (!tokenId) continue;
+    instructions[tokenId] = {
+      waypoints,
+      showRuler: false
+    };
+  }
+  if (!Object.keys(instructions).length) return [];
+
+  try {
+    movementDebug(MOVEMENT_DEBUG_CATEGORIES.SCHEDULER, "submit-scene-move-tokens", () => ({
+      operationCount: operations.length,
+      tokenIds: Object.keys(instructions),
+      instructions
+    }), { runId: run?.runId, tick: run?.tick, combatId: combat?.id, level: MOVEMENT_DEBUG_LEVELS.TRACE });
+    const results = await scene.moveTokens(instructions, {
+      [MODULE_ID]: {
+        movementExecution: true,
+        checkpointExecution: true,
+        sceneBatchExecution: true,
+        checkpointCount: operations.length
+      },
+      showRuler: false
+    });
+    return operations.map(({ context, waypoints }) => {
+      const tokenId = context?.document?.id ?? context?.document?._id;
+      const hasResult = !!tokenId && Object.prototype.hasOwnProperty.call(results ?? {}, tokenId);
+      const moved = hasResult ? results[tokenId] !== false : false;
+      if (!hasResult) {
+        movementDebugWarn(MOVEMENT_DEBUG_CATEGORIES.SCHEDULER, "scene-move-token-missing-result", () => ({
+          combatantId: context.combatant?.id,
+          tokenId,
+          resultKeys: Object.keys(results ?? {}),
+          waypoints
+        }), { runId: run?.runId, tick: run?.tick, combatId: combat?.id, combatantId: context.combatant?.id, tokenId });
+      }
+      movementDebug(MOVEMENT_DEBUG_CATEGORIES.SCHEDULER, "scene-move-token-result", () => ({
+        combatantId: context.combatant?.id,
+        tokenId,
+        hasResult,
+        moved,
+        waypoints
+      }), { runId: run?.runId, tick: run?.tick, combatId: combat?.id, combatantId: context.combatant?.id, tokenId, level: MOVEMENT_DEBUG_LEVELS.VERBOSE });
+      return { context, waypoints, moved };
+    });
+  }
+  catch (err) {
+    warn(err);
+    movementDebugWarn(MOVEMENT_DEBUG_CATEGORIES.SCHEDULER, "scene-move-tokens-exception", () => ({
+      error: String(err?.message ?? err),
+      tokenIds: Object.keys(instructions)
+    }), { runId: run?.runId, tick: run?.tick, combatId: combat?.id });
+    return Promise.all(operations.map(({ context, waypoints }) => submitMovementBatch(combat, context, waypoints)));
   }
 }
 
@@ -2012,7 +2102,8 @@ async function executeMovementTick(combat, contexts) {
     return;
   }
 
-  const results = await Promise.allSettled(operations.map(({ context, waypoints }) => submitMovementBatch(combat, context, waypoints)));
+  const results = (await submitSceneMovementBatch(combat, operations))
+    .map(value => ({ status: "fulfilled", value }));
   await Promise.all(operations.map(({ context }) => waitForTokenAnimation(context.document)));
 
   for (const result of results) {
@@ -2025,6 +2116,8 @@ async function executeMovementTick(combat, contexts) {
     if (!moved) {
       if (context.status === MOVEMENT_PLAN_STATUS.STOPPED) continue;
       await markMovementStatus(combatant, MOVEMENT_PLAN_STATUS.FAILED, {
+        distance: contextMovementDistance(context)
+          ?? actualMovementDistance(context.document, getCombatantState(combatant).movement),
         completedAt: Date.now(),
         stoppedReason: "move-returned-false"
       });
@@ -2120,47 +2213,23 @@ export function isMovementRunActive(combat) {
 }
 
 /**
- * Move the tracker cursor to the last combatant after simultaneous movement has
- * completed. This is a module-owned direct update rather than a sequence of
- * artificial turns, so no combatant action workflows are executed en route.
- *
- * @param {Combat|null} combat Active combat.
- * @returns {Promise<void>}
- */
-export async function moveCombatTurnToLast(combat = game.combat) {
-  const turns = Array.from(combat?.turns ?? []);
-  if (!combat?.started || !turns.length) return;
-  const lastTurn = turns.length - 1;
-  if (Number(combat.turn) === lastTurn) return;
-  await combat.update({ turn: lastTurn }, {
-    direction: 0,
-    turnEvents: false,
-    combatTurn: combat.turn,
-    [MODULE_ID]: {
-      internal: true,
-      reason: "movement-complete-last-turn"
-    }
-  });
-}
-
-/**
  * Start deterministic Movement-phase checkpoint execution for planned combatants.
  *
  * @param {Combat|null} combat Active combat.
- * @param {{positionAtLast?: boolean}} [options={}] Completion navigation options.
+ * @param {object} [options={}] Reserved for compatibility with older callers.
  * @returns {Promise<object|null>}
  */
-export async function startMovementPhase(combat = game.combat, { positionAtLast = true } = {}) {
+export async function startMovementPhase(combat = game.combat, options = {}) {
   if (!game.user?.isGM || !combat) return null;
   const key = combat.uuid ?? combat.id;
   const pending = movementRunLocks.get(key);
   if (pending) {
     await pending;
-    return startMovementPhase(combat, { positionAtLast });
+    return startMovementPhase(combat, options);
   }
 
   let operation;
-  operation = startMovementPhaseUnlocked(combat, { positionAtLast }).finally(() => {
+  operation = startMovementPhaseUnlocked(combat).finally(() => {
     if (movementRunLocks.get(key) === operation) movementRunLocks.delete(key);
   });
   movementRunLocks.set(key, operation);
@@ -2173,11 +2242,10 @@ export async function startMovementPhase(combat = game.combat, { positionAtLast 
  * PLANNED state by the active-run guard.
  *
  * @param {Combat} combat Active combat.
- * @param {{positionAtLast: boolean}} options Completion navigation options.
  * @returns {Promise<object|null>}
  * @protected
  */
-async function startMovementPhaseUnlocked(combat, { positionAtLast }) {
+async function startMovementPhaseUnlocked(combat) {
   if (isMovementRunActive(combat)) return getCombatState(combat).movementRun;
   await settleMovementWrites(combat.id, { quietMs: 100, timeoutMs: 1000 });
   const runId = newMovementDebugRunId(combat);
@@ -2204,7 +2272,10 @@ async function startMovementPhaseUnlocked(combat, { positionAtLast }) {
         pendingCombatantIds: []
       }
     });
-    if (positionAtLast) await moveCombatTurnToLast(combat);
+    // Even an empty Movement phase is a real DEX-stage boundary. Re-project
+    // Planning-only adjustments before Resolution without charging any planned
+    // route distance.
+    await applyMovementDexResults(combat);
     return getCombatState(combat).movementRun;
   }
 
@@ -2241,8 +2312,8 @@ async function startMovementPhaseUnlocked(combat, { positionAtLast }) {
     }
     await checkMovementEngagements(combat);
 
-    // v13 compatibility scheduler: submit one checkpoint per mover in each
-    // tick, then resolve engagement before any later checkpoint is submitted.
+    // v14 scheduler: submit one checkpoint wave through Scene#moveTokens when
+    // available, then resolve engagement before any later checkpoint is sent.
     while (contexts.some(context => context.status === MOVEMENT_PLAN_STATUS.EXECUTING)) {
       await executeMovementTick(combat, contexts);
     }
@@ -2260,7 +2331,11 @@ async function startMovementPhaseUnlocked(combat, { positionAtLast }) {
       pendingCombatantIds: []
     }
   });
-  if (positionAtLast) await moveCombatTurnToLast(combat);
+
+  // Movement penalties are applied once, after every participant has either
+  // completed, stopped, or failed. At this point each stored distance is the
+  // authoritative travelled distance rather than the route planned earlier.
+  await applyMovementDexResults(combat);
   ui.combat?.render?.();
   debug("movement run complete", {
     combatId: combat.id,
@@ -2294,7 +2369,7 @@ export function registerMovementHooks(requestGm) {
     debugCaptureDecision(document, movement, operation, decision);
     if (!decision.capture) return undefined;
     if (decision.reason === "engaged-blocked") {
-      ui.notifications.warn(game.i18n.localize("AOV_SKJADLBORG.MovementAutomation.EngagedCannotMove"));
+      ui.notifications.warn(game.i18n.localize("AOV_SKJALDBORG.MovementAutomation.EngagedCannotMove"));
       return false;
     }
 
@@ -2314,7 +2389,7 @@ export function registerMovementHooks(requestGm) {
     const routeId = String(movement?.id ?? rulerDraft?.routeId ?? `movement:${document?.id ?? document?._id}:${Date.now()}`);
     const plan = annotateMovementPlan({
       ...captured,
-      // The route tail is authoritative. In Foundry v13 movement.destination
+      // The route tail is authoritative. In Foundry v14 movement.destination
       // can refer to the current checkpoint rather than the final authored
       // waypoint when passed and pending sections split the measured path.
       destination: cleanMovementPoint(mergedRoute.at(-1)) ?? cleanMovementPoint(captured.destination),
@@ -2397,16 +2472,16 @@ export function registerMovementHooks(requestGm) {
     }).then(result => {
       if (result === null) return;
       if (key) movementRulerDrafts.delete(key);
-      ui.notifications.info(game.i18n.localize("AOV_SKJADLBORG.MovementAutomation.PlanCaptured"));
+      ui.notifications.info(game.i18n.localize("AOV_SKJALDBORG.MovementAutomation.PlanCaptured"));
       ui.combat?.render?.();
     }).catch(exception => {
       warn(exception);
-      ui.notifications.error(exception?.message ?? game.i18n.localize("AOV_SKJADLBORG.MovementAutomation.MoveFailed"));
+      ui.notifications.error(exception?.message ?? game.i18n.localize("AOV_SKJALDBORG.MovementAutomation.MoveFailed"));
     });
     return false;
   });
 
-  // Foundry v13 documents recordToken as a single-argument notification. It is
+  // Foundry v14 documents recordToken as a single-argument notification. It is
   // diagnostic only here; treating its nonexistent second and third arguments
   // as movement data previously created competing, incomplete plan writes.
   Hooks.on("recordToken", document => {

@@ -1,5 +1,13 @@
 import { AoVAdapter } from "../adapter/aov-adapter.mjs";
-import { ACTION_CATEGORIES, DEX_MODIFIERS, MODULE_ID, MOVEMENT_DEBUG_CATEGORIES, MOVEMENT_DEBUG_LEVELS, ROUNDING_POLICIES } from "../constants.mjs";
+import {
+  ACTION_CATEGORIES,
+  DEX_MODIFIERS,
+  MODULE_ID,
+  MOVEMENT_DEBUG_CATEGORIES,
+  MOVEMENT_DEBUG_LEVELS,
+  MOVEMENT_PLAN_STATUS,
+  ROUNDING_POLICIES
+} from "../constants.mjs";
 import { movementDebug } from "./movement-debugger.mjs";
 
 /**
@@ -60,9 +68,14 @@ function addModifier(modifiers, label, value) {
  *
  * @param {Combatant} combatant Foundry Combatant document.
  * @param {import("../types.mjs").SkjaldborgCombatantState} combatantState Module combatant state.
+ * @param {{includePlanningAdjustment?: boolean, includeMovementPenalty?: boolean}} [options={}] Calculation options.
  * @returns {import("../types.mjs").SkjaldborgDexLedger}
  */
-export function computeDexLedger(combatant, combatantState) {
+export function computeDexLedger(
+  combatant,
+  combatantState,
+  { includePlanningAdjustment = true, includeMovementPenalty = true } = {}
+) {
   const actor = combatant.actor;
   const baseDex = AoVAdapter.getDex(actor);
   const int = AoVAdapter.getInt(actor);
@@ -72,14 +85,37 @@ export function computeDexLedger(combatant, combatantState) {
   const modifiers = [];
 
   const intentModifiers = intent.modifiers ?? {};
-  addModifier(modifiers, "AOV_SKJADLBORG.Dex.DrawWeapon", intentModifiers.drawWeapon ? DEX_MODIFIERS.DRAW_WEAPON : 0);
-  addModifier(modifiers, "AOV_SKJADLBORG.Dex.SheatheWeapon", intentModifiers.sheatheWeapon ? DEX_MODIFIERS.SHEATHE_WEAPON : 0);
-  addModifier(modifiers, "AOV_SKJADLBORG.Dex.Surprised", intentModifiers.surprised ? DEX_MODIFIERS.SURPRISED : 0);
+  let dynamicPlanningEnabled = false;
+  try {
+    dynamicPlanningEnabled = game.settings.get(MODULE_ID, "dynamicPlanningInitiative") === true;
+  }
+  catch (_exception) {
+    dynamicPlanningEnabled = false;
+  }
+  const planningAdjustment = includePlanningAdjustment && dynamicPlanningEnabled
+    ? numberOr(combatantState.planningInitiative?.externalAdjustment, 0)
+    : 0;
+  addModifier(modifiers, "AOV_SKJALDBORG.Dex.PlanningInitiativeAdjustment", planningAdjustment);
+  addModifier(modifiers, "AOV_SKJALDBORG.Dex.DrawWeapon", intentModifiers.drawWeapon ? DEX_MODIFIERS.DRAW_WEAPON : 0);
+  addModifier(modifiers, "AOV_SKJALDBORG.Dex.SheatheWeapon", intentModifiers.sheatheWeapon ? DEX_MODIFIERS.SHEATHE_WEAPON : 0);
+  addModifier(modifiers, "AOV_SKJALDBORG.Dex.Surprised", intentModifiers.surprised ? DEX_MODIFIERS.SURPRISED : 0);
 
-  const distance = numberOr(movement.distance, 0);
+  // A stored PLANNED route describes intended travel, not distance already
+  // travelled. Movement DEX is therefore eligible only after the authoritative
+  // movement run has placed the plan in a terminal state and replaced the
+  // stored distance with the measured travelled distance. This prevents live
+  // Planning initiative from charging a route before the token has moved.
+  const movementTerminal = [
+    MOVEMENT_PLAN_STATUS.COMPLETED,
+    MOVEMENT_PLAN_STATUS.STOPPED,
+    MOVEMENT_PLAN_STATUS.FAILED
+  ].includes(movement.planStatus);
+  const movementPenaltyEligible = includeMovementPenalty && movementTerminal;
+  const recordedDistance = numberOr(movement.distance, 0);
+  const distance = movementPenaltyEligible ? recordedDistance : 0;
   const movementUnits = distance > 0 ? roundMovementUnits(distance / movementUnitDistance()) : 0;
   const movementPenalty = movementUnits > 0 && !intentModifiers.fullMove ? -movementUnits : 0;
-  addModifier(modifiers, "AOV_SKJADLBORG.Dex.Movement", movementPenalty);
+  addModifier(modifiers, "AOV_SKJALDBORG.Dex.Movement", movementPenalty);
 
   const fixedRank = numberOr(intent.fixedRank, null);
   const fixedRankValue = Number.isFinite(fixedRank) && fixedRank > 0 ? fixedRank : null;
@@ -104,23 +140,27 @@ export function computeDexLedger(combatant, combatantState) {
     distance,
     movementUnits,
     movementPenalty,
+    planningAdjustment,
     modifiers,
     modifierTotal,
     fixedRank: fixedRankValue,
     finalDex,
     projectedInitiative,
     preventedThisRound,
-    carryoverReason: preventedThisRound ? "AOV_SKJADLBORG.Dex.CarryoverDexZero" : "",
+    carryoverReason: preventedThisRound ? "AOV_SKJALDBORG.Dex.CarryoverDexZero" : "",
     actionCategory: intent.actionCategory ?? ACTION_CATEGORIES.ATTACK
   };
   movementDebug(MOVEMENT_DEBUG_CATEGORIES.DEX, "compute-dex-ledger", () => ({
     combatantId: combatant.id,
     actorId: actor?.id ?? null,
     movement: {
+      recordedDistance,
       distance,
       movementUnitDistance: movementUnitDistance(),
       movementUnits,
       movementPenalty,
+      movementPenaltyEligible,
+      includeMovementPenalty,
       planStatus: movement.planStatus,
       stoppedReason: movement.stoppedReason,
       waypointCount: movement.waypoints?.length ?? 0
@@ -155,7 +195,7 @@ export function buildScheduledActions(combatant, combatantState, ledger) {
       int: ledger.int,
       status: "carryover",
       carryover: true,
-      label: game.i18n.localize("AOV_SKJADLBORG.Actions.Carryover")
+      label: game.i18n.localize("AOV_SKJALDBORG.Actions.Carryover")
     }];
   }
 
@@ -181,8 +221,8 @@ export function buildScheduledActions(combatant, combatantState, ledger) {
       publicText: intent.publicText ?? "",
       privateText: intent.privateText ?? "",
       label: count > 1
-        ? game.i18n.format("AOV_SKJADLBORG.Actions.SplitLabel", { index: index + 1, count })
-        : game.i18n.localize(`AOV_SKJADLBORG.ActionCategories.${intent.actionCategory ?? ACTION_CATEGORIES.ATTACK}`)
+        ? game.i18n.format("AOV_SKJALDBORG.Actions.SplitLabel", { index: index + 1, count })
+        : game.i18n.localize(`AOV_SKJALDBORG.ActionCategories.${intent.actionCategory ?? ACTION_CATEGORIES.ATTACK}`)
     });
   }
   return actions;

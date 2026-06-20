@@ -1,4 +1,5 @@
 import { MODULE_ID, ROUNDING_POLICIES } from "../constants.mjs";
+import { normalizeNumberSetting } from "../utils/settings.mjs";
 
 const { ApplicationV2, HandlebarsApplicationMixin } = foundry.applications.api;
 
@@ -12,8 +13,8 @@ const LIMITS = Object.freeze({
  */
 export class CombatTrackingSettings extends HandlebarsApplicationMixin(ApplicationV2) {
   static DEFAULT_OPTIONS = {
-    classes: ["aov-skjadlborg", "skj-combat-tracking-settings"],
-    id: "aov-skjadlborg-combat-tracking-settings",
+    classes: ["aov-skjaldborg", "skj-combat-tracking-settings"],
+    id: "aov-skjaldborg-combat-tracking-settings",
     form: {
       handler: CombatTrackingSettings.formHandler,
       closeOnSubmit: true,
@@ -25,13 +26,13 @@ export class CombatTrackingSettings extends HandlebarsApplicationMixin(Applicati
     },
     tag: "form",
     window: {
-      title: "AOV_SKJADLBORG.Settings.CombatTrackingMenu.Title",
+      title: "AOV_SKJALDBORG.Settings.CombatTrackingMenu.Title",
       contentClasses: ["standard-form", "skj-combat-tracking-settings-content"]
     }
   };
 
   static PARTS = {
-    form: { template: "modules/aov-skjadlborg/templates/combat-tracking-settings.hbs" },
+    form: { template: "modules/aov-skjaldborg/templates/combat-tracking-settings.hbs" },
     footer: { template: "templates/generic/form-footer.hbs" }
   };
 
@@ -45,6 +46,7 @@ export class CombatTrackingSettings extends HandlebarsApplicationMixin(Applicati
     const currentRounding = game.settings.get(MODULE_ID, "movementRounding");
     return {
       ...context,
+      dynamicPlanningInitiative: game.settings.get(MODULE_ID, "dynamicPlanningInitiative") === true,
       requireAllCommit: game.settings.get(MODULE_ID, "requireAllCommit") === true,
       movementRounding: currentRounding,
       movementTickDelayMs: game.settings.get(MODULE_ID, "movementTickDelayMs"),
@@ -57,7 +59,7 @@ export class CombatTrackingSettings extends HandlebarsApplicationMixin(Applicati
         ROUNDING_POLICIES.NEAREST
       ].map(value => ({
         value,
-        label: game.i18n.localize(`AOV_SKJADLBORG.Settings.MovementRounding.${{
+        label: game.i18n.localize(`AOV_SKJALDBORG.Settings.MovementRounding.${{
           [ROUNDING_POLICIES.CEIL]: "Ceil",
           [ROUNDING_POLICIES.FLOOR]: "Floor",
           [ROUNDING_POLICIES.NEAREST]: "Nearest"
@@ -86,12 +88,13 @@ export class CombatTrackingSettings extends HandlebarsApplicationMixin(Applicati
       ? data.movementRounding
       : ROUNDING_POLICIES.CEIL;
     const values = {
+      dynamicPlanningInitiative: data.dynamicPlanningInitiative === true,
       requireAllCommit: data.requireAllCommit === true,
       movementRounding: rounding,
-      movementTickDelayMs: normalizeNumber(data.movementTickDelayMs, 250, LIMITS.movementTickDelayMs),
-      shortReachGridUnits: normalizeNumber(data.shortReachGridUnits, 1, LIMITS.reach),
-      mediumReachGridUnits: normalizeNumber(data.mediumReachGridUnits, 2, LIMITS.reach),
-      longReachGridUnits: normalizeNumber(data.longReachGridUnits, 3, LIMITS.reach)
+      movementTickDelayMs: normalizeNumberSetting(data.movementTickDelayMs, 250, LIMITS.movementTickDelayMs),
+      shortReachGridUnits: normalizeNumberSetting(data.shortReachGridUnits, 1, LIMITS.reach),
+      mediumReachGridUnits: normalizeNumberSetting(data.mediumReachGridUnits, 2, LIMITS.reach),
+      longReachGridUnits: normalizeNumberSetting(data.longReachGridUnits, 3, LIMITS.reach)
     };
 
     await Promise.all(Object.entries(values).map(([key, value]) => (
@@ -99,21 +102,4 @@ export class CombatTrackingSettings extends HandlebarsApplicationMixin(Applicati
     )));
     ui.combat?.render?.();
   }
-}
-
-/**
- * Coerce a numeric settings value to its supported range and step.
- *
- * @param {unknown} value Submitted value.
- * @param {number} fallback Default value.
- * @param {{min: number, max: number, step: number}} limits Numeric constraints.
- * @returns {number}
- */
-function normalizeNumber(value, fallback, limits) {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return fallback;
-  const clamped = Math.min(limits.max, Math.max(limits.min, numeric));
-  const stepped = limits.min + Math.round((clamped - limits.min) / limits.step) * limits.step;
-  const decimals = String(limits.step).split(".")[1]?.length ?? 0;
-  return Number(stepped.toFixed(decimals));
 }

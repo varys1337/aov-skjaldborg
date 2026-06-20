@@ -1,6 +1,13 @@
 import { MODULE_ID, SOCKET_NAME } from "./constants.mjs";
 import { AoVAdapter } from "./adapter/aov-adapter.mjs";
 import { getCombatState } from "./combat/state.mjs";
+import { detectV14Capabilities, getLastCapabilityReport } from "./compat/capabilities.mjs";
+import { getEngagedStatusEffectMode } from "./combat/engagement-status.mjs";
+import {
+  getAoVMessageModeCompatibilityStatus,
+  isAoVMessageModeCompatible
+} from "./compat/aov-message-mode.mjs";
+import { getAdjustInitiativeIntegrationStatus } from "./compat/aov-adjust-initiative.mjs";
 
 /**
  * Build a diagnostic row.
@@ -33,20 +40,57 @@ async function canRenderTemplate(path) {
 /**
  * Run in-world diagnostics for installation and runtime assumptions.
  *
- * Exposed as `game.aovSkjadlborg.diagnostics.run()` after ready.
+ * Exposed as `game.aovSkjaldborg.diagnostics.run()` after ready.
  *
  * @returns {Promise<{id: string, ok: boolean, detail: string}[]>}
  */
 export async function runDiagnostics() {
   const results = [];
   const combat = game.combat ?? null;
+  const capabilities = detectV14Capabilities();
+  const messageModeStatus = getAoVMessageModeCompatibilityStatus();
+  const adjustInitiativeStatus = getAdjustInitiativeIntegrationStatus();
+  const hardBlockers = capabilities.hardBlockers ?? capabilities.missing ?? [];
+  const warnings = capabilities.warnings ?? [];
+  const degradedFeatures = capabilities.degradedFeatures ?? [];
+  results.push(check("foundry-generation", capabilities.foundry.generationOk, `generation=${capabilities.foundry.generation}`));
+  results.push(check("foundry-version", true, `${capabilities.foundry.version}; minimum confirmed=${capabilities.foundry.versionOk}`));
+  results.push(check("aov-version", true, `id=${capabilities.system.id}; version=${capabilities.system.version}; minimum confirmed=${capabilities.system.versionOk}`));
+  results.push(check("runtime-enabled", capabilities.runtimeEnabled, hardBlockers.join(", ")));
+  results.push(check("hard-blockers", hardBlockers.length === 0, hardBlockers.join(", ")));
+  results.push(check("feature-warnings", true, warnings.join(", ")));
+  results.push(check("degraded-features", true, degradedFeatures.join(", ")));
   results.push(check("system", AoVAdapter.isAoVWorld(), `game.system.id=${game.system?.id ?? "unknown"}`));
   results.push(check("setting-enabled", typeof game.settings.get(MODULE_ID, "enabled") === "boolean"));
   results.push(check("action-ring-setting", typeof game.settings.get(MODULE_ID, "enableActionRing") === "boolean"));
   results.push(check("actor-hotbar-setting", typeof game.settings.get(MODULE_ID, "enableActorHotbar") === "boolean"));
-  results.push(check("appv2", !!foundry.applications?.api?.ApplicationV2));
-  results.push(check("dialogv2", !!foundry.applications?.api?.DialogV2));
+  results.push(check("appv2", capabilities.applications.applicationV2));
+  results.push(check("dialogv2", capabilities.applications.dialogV2));
+  results.push(check("scene-move-tokens", true, capabilities.movement.sceneMoveTokens ? "native" : "per-token fallback"));
+  results.push(check("token-move", capabilities.movement.tokenMove));
+  results.push(check("token-complete-movement-path", true, capabilities.movement.completeMovementPath ? "native" : "fallback expansion"));
+  results.push(check("status-effects-v14", true, capabilities.effects.statusEffectsObject ? "object catalog present" : "catalog unavailable"));
+  results.push(check("status-effect-mode", true, getEngagedStatusEffectMode()));
+  results.push(check("active-effect-class", true, String(capabilities.effects.activeEffectClass)));
+  results.push(check("aov-combat-class", capabilities.combat.combatClass, `${capabilities.combat.className}; name recognized=${capabilities.combat.aovCombatClass}`));
+  results.push(check("message-mode-compatibility", isAoVMessageModeCompatible(), "Combat#rollInitiative does not access core.rollMode"));
+  results.push(check(
+    "message-mode-status",
+    messageModeStatus.compatible,
+    `${messageModeStatus.status}; patched=${messageModeStatus.patched}; deprecated-roll-mode=${messageModeStatus.usesDeprecatedRollMode}`
+  ));
+  results.push(check("aov-tracker-class", capabilities.combat.trackerClass, `${capabilities.combat.trackerClassName}; name recognized=${capabilities.combat.aovTrackerClass}`));
+  results.push(check("adjust-init-method", adjustInitiativeStatus.hasAdjustInit, `status=${adjustInitiativeStatus.status}`));
+  results.push(check("adjust-init-dialog", adjustInitiativeStatus.hasAdjDex, `status=${adjustInitiativeStatus.status}`));
+  results.push(check(
+    "adjust-init-patch",
+    adjustInitiativeStatus.weaponPatchInstalled,
+    `weaponPatch=${adjustInitiativeStatus.weaponPatchInstalled}; dismissGuard=${adjustInitiativeStatus.dismissGuardInstalled}`
+  ));
   results.push(check("socket-name", SOCKET_NAME === `module.${MODULE_ID}`, SOCKET_NAME));
+  results.push(check("socket-api", capabilities.sockets.available));
+  results.push(check("v14-migration-version", Number(game.settings.get(MODULE_ID, "v14MigrationVersion")) >= 1, String(game.settings.get(MODULE_ID, "v14MigrationVersion"))));
+  results.push(check("v14-migration-last-run", true, String(game.settings.get(MODULE_ID, "v14MigrationLastRun") ?? "")));
   results.push(check("combat-class-preserved", CONFIG.Combat?.documentClass?.name !== "SkjaldborgCombat", CONFIG.Combat?.documentClass?.name));
   results.push(check("tracker-class-preserved", CONFIG.ui?.combat?.name !== "SkjaldborgCombatTracker", CONFIG.ui?.combat?.name));
   results.push(check("active-combat", !!combat, combat?.id ?? ""));
@@ -54,18 +98,20 @@ export async function runDiagnostics() {
     const state = getCombatState(combat);
     results.push(check("combat-state-readable", !!state && typeof state.phase === "string", state.phase));
   }
-  results.push(check("hud-template", await canRenderTemplate("modules/aov-skjadlborg/templates/combat-hud.hbs")));
-  results.push(check("phase-report-template", await canRenderTemplate("modules/aov-skjadlborg/templates/phase-report.hbs")));
-  results.push(check("action-ring-template", await canRenderTemplate("modules/aov-skjadlborg/templates/action-ring.hbs")));
-  results.push(check("actor-hotbar-template", await canRenderTemplate("modules/aov-skjadlborg/templates/actor-hotbar.hbs")));
+  results.push(check("hud-template", await canRenderTemplate("modules/aov-skjaldborg/templates/combat-hud.hbs")));
+  results.push(check("phase-report-template", await canRenderTemplate("modules/aov-skjaldborg/templates/phase-report.hbs")));
+  results.push(check("action-ring-template", await canRenderTemplate("modules/aov-skjaldborg/templates/action-ring.hbs")));
+  results.push(check("actor-hotbar-template", await canRenderTemplate("modules/aov-skjaldborg/templates/actor-hotbar.hbs")));
 
   const failed = results.filter(r => !r.ok);
   console.table(results);
   if (failed.length) {
-    ui.notifications.warn(game.i18n.format("AOV_SKJADLBORG.Diagnostics.Failed", { count: failed.length }));
+    ui.notifications.warn(game.i18n.format("AOV_SKJALDBORG.Diagnostics.Failed", { count: failed.length }));
   }
   else {
-    ui.notifications.info(game.i18n.localize("AOV_SKJADLBORG.Diagnostics.Passed"));
+    ui.notifications.info(game.i18n.localize("AOV_SKJALDBORG.Diagnostics.Passed"));
   }
+  game.aovSkjaldborg ??= {};
+  game.aovSkjaldborg.capabilities = getLastCapabilityReport();
   return results;
 }

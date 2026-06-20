@@ -12,35 +12,19 @@ import { getCombatState, getCombatantState, phaseLabelKey } from "../combat/stat
 import { getEnabledPhases } from "../combat/phase-structure.mjs";
 import { getReadiedWeapon } from "../combat/weapon-state.mjs";
 import { requestGm } from "../socket.mjs";
+import {
+  combatantFromTrackerRow,
+  combatFromTrackerApp,
+  elementFromTrackerHook,
+  trackerCombatantRows,
+  trackerHeaderElement
+} from "../compat/tracker-adapter.mjs";
 
 const INTENT_STATUS_ICONS = Object.freeze({
   [INTENT_STATUS.UNCOMMITTED]: "fa-circle-question",
   [INTENT_STATUS.COMMITTED]: "fa-circle-check",
   [INTENT_STATUS.HELD]: "fa-hand"
 });
-
-/**
- * Normalize render-hook HTML arguments across jQuery-style and HTMLElement-style hooks.
- *
- * @param {Application|object} app Rendering application.
- * @param {HTMLElement|JQuery|undefined} html Hook HTML argument.
- * @returns {HTMLElement|null}
- */
-function elementFromHook(app, html) {
-  if (html instanceof HTMLElement) return html;
-  if (html?.[0] instanceof HTMLElement) return html[0];
-  return app?.element instanceof HTMLElement ? app.element : null;
-}
-
-/**
- * Resolve the Combat document represented by a tracker application.
- *
- * @param {Application|object} app Combat tracker application.
- * @returns {Combat|null}
- */
-function combatFromApp(app) {
-  return app?.viewed ?? app?.combat ?? game.combat ?? null;
-}
 
 /**
  * Localize a key.
@@ -102,14 +86,14 @@ function renderPhaseBar(combat, state) {
     disabled: !game.user.isGM
   })).join("");
 
-  const navigationLabel = escapeHtml(localize("AOV_SKJADLBORG.Controls.PhaseNavigation"));
-  const movementStatus = escapeHtml(localize(`AOV_SKJADLBORG.MovementStatus.${state.movementRun?.status ?? "none"}`));
+  const navigationLabel = escapeHtml(localize("AOV_SKJALDBORG.Controls.PhaseNavigation"));
+  const movementStatus = escapeHtml(localize(`AOV_SKJALDBORG.MovementStatus.${state.movementRun?.status ?? "none"}`));
 
   return `
     <section class="skj-phasebar" data-combat-id="${combat?.id ?? ""}">
       <nav class="skj-phasebar-main" aria-label="${navigationLabel}">
         <div class="skj-phase-buttons">${phaseButtons}</div>
-        <div class="skj-movement-run">${localize("AOV_SKJADLBORG.Labels.Movement")}: ${movementStatus}</div>
+        <div class="skj-movement-run">${localize("AOV_SKJALDBORG.Labels.Movement")}: ${movementStatus}</div>
       </nav>
     </section>
   `;
@@ -125,11 +109,11 @@ function renderCombatantStatus(state) {
   const candidate = state.intent?.status;
   const status = Object.values(INTENT_STATUS).includes(candidate) ? candidate : INTENT_STATUS.UNCOMMITTED;
   const icon = INTENT_STATUS_ICONS[status] ?? "fa-circle-question";
-  const statusLabel = localize(`AOV_SKJADLBORG.IntentStatus.${status}`);
+  const statusLabel = localize(`AOV_SKJALDBORG.IntentStatus.${status}`);
   const category = Object.values(ACTION_CATEGORIES).includes(state.intent?.actionCategory)
     ? state.intent.actionCategory
     : null;
-  const categoryLabel = category ? localize(`AOV_SKJADLBORG.ActionCategories.${category}`) : "";
+  const categoryLabel = category ? localize(`AOV_SKJALDBORG.ActionCategories.${category}`) : "";
   const text = status !== INTENT_STATUS.UNCOMMITTED && categoryLabel
     ? categoryLabel
     : statusLabel;
@@ -174,7 +158,7 @@ function renderIntentIndicators(combatant, state, combatState) {
     renderIndicator({
       className: "reactions",
       icon: "fa-shield-halved",
-      label: `${localize("AOV_SKJADLBORG.Labels.Reactions")}: ${reactionPenalty}%`,
+      label: `${localize("AOV_SKJALDBORG.Labels.Reactions")}: ${reactionPenalty}%`,
       text: `${reactionPenalty}%`
     })
   ];
@@ -188,12 +172,12 @@ function renderIntentIndicators(combatant, state, combatState) {
       Array.isArray(movement.waypoints) ? movement.waypoints.length : 0
     );
     const units = String(movement.units ?? "").trim();
-    const statusLabel = localize(`AOV_SKJADLBORG.MovementStatus.${movementStatus}`);
+    const statusLabel = localize(`AOV_SKJALDBORG.MovementStatus.${movementStatus}`);
     const shortText = `${distance}${units ? ` ${units}` : ""}`;
     indicators.push(renderIndicator({
       className: `movement ${movementStatus}`,
       icon: "fa-route",
-      label: game.i18n.format("AOV_SKJADLBORG.Tracker.MovementPlan", {
+      label: game.i18n.format("AOV_SKJALDBORG.Tracker.MovementPlan", {
         status: statusLabel,
         distance,
         units,
@@ -208,7 +192,7 @@ function renderIntentIndicators(combatant, state, combatState) {
     indicators.push(renderIndicator({
       className: "readied-weapon",
       icon: "fa-sword",
-      label: game.i18n.format("AOV_SKJADLBORG.Tracker.ReadiedWeapon", { weapon: readiedWeapon.name }),
+      label: game.i18n.format("AOV_SKJALDBORG.Tracker.ReadiedWeapon", { weapon: readiedWeapon.name }),
       text: readiedWeapon.name
     }));
   }
@@ -310,16 +294,16 @@ function attachTrackerEvents(element, combat) {
 export function registerTrackerHooks() {
   const hook = (app, html) => {
     if (!AoVAdapter.isAoVWorld()) return;
-    const element = elementFromHook(app, html);
+    const element = elementFromTrackerHook(app, html);
     if (!element) return;
 
     element.querySelectorAll(".skj-phasebar, .skj-combatant-row, .skj-combatant-indicators, .skj-combatant-notes, .skj-combatant-status, .skj-combatant-status-fallback, .skj-status-fallback").forEach(n => n.remove());
     if (!AoVAdapter.enabledSetting) return;
 
-    const combat = combatFromApp(app);
+    const combat = combatFromTrackerApp(app);
     if (!combat) return;
     const state = getCombatState(combat);
-    const header = element.querySelector(".combat-tracker-header") ?? element.querySelector("header") ?? element;
+    const header = trackerHeaderElement(element);
     header.insertAdjacentHTML("beforeend", renderPhaseBar(combat, state));
 
     // AoV owns the Adjust Initiative control and its click automation. Do not
@@ -327,8 +311,8 @@ export function registerTrackerHooks() {
     // the same logical combat round, so the control remains available wherever
     // AoV rendered it.
 
-    for (const row of element.querySelectorAll("[data-combatant-id]")) {
-      const combatant = combat.combatants.get(row.dataset.combatantId);
+    for (const row of trackerCombatantRows(element)) {
+      const combatant = combatantFromTrackerRow(combat, row);
       if (!combatant) continue;
       decorateCombatantRow(row, combatant, getCombatantState(combatant), state);
     }

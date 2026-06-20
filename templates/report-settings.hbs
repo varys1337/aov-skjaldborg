@@ -1,7 +1,7 @@
 <div class="skj-report-settings-form">
   <fieldset>
-    <legend>{{localize "AOV_SKJADLBORG.Settings.ReportMenu.Phases.Name"}}</legend>
-    <p class="hint">{{localize "AOV_SKJADLBORG.Settings.ReportMenu.Phases.Hint"}}</p>
+    <legend>{{localize "AOV_SKJALDBORG.Settings.ReportMenu.Phases.Name"}}</legend>
+    <p class="hint">{{localize "AOV_SKJALDBORG.Settings.ReportMenu.Phases.Hint"}}</p>
     <div class="skj-report-phase-grid">
       {{#each phases}}
         <label class="skj-report-phase-option">
@@ -13,32 +13,32 @@
   </fieldset>
 
   <div class="form-group">
-    <label>{{localize "AOV_SKJADLBORG.Settings.ReportMenu.Delivery.Name"}}</label>
+    <label>{{localize "AOV_SKJALDBORG.Settings.ReportMenu.Delivery.Name"}}</label>
     <div class="form-fields">
       <select name="delivery">
         {{selectOptions deliveryChoices selected=delivery valueAttr="value" labelAttr="label" localize=false}}
       </select>
     </div>
-    <p class="hint">{{localize "AOV_SKJADLBORG.Settings.ReportMenu.Delivery.Hint"}}</p>
+    <p class="hint">{{localize "AOV_SKJALDBORG.Settings.ReportMenu.Delivery.Hint"}}</p>
   </div>
 
   <div class="form-group">
-    <label>{{localize "AOV_SKJADLBORG.Settings.ReportMenu.Recipients.Name"}}</label>
+    <label>{{localize "AOV_SKJALDBORG.Settings.ReportMenu.Recipients.Name"}}</label>
     <div class="form-fields">
       <select name="recipients">
         {{selectOptions recipientChoices selected=recipients valueAttr="value" labelAttr="label" localize=false}}
       </select>
     </div>
-    <p class="hint">{{localize "AOV_SKJADLBORG.Settings.ReportMenu.Recipients.Hint"}}</p>
+    <p class="hint">{{localize "AOV_SKJALDBORG.Settings.ReportMenu.Recipients.Hint"}}</p>
   </div>
 
   <div class="form-group">
-    <label>{{localize "AOV_SKJADLBORG.Settings.ReportMenu.Scope.Name"}}</label>
+    <label>{{localize "AOV_SKJALDBORG.Settings.ReportMenu.Scope.Name"}}</label>
     <div class="form-fields">
       <select name="scope">
         {{selectOptions scopeChoices selected=scope valueAttr="value" labelAttr="label" localize=false}}
       </select>
     </div>
-    <p class="hint">{{localize "AOV_SKJADLBORG.Settings.ReportMenu.Scope.Hint"}}</p>
+    <p class="hint">{{localize "AOV_SKJALDBORG.Settings.ReportMenu.Scope.Hint"}}</p>
   </div>
 </div>

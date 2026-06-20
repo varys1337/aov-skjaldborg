@@ -9,12 +9,12 @@ import { logMovementDebugExport, logMovementDebugSnapshot } from "../combat/move
 const { ApplicationV2, HandlebarsApplicationMixin } = foundry.applications.api;
 
 /**
- * AppV2 settings submenu for temporary v13 movement diagnostics.
+ * AppV2 settings submenu for movement diagnostics.
  */
 export class MovementDebugSettings extends HandlebarsApplicationMixin(ApplicationV2) {
   static DEFAULT_OPTIONS = {
-    classes: ["aov-skjadlborg", "skj-movement-debug-settings"],
-    id: "aov-skjadlborg-movement-debug-settings",
+    classes: ["aov-skjaldborg", "skj-movement-debug-settings"],
+    id: "aov-skjaldborg-movement-debug-settings",
     actions: {
       export: MovementDebugSettings.onExportDebug,
       reset: MovementDebugSettings.onResetDefaults,
@@ -31,13 +31,13 @@ export class MovementDebugSettings extends HandlebarsApplicationMixin(Applicatio
     },
     tag: "form",
     window: {
-      title: "AOV_SKJADLBORG.Settings.MovementDebugMenu.Title",
+      title: "AOV_SKJALDBORG.Settings.MovementDebugMenu.Title",
       contentClasses: ["standard-form", "skj-movement-debug-settings-content"]
     }
   };
 
   static PARTS = {
-    form: { template: "modules/aov-skjadlborg/templates/movement-debug-settings.hbs" },
+    form: { template: "modules/aov-skjaldborg/templates/movement-debug-settings.hbs" },
     footer: { template: "templates/generic/form-footer.hbs" }
   };
 
@@ -56,19 +56,19 @@ export class MovementDebugSettings extends HandlebarsApplicationMixin(Applicatio
       level,
       levels: Object.values(MOVEMENT_DEBUG_LEVELS).map(value => ({
         value,
-        label: game.i18n.localize(`AOV_SKJADLBORG.Settings.MovementDebugMenu.Levels.${value}`),
+        label: game.i18n.localize(`AOV_SKJALDBORG.Settings.MovementDebugMenu.Levels.${value}`),
         selected: value === level
       })),
       categories: Object.values(MOVEMENT_DEBUG_CATEGORIES).map(value => ({
         value,
         checked: categories[value] === true,
-        label: game.i18n.localize(`AOV_SKJADLBORG.Settings.MovementDebugMenu.Categories.${value}.Name`),
-        hint: game.i18n.localize(`AOV_SKJADLBORG.Settings.MovementDebugMenu.Categories.${value}.Hint`)
+        label: game.i18n.localize(`AOV_SKJALDBORG.Settings.MovementDebugMenu.Categories.${value}.Name`),
+        hint: game.i18n.localize(`AOV_SKJALDBORG.Settings.MovementDebugMenu.Categories.${value}.Hint`)
       })),
       buttons: [
         { type: "submit", icon: "fa-solid fa-save", label: "SETTINGS.Save" },
-        { type: "button", action: "snapshot", icon: "fa-solid fa-bug", label: "AOV_SKJADLBORG.Settings.MovementDebugMenu.LogSnapshot" },
-        { type: "button", action: "export", icon: "fa-solid fa-file-export", label: "AOV_SKJADLBORG.Settings.MovementDebugMenu.ExportDebug" },
+        { type: "button", action: "snapshot", icon: "fa-solid fa-bug", label: "AOV_SKJALDBORG.Settings.MovementDebugMenu.LogSnapshot" },
+        { type: "button", action: "export", icon: "fa-solid fa-file-export", label: "AOV_SKJALDBORG.Settings.MovementDebugMenu.ExportDebug" },
         { type: "button", action: "reset", icon: "fa-solid fa-undo", label: "SETTINGS.Reset" }
       ]
     };

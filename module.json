@@ -1,26 +1,35 @@
 {
-  "id": "aov-skjadlborg",
-  "title": "Age of Vikings - Skjadlborg",
-  "description": "Full combat round workflow automation plus token action ring and selected-actor hotbar for Age of Vikings 13.29. Includes configurable tactical or streamlined combat phases, free GM phase navigation, automatic Movement-to-Resolution continuation, acknowledged player movement planning, ordered GM-authoritative plan persistence, unified debug logging, configurable combat tracking and melee reach, canvas intent markers, grid-checkpoint engagement stopping, readied-weapon reach and initiative automation, deterministic round progression, and Foundry VTT v13.351 compatibility.",
-  "version": "0.2.35",
+  "id": "aov-skjaldborg",
+  "type": "module",
+  "title": "Age of Vikings - Skjaldborg",
+  "description": "Full combat round workflow automation plus token action ring and selected-actor hotbar for Age of Vikings on Foundry VTT v14. Includes disposition-consistent actor-HUD interaction highlights, a targeted AoV v14 message-mode compatibility fix for initiative rolling, configurable tactical or streamlined combat phases, optional simultaneous live initiative during Planning with a turnless first-round start, phase-staged DEX projection based on actual travelled distance, manual GM current-turn selection, free GM phase navigation, automatic Movement-to-Resolution continuation, acknowledged player movement planning, ordered GM-authoritative plan persistence, phase chat cards ranked by Final DEX and INT, unified debug logging, configurable combat tracking and melee reach, pre-combat actor intent declarations, active-combat-only canvas intent markers with custom Other tooltips, Grapple intent support, engagement stopping, readied-weapon reach and initiative automation, deterministic round progression, and live Foundry v14 validation diagnostics.",
+  "version": "0.3.0-alpha.10",
   "compatibility": {
-    "minimum": "13",
-    "verified": "13.351",
-    "maximum": "13"
+    "minimum": "14.363",
+    "verified": "14.364"
   },
   "authors": [
     {
       "name": "TPKomrade"
     }
   ],
-  "system": [
-    "aov"
-  ],
+  "relationships": {
+    "systems": [
+      {
+        "id": "aov",
+        "type": "system",
+        "compatibility": {
+          "minimum": "14.1",
+          "verified": "14.1"
+        }
+      }
+    ]
+  },
   "esmodules": [
     "scripts/main.mjs"
   ],
   "styles": [
-    "styles/skjadlborg.css"
+    "styles/skjaldborg.css"
   ],
   "languages": [
     {
@@ -30,10 +39,6 @@
     }
   ],
   "socket": true,
-  "readme": "https://github.com/varys1337/aov-skjaldborg/blob/main/README.md",
-  "url": "https://github.com/varys1337/aov-skjaldborg",
-  "manifest": "https://github.com/varys1337/aov-skjaldborg/releases/latest/download/module.json",
-  "download": "https://github.com/varys1337/aov-skjaldborg/releases/download/v0.2.35/aov-skjadlborg.zip",
-  "bugs": "https://github.com/varys1337/aov-skjaldborg/issues",
-  "changelog": "https://github.com/varys1337/aov-skjaldborg/releases"
+  "readme": "README.md",
+  "media": []
 }

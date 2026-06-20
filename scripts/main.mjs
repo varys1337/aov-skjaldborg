@@ -4,12 +4,14 @@ import {
   migrateCombatTrackingSettings,
   migrateLegacyReportSettings,
   migrateUnifiedDebugSetting,
+  migrateV14WorldState,
   registerSettings
 } from "./settings.mjs";
 import { registerSocket } from "./socket.mjs";
 import { requestGm } from "./socket.mjs";
 import { registerTrackerHooks } from "./hooks/tracker.mjs";
 import { registerCombatNavigationHooks } from "./hooks/combat-navigation.mjs";
+import { registerCombatContextHooks } from "./hooks/combat-context.mjs";
 import { ActionRing, registerActionRingHooks } from "./apps/action-ring.mjs";
 import { ActorHotbar, registerActorHotbarHooks } from "./apps/actor-hotbar.mjs";
 import { CombatHUD } from "./apps/combat-hud.mjs";
@@ -29,22 +31,42 @@ import { reconcileEngagedStatusEffects, registerEngagedStatusEffect, registerEng
 import { registerReadiedWeaponHooks } from "./combat/weapon-state.mjs";
 import { logMovementDebugExport, logMovementDebugSnapshot, movementDebugExport, movementDebugSnapshot } from "./combat/movement-debugger.mjs";
 import { registerTokenIntentIndicatorHooks, refreshTokenIntentIndicators } from "./canvas/intent-indicators.mjs";
+import { captureExternalPlanningInitiativeChange } from "./combat/planning-initiative.mjs";
+import { registerPreparedIntentHooks } from "./combat/prepared-intent.mjs";
+import { capabilityFailureSummary, capabilityWarningSummary, detectV14Capabilities } from "./compat/capabilities.mjs";
+import { installAoVMessageModeCompatibility } from "./compat/aov-message-mode.mjs";
 
 let adjustInitiativeIntegrationInstalled = false;
+let messageModeCompatibilityInstalled = false;
+
+/**
+ * Select one active GM for document-observer work which is not already routed
+ * through the module socket. This mirrors AoV's first-active-GM authority and
+ * prevents duplicate flag writes when several GMs are connected.
+ *
+ * @returns {boolean}
+ */
+function isAuthoritativeGmClient() {
+  if (!game.user?.isGM) return false;
+  const activeGm = game.users?.find?.(user => user.active && user.isGM) ?? null;
+  return !activeGm || activeGm.id === game.user.id;
+}
 
 /**
  * Register settings as early as possible.
  */
 Hooks.once("init", () => {
   registerSettings();
+  registerCombatContextHooks();
   registerEngagedStatusEffect();
 });
 
 // AoV and other packages may complete CONFIG mutations later in init. Reapply
-// the idempotent status registration before the v13 UI is constructed.
+// the idempotent status registration before the v14 UI is constructed.
 Hooks.once("setup", () => {
   registerEngagedStatusEffect();
   if (!AoVAdapter.isAoVWorld()) return;
+  messageModeCompatibilityInstalled = installAoVMessageModeCompatibility();
   adjustInitiativeIntegrationInstalled = installAdjustInitiativeWeaponIntegration();
 });
 
@@ -57,6 +79,28 @@ Hooks.once("ready", async () => {
     warn("Loaded outside the Age of Vikings system; module remains idle.");
     return;
   }
+  if (!messageModeCompatibilityInstalled) {
+    messageModeCompatibilityInstalled = installAoVMessageModeCompatibility();
+  }
+  const capabilities = detectV14Capabilities();
+  if (!capabilities.runtimeEnabled) {
+    const blockers = capabilityFailureSummary(capabilities);
+    warn(`Foundry v14/AoV hard capability check failed; Skjaldborg runtime integrations remain disabled. Missing: ${blockers}`);
+    ui.notifications?.warn?.(`Skjaldborg is disabled for this world. Missing required v14/AoV capability: ${blockers}`);
+    game.aovSkjaldborg = {
+      adapter: AoVAdapter,
+      diagnostics: {
+        run: runDiagnostics
+      },
+      capabilities
+    };
+    return;
+  }
+  const warnings = capabilityWarningSummary(capabilities);
+  if (warnings) {
+    warn(`Skjaldborg is loading with degraded v14/AoV capabilities: ${warnings}`);
+  }
+  await migrateV14WorldState();
   await migrateActionUiSettings();
   await migrateLegacyReportSettings();
   await migrateCombatTrackingSettings();
@@ -70,6 +114,7 @@ Hooks.once("ready", async () => {
     warn("AoV Adjust Initiative weapon integration was unavailable; installed only the dismissal guard.");
   }
   registerReadiedWeaponHooks();
+  registerPreparedIntentHooks();
   registerTrackerHooks();
   registerCombatNavigationHooks();
   registerMovementHooks(requestGm);
@@ -79,8 +124,9 @@ Hooks.once("ready", async () => {
   registerTokenIntentIndicatorHooks();
   registerChatReportHooks();
   await reconcileEngagedStatusEffects(game.combat);
-  game.aovSkjadlborg = {
+  game.aovSkjaldborg = {
     adapter: AoVAdapter,
+    capabilities,
     phase: PhaseController,
     movement: {
       startMovementPhase,
@@ -119,7 +165,21 @@ Hooks.on("updateCombat", combat => {
 /**
  * Keep the tracker synchronized when Combatant flags or initiative state changes.
  */
-Hooks.on("updateCombatant", combatant => {
+Hooks.on("updateCombatant", (combatant, changed, options = {}) => {
   if (!combatant?.parent?.getFlag?.(MODULE_ID, "combatState")?.enabled) return;
+  const planningOptions = options?.[MODULE_ID] ?? {};
+  if (
+    isAuthoritativeGmClient()
+    && Object.prototype.hasOwnProperty.call(changed ?? {}, "initiative")
+    && planningOptions.planningProjection !== true
+    && planningOptions.movementDexProjection !== true
+    && planningOptions.planningExternalHandled !== true
+  ) {
+    void captureExternalPlanningInitiativeChange(combatant, changed, options)
+      .then(ledger => ledger
+        ? PhaseController.clearCurrentTurn(combatant.parent, "planning-initiative-update")
+        : undefined)
+      .catch(cause => warn(cause));
+  }
   ui.combat?.render?.();
 });

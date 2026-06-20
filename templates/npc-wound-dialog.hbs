@@ -1,0 +1,14 @@
+<section class="skj-npc-wound-dialog">
+  <label>
+    <span>{{localize 'AOV.hitLocation'}}</span>
+    <select name="locationId" required>
+      {{#each locations}}
+        <option value="{{id}}">{{name}} ({{rollLabel}})</option>
+      {{/each}}
+    </select>
+  </label>
+  <label>
+    <span>{{localize 'AOV.damage'}}</span>
+    <input type="number" name="damage" value="1" min="1" step="1" inputmode="numeric" required>
+  </label>
+</section>

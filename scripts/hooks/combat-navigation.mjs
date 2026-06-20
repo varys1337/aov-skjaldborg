@@ -1,7 +1,34 @@
 import { AoVAdapter } from "../adapter/aov-adapter.mjs";
 import { PhaseController } from "../combat/phase-controller.mjs";
+import { isDynamicPlanningInitiativeEnabled } from "../combat/planning-initiative.mjs";
+import { getCombatState } from "../combat/state.mjs";
+import { PHASES } from "../constants.mjs";
 import { error } from "../logger.mjs";
 import { requestGm } from "../socket.mjs";
+
+
+/**
+ * Prepare Foundry's initial Combat update for simultaneous Planning.
+ *
+ * Core Combat#startCombat starts round 1 with the first sorted Combatant as the
+ * active turn. Foundry's documented `combatStart` hook runs before that update
+ * and explicitly permits mutation of its `{round, turn}` payload, so this is the
+ * earliest point at which the module can prevent an artificial first-turn
+ * assignment instead of clearing it in a second database update.
+ *
+ * @param {Combat} combat Combat encounter being started.
+ * @param {{round?: number, turn?: number|null}} updateData Mutable core start payload.
+ * @returns {boolean} Whether the initial turn cursor was cleared.
+ */
+export function prepareInitialPlanningTurn(combat, updateData) {
+  if (!AoVAdapter.isAoVWorld() || !AoVAdapter.enabledSetting) return false;
+  if (!isDynamicPlanningInitiativeEnabled()) return false;
+  if (getCombatState(combat).phase !== PHASES.INTENT) return false;
+  if (!updateData || typeof updateData !== "object") return false;
+
+  updateData.turn = null;
+  return true;
+}
 
 /**
  * Classify a positive-direction core Combat navigation update.
@@ -57,6 +84,10 @@ export function isForwardCombatNavigation(combat, changed, options) {
  * @returns {void}
  */
 export function registerCombatNavigationHooks() {
+  Hooks.on("combatStart", (combat, updateData) => {
+    prepareInitialPlanningTurn(combat, updateData);
+  });
+
   Hooks.on("preUpdateCombat", (combat, changed, options) => {
     if (!AoVAdapter.isAoVWorld() || !AoVAdapter.enabledSetting) return;
     if (PhaseController.isInternalCombatUpdate(combat, options)) return;

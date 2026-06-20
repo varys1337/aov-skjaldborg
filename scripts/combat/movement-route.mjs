@@ -1,7 +1,9 @@
-import { MOVEMENT_DEBUG_CATEGORIES, MOVEMENT_DEBUG_LEVELS } from "../constants.mjs";
+import { MODULE_ID, MOVEMENT_DEBUG_CATEGORIES, MOVEMENT_DEBUG_LEVELS } from "../constants.mjs";
 import { movementDebug, movementDebugWarn } from "./movement-debugger.mjs";
 
 const DEFAULT_WAYPOINT_LIMIT = 250;
+const TRUNCATION_NOTIFICATION_THROTTLE_MS = 5000;
+let lastTruncationNotificationAt = 0;
 const ROUTE_SOURCE_PRIORITY = Object.freeze({
   PENDING: 1,
   PAYLOAD: 10,
@@ -54,7 +56,7 @@ export function appendRoutePoint(route, point) {
 /**
  * Return a plain point array from any Foundry movement route-like value.
  *
- * Foundry v13 movement operations store the authoritative path in section
+ * Foundry v14 movement operations store the authoritative path in section
  * objects such as `pending.waypoints`, not in a top-level `waypoints` field.
  *
  * @param {unknown} value Candidate route value.
@@ -139,8 +141,8 @@ function addMovementCandidates(candidates, prefix, value, directPriority, pendin
 }
 
 /**
- * Build candidate movement routes from every documented v13 surface and the
- * plain payload shapes retained for compatibility with tests and older builds.
+ * Build candidate movement routes from every documented v14 surface and the
+ * plain payload shapes retained for compatibility with older builds.
  *
  * @param {object} movement Movement payload.
  * @param {object} options Options.
@@ -257,6 +259,14 @@ export function normalizeMovementRoute(movement = {}, { limit = DEFAULT_WAYPOINT
       sourceCount,
       retainedCount: waypoints.length
     }));
+    const now = Date.now();
+    if (game.user?.isGM && (now - lastTruncationNotificationAt) > TRUNCATION_NOTIFICATION_THROTTLE_MS) {
+      lastTruncationNotificationAt = now;
+      ui.notifications.warn(game.i18n.format("AOV_SKJALDBORG.Warnings.MovementRouteTruncated", {
+        limit,
+        module: MODULE_ID
+      }));
+    }
   }
 
   return {

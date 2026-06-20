@@ -20,19 +20,19 @@
   </label>
 
   <label class="skj-adjust-weapon-field">
-    <span>{{localize 'AOV_SKJADLBORG.Weapons.WeaponToDraw'}}</span>
+    <span>{{localize 'AOV_SKJALDBORG.Weapons.WeaponToDraw'}}</span>
     <select name="weaponId" {{#unless weaponState.canDraw}}disabled{{/unless}}>
       {{#each weaponState.carriedWeapons}}
         <option value="{{id}}" {{#if selected}}selected{{/if}}>{{name}}</option>
       {{else}}
-        <option value="">{{localize 'AOV_SKJADLBORG.Weapons.NoCarriedWeapons'}}</option>
+        <option value="">{{localize 'AOV_SKJALDBORG.Weapons.NoCarriedWeapons'}}</option>
       {{/each}}
     </select>
   </label>
 
   <p class="skj-adjust-current">
-    <strong>{{localize 'AOV_SKJADLBORG.Weapons.CurrentlyReadied'}}:</strong>
-    {{#if weaponState.name}}{{weaponState.name}}{{else}}{{localize 'AOV_SKJADLBORG.Weapons.None'}}{{/if}}
+    <strong>{{localize 'AOV_SKJALDBORG.Weapons.CurrentlyReadied'}}:</strong>
+    {{#if weaponState.name}}{{weaponState.name}}{{else}}{{localize 'AOV_SKJALDBORG.Weapons.None'}}{{/if}}
   </p>
 
   <div class="flexrow skj-adjust-other">

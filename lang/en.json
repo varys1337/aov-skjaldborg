@@ -1,13 +1,13 @@
 {
-  "AOV_SKJADLBORG": {
+  "AOV_SKJALDBORG": {
     "Settings": {
       "Enabled": {
         "Name": "Enable Skjaldborg full combat workflow",
-        "Hint": "Adds Statement, Movement, Resolution, and Bookkeeping workflow automation to AoV combats."
+        "Hint": "Adds Planning, Movement, Resolution, and Bookkeeping workflow automation to AoV combats."
       },
       "RequireAllCommit": {
         "Name": "Require all capable combatants to commit",
-        "Hint": "Optional strict mode. When enabled, Statement cannot advance until every capable combatant has committed or held an intent. Disabled by default so the GM may advance freely."
+        "Hint": "Optional strict mode. When enabled, Planning cannot advance until every capable combatant has committed or held an intent. Disabled by default so the GM may advance freely."
       },
       "MovementRounding": {
         "Name": "Movement DEX penalty rounding",
@@ -18,7 +18,7 @@
       },
       "MovementTickDelay": {
         "Name": "Movement tick delay",
-        "Hint": "Delay in milliseconds between Skjaldborg movement checkpoints during the v13 compatibility movement phase."
+        "Hint": "Delay in milliseconds between Skjaldborg movement checkpoints during the Foundry v14 movement phase."
       },
       "Reach": {
         "Short": {
@@ -43,9 +43,9 @@
         "Hint": "Enable all Skjaldborg diagnostic output with one switch, including general logs and every movement-debug category at trace detail."
       },
       "MovementDebugMenu": {
-        "Name": "Movement debugger",
-        "Label": "Configure movement debugger",
-        "Hint": "Temporary v13 diagnostics for Skjaldborg movement capture, route execution, collision, and engagement.",
+        "Name": "Advanced movement diagnostics",
+        "Label": "Configure movement diagnostics",
+        "Hint": "GM-only v14 diagnostics for Skjaldborg movement capture, route execution, collision, and engagement.",
         "Title": "Skjaldborg Movement Debugger",
         "LogSnapshot": "Log current movement state",
         "ExportDebug": "Export last movement debug JSON",
@@ -228,12 +228,12 @@
       "CombatTrackingMenu": {
         "Name": "Combat tracking",
         "Label": "Configure combat tracking",
-        "Hint": "Configure phase validation, movement DEX rounding and timing, and melee engagement reach in one GM-only submenu.",
+        "Hint": "Configure Planning initiative behavior, phase validation, movement DEX rounding and timing, and melee engagement reach in one GM-only submenu.",
         "Title": "Skjaldborg Combat Tracking",
-        "Intro": "These world settings control how strictly the tracker validates declarations and how movement contributes to DEX and engagement. Phase navigation itself remains GM-authoritative.",
+        "Intro": "These world settings control Planning turn behavior, declaration validation, and how movement contributes to DEX and engagement. Phase navigation remains GM-authoritative.",
         "Navigation": {
           "Name": "Phase navigation",
-          "Hint": "The all-intents requirement is optional. With it disabled, the GM may leave Statement even when some combatants have not declared an action."
+          "Hint": "Choose sequential or simultaneous live initiative during Planning. The all-intents requirement remains optional; when disabled, the GM may advance even if some combatants have not declared an action."
         },
         "Movement": {
           "Name": "Movement and DEX",
@@ -243,10 +243,14 @@
           "Name": "Melee engagement reach",
           "Hint": "Set the grid-unit contact distance used for short, medium, and long readied melee weapons."
         }
+      },
+      "DynamicPlanningInitiative": {
+        "Name": "Use simultaneous live initiative during Planning",
+        "Hint": "Optional advanced mode. Planning has no active combatant turn: initiative changes are tracked and re-sorted live, while Next Turn and Next Round advance to the next configured phase. Disable this to retain the normal sequential turn cursor during Planning."
       }
     },
     "Phases": {
-      "intent": "Statement",
+      "intent": "Planning",
       "movement": "Movement",
       "resolution": "Resolution",
       "bookkeeping": "Bookkeeping"
@@ -268,13 +272,14 @@
       "Carryover": "Carry Over",
       "PhaseNavigation": "Skjaldborg combat phases",
       "OpenActionRing": "Open action ring",
-      "Close": "Close"
+      "Close": "Close",
+      "SetCurrentTurn": "Set Current Turn"
     },
     "Hud": {
       "Title": "Skjaldborg",
       "Intent": "Statement of Intent",
       "Movement": "Movement",
-      "MovementNote": "Drag a combatant token during Statement to declare its route. The token stays in place until the Movement phase.",
+      "MovementNote": "Drag a combatant token during Planning to declare its route. The token stays in place until the Movement phase.",
       "DexLedger": "DEX Ledger",
       "NoLedger": "DEX is calculated when the GM advances from Movement to Resolution.",
       "Resolution": "Resolution Queue",
@@ -310,14 +315,15 @@
     "ActionCategories": {
       "attack": "Attack",
       "missile": "Missile",
-      "magic": "Magic",
-      "defend": "Defend",
-      "retreat": "Retreat",
       "knockback": "Knockback",
-      "flee": "Flee",
+      "grapple": "Grapple",
+      "defend": "Defend",
+      "magic": "Magic",
+      "retreat": "Retreat",
       "wait": "Wait",
       "delay": "Delay",
-      "other": "Other"
+      "other": "Other",
+      "flee": "Flee"
     },
     "IntentStatus": {
       "uncommitted": "Open",
@@ -345,22 +351,20 @@
       "FullMove": "Full movement only",
       "Movement": "Movement",
       "CarryoverDexZero": "DEX rank was reduced to 0 or below.",
-      "CarryoverShort": "Next round"
+      "CarryoverShort": "Next round",
+      "PlanningInitiativeAdjustment": "Planning initiative adjustment"
     },
     "Actions": {
       "Carryover": "Carry over",
       "SplitLabel": "Split attack {index}/{count}"
     },
     "Chat": {
-      "Initialized": "Skjaldborg combat initialized",
-      "PhaseAdvanced": "Skjaldborg phase advanced",
-      "SimultaneousGroups": "{count} simultaneous group(s) require GM confirmation.",
+      "ReportTitle": "Round {round} - {phase}",
       "Combatant": "Combatant",
       "BaseDex": "Base DEX",
       "DexChanges": "DEX changes",
       "FinalDex": "Final DEX",
       "Initiative": "Initiative",
-      "ResolutionQueue": "Resolution queue",
       "NoCombatants": "No combatants match this report scope.",
       "None": "None",
       "FullMovementRule": "Full movement only sets final DEX to 0.",
@@ -382,6 +386,7 @@
     "Warnings": {
       "GmOnly": "Only a GM can perform this combat control.",
       "NoGm": "No active GM is available to receive the combat request.",
+      "GmChanged": "The responding GM changed before this combat request was acknowledged. Try the action again.",
       "SocketTimeout": "The active GM did not acknowledge the combat request.",
       "NoCombat": "No active combat is available for this control.",
       "NotOwner": "You do not control this combatant.",
@@ -389,6 +394,7 @@
       "InvalidPhase": "That phase transition is not legal from the current phase.",
       "MovementRunning": "Movement automation is still resolving. Wait for movement to complete before advancing.",
       "MovementPlansPending": "Cannot begin Movement: the plans for {names} are still synchronizing or unfinished. Wait for the movement-plan confirmation, or clear and plan those routes again.",
+      "MovementRouteTruncated": "A movement route exceeded {limit} points and was truncated. Open the advanced movement diagnostics for details.",
       "UnknownMovementPlan": "one or more combatants",
       "NoCombatant": "Select or activate a combatant first.",
       "Uncommitted": "Cannot advance: these combatants have not committed or held intent: {names}",
@@ -402,7 +408,11 @@
       "ActorUnavailable": "The represented actor is unavailable.",
       "AtLeastOnePhase": "At least one combat phase must remain enabled. Resolution has been retained as the safety fallback.",
       "DisabledPhase": "That phase is disabled in the current combat phase structure.",
-      "MovementDraftsSkipped": "The following combatants still have unfinished movement drafts; those drafts will not execute: {names}"
+      "MovementDraftsSkipped": "The following combatants still have unfinished movement drafts; those drafts will not execute: {names}",
+      "WellbeingUpdateFailed": "The actor wellbeing data could not be updated. See the browser console for details.",
+      "SelectWeapon": "Select a carried weapon to roll.",
+      "MagicPreparationFailed": "The magic preparation state could not be updated. See the browser console for details.",
+      "NoItemDescription": "{item} has no description to share."
     },
     "ActionRing": {
       "IntentHint": "Click to commit. Shift-click or right-click for details.",
@@ -414,20 +424,25 @@
       "HitPoints": "Hit Points",
       "MagicPoints": "Magic Points",
       "LockedMagic": "{locked} locked / {max} total",
+      "Magic": {
+        "Prepared": "Prepared — click to unprepare",
+        "Unprepared": "Unprepared — click to prepare"
+      },
       "Phase": "Current Skjaldborg phase",
       "Tabs": {
         "Combat": "Combat and intent",
         "Skills": "Skills",
-        "Magic": "Rune scripts, Seiðr, and powers",
+        "Magic": "Magic and Powers",
         "Macros": "User macros",
         "Stats": "Statistics",
         "Equip": "Equipment",
-        "HistoryFamily": "History and family"
+        "HistoryFamily": "History and family",
+        "Wellbeing": "Wellbeing and wounds"
       },
       "EmptyMacro": "Empty macro slot {slot}",
       "NoCombatActions": "No combat actions are available.",
       "NoSkills": "No skills are available.",
-      "NoMagic": "No rune scripts, Seiðr spells, or powers are available.",
+      "NoMagic": "No magic or powers are available.",
       "Move": "Right-drag portrait to move actor hotbar",
       "Groups": {
         "OtherSkills": "Other skills",
@@ -438,7 +453,10 @@
         "Histories": "History",
         "Family": "Family",
         "Thralls": "Thralls",
-        "Farms": "Farms"
+        "Farms": "Farms",
+        "HitLocations": "Hit locations",
+        "Wounds": "Wounds",
+        "GeneralInformation": "General information"
       },
       "ActiveEffects": "Active effects",
       "NoStats": "No rollable actor statistics are available.",
@@ -467,7 +485,20 @@
       "NoHistoryFamily": "No history, family, passion, devotion, thrall, or farm records are available.",
       "UnavailableDocument": "Unavailable document",
       "Collapse": "Collapse action panels",
-      "Expand": "Expand action panels"
+      "Expand": "Expand action panels",
+      "NoHitLocations": "No hit locations are available for this actor.",
+      "NoActiveWounds": "No active wounds.",
+      "CreateWound": "Add a wound",
+      "DeleteWound": "Double-click to remove this wound",
+      "UnassignedLocation": "Unassigned",
+      "NpcDamage": "NPC hit-location damage",
+      "WoundHeaders": {
+        "Location": "Location",
+        "Damage": "Dmg",
+        "Status": "State"
+      },
+      "AddNpcWound": "Add NPC wound damage",
+      "DockMove": "Click to collapse or expand; drag around the portrait to dock action panels left, right, above, or below."
     },
     "Tracker": {
       "IntentCategory": "Declared action: {category}",
@@ -492,7 +523,17 @@
       "Drop": "Drop",
       "DrawHint": "Ready the selected carried weapon and reduce initiative by 5 DEX.",
       "SheatheHint": "Sheathe the currently readied weapon and reduce initiative by 5 DEX.",
-      "DropHint": "Clear the currently readied weapon without changing initiative."
+      "DropHint": "Clear the currently readied weapon without changing initiative.",
+      "RollSelected": "Roll selected weapon",
+      "RollSelectedHint": "Roll an attack with the selected carried weapon.",
+      "RollAttackHint": "Roll an attack with this weapon.",
+      "RollDamageHint": "Roll this weapon's damage using the Age of Vikings damage workflow."
+    },
+    "IntentDialog": {
+      "Title": "Other Intent",
+      "Label": "Describe the intended action",
+      "Placeholder": "Enter the action or declaration that other players should see…",
+      "Save": "Set Intent"
     }
   }
 }

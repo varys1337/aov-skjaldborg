@@ -1,5 +1,82 @@
 # Age of Vikings - Skjadlborg
 
+## 0.3.0-alpha.10
+
+- Uses the selected Token disposition as the actor-HUD interaction accent for
+  active tabs, selected intents, prepared actions, hover/focus states, and drop
+  targets. Resource fills, wound severity, and workflow statuses keep their own
+  semantic colours.
+- Replaces AoV 14.1's deprecated `core.rollMode` read in
+  `Combat#rollInitiative` with a v14-compatible implementation which preserves
+  the system's existing initiative semantics and accepts `messageMode`.
+
+## 0.3.0-alpha.8 authoritative HP and transparent empty wounds
+
+- Derives the HP resource pill from the same owned Wound or Hit Location damage documents used by AoV actor preparation, preventing stale synthetic-Token HP values after embedded damage updates.
+- Uses the same derived HP state when reconciling edits from the resource pill.
+- Makes the Wounds panel body and empty-state message transparent when there are no active wounds, while retaining the normal section frame and header.
+
+## 0.3.0-alpha.7 neutral hit-location AP/HP values
+
+- Uses the standard HUD text colour for hit-location AP and HP values instead of inheriting the Token disposition palette.
+
+## 0.3.0-alpha.6 final compact hit-location typography
+
+- Reduced the hit-location name, roll range, AP/HP labels, and emphasized values by one additional pixel.
+- Tightened the bounded card row heights, inter-column gap, letter spacing, and internal padding without changing card dimensions or body-map placement.
+- Left wounds, resource bars, hit-location data, and interaction behavior unchanged.
+
+## 0.3.0-alpha.5 compact hit-location typography
+
+- Reduced body-map location-name, roll-range, AP and HP typography slightly so bounded cards no longer overflow or overlap.
+- Tightened the lower value row and internal padding while preserving readable emphasis for AP/HP values.
+- Kept the restored centred 3 × 4 hit-location arrangement unchanged.
+
+## 0.3.0-alpha.4 token resource bars and hit-location alignment
+
+- Uses Foundry v14 `TokenDocument#getBarAttribute` for the selected Token's configured `bar1` and `bar2` resource pills.
+- Centres a single tracked resource and preserves the established paired layout for two tracked resources.
+- Preserves AoV-specific HP wound reconciliation and MP available/locked/total handling.
+- Bounds and centres the AoV 3-by-4 hit-location body map so larger panel widths do not distort card placement.
+
+## 0.3.0-alpha.3
+
+- Restored the action-header navigation icons to the stable centred layout in left, right, top, and bottom docking modes.
+- Removed the nested horizontal scroll area from the header; active effects are right-aligned and clipped within their lane.
+- Forced the top/bottom collapse rail to the same 10 px thickness as the left/right rail, overriding Foundry button minimum dimensions.
+- Rebuilt History and Family → General Information as a standard read-only reference category containing only personal/header information; duplicate characteristic and short-attribute columns were removed.
+- Added explicit Foundry v14 manifest `type` and `media` fields and corrected the distributable archive layout.
+
+# Version 0.2.39 — Turnless Initial Planning
+
+- Clears Foundry's initial active-turn assignment in the mutable `combatStart` payload whenever simultaneous live Planning is enabled. Round 1 now begins with no current Combatant, matching every later Planning phase.
+- Leaves Foundry's normal first-combatant start intact when simultaneous Planning is disabled, the module is disabled, Planning is not the active configured phase, or the world is not using Age of Vikings.
+- Retains the existing later-round reconciliation, which clears the cursor whenever the phase cycle re-enters Planning.
+
+# Version 0.2.38 — Phase-Staged Movement DEX
+
+- Keeps Planning initiative based only on the round reset, legal Planning actions, intent modifiers, and other direct DEX-rank changes. Banking or editing a planned route no longer deducts DEX.
+- Applies movement DEX only after the authoritative movement run has finished and every route is terminal. Completed, stopped, and failed movement uses measured travelled distance rather than the originally planned path length.
+- Re-ranks the AoV Combat Tracker at the end of Movement before the automatic transition to Resolution. Resolution queue construction remains a separate stage so later Resolution rules can extend the result without contaminating Planning.
+- Marks module-owned Movement initiative projections so a hidden/immediate Movement run cannot be captured again as an external Planning adjustment.
+- Clears the planned-distance cost on unavailable or failed zero-travel movement and preserves partial travelled distance when execution stops or fails after some checkpoints.
+
+# Version 0.2.37 — Live Planning Initiative and Manual Turn Control
+
+- Added a GM-only **Set Current Turn** command to the Combat Tracker participant context menu.
+- Added the optional **Use simultaneous live initiative during Planning** world setting under Combat Tracking.
+- In simultaneous Planning, the active-turn cursor is cleared, DEX/INT initiative remains live-sorted as legal Planning actions change DEX rank, and either Next Turn or Next Round advances the phase. Version 0.2.38 supersedes the original route-distance timing by applying movement cost only after actual travel.
+- Preserved external AoV initiative deductions as explicit current-round Planning adjustments so later movement and Resolution calculations do not erase draw, sheathe, or other legal initiative changes.
+- Retained the existing sequential Planning cursor when the new setting is disabled.
+- Added serialized Planning initiative writes and phase-transition settling to prevent concurrent player updates from racing.
+
+# 0.2.36 — Ranked phase chat cards
+
+- Replaces the generic **Skjaldborg phase advanced** heading and separate phase line with one localized title in the form **Round N - Phase**. The Intent phase is now presented to users as **Planning**.
+- Removes the redundant Resolution queue and simultaneous-group summary from phase reports; the ranked DEX table is the single phase-order presentation.
+- Sorts every report table by Final DEX descending, then INT descending as the AoV tie-breaker, with deterministic name/id fallbacks.
+- Adds INT to both Base DEX and Final DEX hover details so the ranking tie-breaker is visible without adding another table column.
+
 ## 0.2.35 phase-control freedom and automatic Movement completion
 
 - Fixes the AppV2 preset handlers in **Combat phase structure** by calling the class-owned persistence helper while retaining the clicked application instance for rerendering.

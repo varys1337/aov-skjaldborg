@@ -12,8 +12,8 @@ const { ApplicationV2, HandlebarsApplicationMixin } = foundry.applications.api;
  */
 export class PhaseStructureSettings extends HandlebarsApplicationMixin(ApplicationV2) {
   static DEFAULT_OPTIONS = {
-    classes: ["aov-skjadlborg", "skj-phase-structure-settings"],
-    id: "aov-skjadlborg-phase-structure-settings",
+    classes: ["aov-skjaldborg", "skj-phase-structure-settings"],
+    id: "aov-skjaldborg-phase-structure-settings",
     actions: {
       standard: PhaseStructureSettings.onStandardPreset,
       streamlined: PhaseStructureSettings.onStreamlinedPreset
@@ -29,13 +29,13 @@ export class PhaseStructureSettings extends HandlebarsApplicationMixin(Applicati
     },
     tag: "form",
     window: {
-      title: "AOV_SKJADLBORG.Settings.PhaseStructureMenu.Title",
+      title: "AOV_SKJALDBORG.Settings.PhaseStructureMenu.Title",
       contentClasses: ["standard-form", "skj-phase-structure-settings-content"]
     }
   };
 
   static PARTS = {
-    form: { template: "modules/aov-skjadlborg/templates/phase-structure-settings.hbs" },
+    form: { template: "modules/aov-skjaldborg/templates/phase-structure-settings.hbs" },
     footer: { template: "templates/generic/form-footer.hbs" }
   };
 
@@ -51,14 +51,14 @@ export class PhaseStructureSettings extends HandlebarsApplicationMixin(Applicati
       phases: PHASE_ORDER.map(phase => ({
         id: phase,
         name: `phases.${phase}`,
-        label: game.i18n.localize(`AOV_SKJADLBORG.Phases.${phase}`),
-        hint: game.i18n.localize(`AOV_SKJADLBORG.Settings.PhaseStructureMenu.Phases.${phase}.Hint`),
+        label: game.i18n.localize(`AOV_SKJALDBORG.Phases.${phase}`),
+        hint: game.i18n.localize(`AOV_SKJALDBORG.Settings.PhaseStructureMenu.Phases.${phase}.Hint`),
         checked: game.settings.get(MODULE_ID, PHASE_STRUCTURE_SETTING_KEYS[phase]) !== false
       })),
       buttons: [
         { type: "submit", icon: "fa-solid fa-save", label: "SETTINGS.Save" },
-        { type: "button", action: "standard", icon: "fa-solid fa-list-check", label: "AOV_SKJADLBORG.Settings.PhaseStructureMenu.Standard" },
-        { type: "button", action: "streamlined", icon: "fa-solid fa-forward-fast", label: "AOV_SKJADLBORG.Settings.PhaseStructureMenu.Streamlined" }
+        { type: "button", action: "standard", icon: "fa-solid fa-list-check", label: "AOV_SKJALDBORG.Settings.PhaseStructureMenu.Standard" },
+        { type: "button", action: "streamlined", icon: "fa-solid fa-forward-fast", label: "AOV_SKJALDBORG.Settings.PhaseStructureMenu.Streamlined" }
       ]
     };
   }
@@ -112,7 +112,7 @@ export class PhaseStructureSettings extends HandlebarsApplicationMixin(Applicati
       normalized[phase]
     )));
 
-    await game.aovSkjadlborg?.phase?.reconcilePhaseStructure?.(game.combat);
+    await game.aovSkjaldborg?.phase?.reconcilePhaseStructure?.(game.combat);
     ui.combat?.render?.();
   }
 
@@ -133,7 +133,7 @@ export class PhaseStructureSettings extends HandlebarsApplicationMixin(Applicati
     ]));
 
     if (!Object.values(selection).some(Boolean)) {
-      ui.notifications.warn(game.i18n.localize("AOV_SKJADLBORG.Warnings.AtLeastOnePhase"));
+      ui.notifications.warn(game.i18n.localize("AOV_SKJALDBORG.Warnings.AtLeastOnePhase"));
       selection[PHASES.RESOLUTION] = true;
     }
     await PhaseStructureSettings._persistSelection(selection);

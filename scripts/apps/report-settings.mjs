@@ -14,8 +14,8 @@ const { ApplicationV2, HandlebarsApplicationMixin } = foundry.applications.api;
  */
 export class ReportSettings extends HandlebarsApplicationMixin(ApplicationV2) {
   static DEFAULT_OPTIONS = {
-    classes: ["aov-skjadlborg", "skj-report-settings"],
-    id: "aov-skjadlborg-report-settings",
+    classes: ["aov-skjaldborg", "skj-report-settings"],
+    id: "aov-skjaldborg-report-settings",
     actions: {
       reset: ReportSettings.onResetDefaults
     },
@@ -30,13 +30,13 @@ export class ReportSettings extends HandlebarsApplicationMixin(ApplicationV2) {
     },
     tag: "form",
     window: {
-      title: "AOV_SKJADLBORG.Settings.ReportMenu.Title",
+      title: "AOV_SKJALDBORG.Settings.ReportMenu.Title",
       contentClasses: ["standard-form", "skj-report-settings-content"]
     }
   };
 
   static PARTS = {
-    form: { template: "modules/aov-skjadlborg/templates/report-settings.hbs" },
+    form: { template: "modules/aov-skjaldborg/templates/report-settings.hbs" },
     footer: { template: "templates/generic/form-footer.hbs" }
   };
 
@@ -52,23 +52,23 @@ export class ReportSettings extends HandlebarsApplicationMixin(ApplicationV2) {
       phases: PHASE_ORDER.map(phase => ({
         id: phase,
         name: `phases.${phase}`,
-        label: game.i18n.localize(`AOV_SKJADLBORG.Phases.${phase}`),
+        label: game.i18n.localize(`AOV_SKJALDBORG.Phases.${phase}`),
         checked: game.settings.get(MODULE_ID, REPORT_PHASE_SETTING_KEYS[phase])
       })),
       delivery: game.settings.get(MODULE_ID, "reportDelivery"),
       recipients: game.settings.get(MODULE_ID, "reportWhisperRecipients"),
       scope: game.settings.get(MODULE_ID, "reportCombatantScope"),
       deliveryChoices: [
-        { value: REPORT_DELIVERY.PUBLIC, label: game.i18n.localize("AOV_SKJADLBORG.Settings.ReportMenu.Delivery.Public") },
-        { value: REPORT_DELIVERY.WHISPER, label: game.i18n.localize("AOV_SKJADLBORG.Settings.ReportMenu.Delivery.Whisper") }
+        { value: REPORT_DELIVERY.PUBLIC, label: game.i18n.localize("AOV_SKJALDBORG.Settings.ReportMenu.Delivery.Public") },
+        { value: REPORT_DELIVERY.WHISPER, label: game.i18n.localize("AOV_SKJALDBORG.Settings.ReportMenu.Delivery.Whisper") }
       ],
       recipientChoices: [
-        { value: REPORT_RECIPIENTS.GM, label: game.i18n.localize("AOV_SKJADLBORG.Settings.ReportMenu.Recipients.Gm") },
-        { value: REPORT_RECIPIENTS.GM_AND_PLAYERS, label: game.i18n.localize("AOV_SKJADLBORG.Settings.ReportMenu.Recipients.GmAndPlayers") }
+        { value: REPORT_RECIPIENTS.GM, label: game.i18n.localize("AOV_SKJALDBORG.Settings.ReportMenu.Recipients.Gm") },
+        { value: REPORT_RECIPIENTS.GM_AND_PLAYERS, label: game.i18n.localize("AOV_SKJALDBORG.Settings.ReportMenu.Recipients.GmAndPlayers") }
       ],
       scopeChoices: [
-        { value: REPORT_SCOPE.ALL, label: game.i18n.localize("AOV_SKJADLBORG.Settings.ReportMenu.Scope.All") },
-        { value: REPORT_SCOPE.PLAYER_OWNED, label: game.i18n.localize("AOV_SKJADLBORG.Settings.ReportMenu.Scope.PlayerOwned") }
+        { value: REPORT_SCOPE.ALL, label: game.i18n.localize("AOV_SKJALDBORG.Settings.ReportMenu.Scope.All") },
+        { value: REPORT_SCOPE.PLAYER_OWNED, label: game.i18n.localize("AOV_SKJALDBORG.Settings.ReportMenu.Scope.PlayerOwned") }
       ],
       buttons: [
         { type: "submit", icon: "fa-solid fa-save", label: "SETTINGS.Save" },

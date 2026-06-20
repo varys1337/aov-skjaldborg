@@ -5,6 +5,12 @@ import { createPhaseReport } from "./chat-report.mjs";
 import { isMovementRunActive, startMovementPhase } from "./movement-controller.mjs";
 import { settleMovementWrites } from "./authoritative-write-queue.mjs";
 import {
+  initializePlanningInitiativeTracking,
+  isDynamicPlanningInitiativeActive,
+  isDynamicPlanningInitiativeEnabled,
+  settlePlanningInitiativeWrites
+} from "./planning-initiative.mjs";
+import {
   buildResolutionQueue,
   refreshAllImmediateResolutionActions,
   setActionStatus,
@@ -164,7 +170,8 @@ export class PhaseController {
       recoverySnapshot: snapshotCombat(combat)
     };
     await setCombatState(combat, next);
-    await createPhaseReport(combat, next, "AOV_SKJADLBORG.Chat.Initialized");
+    await this.reconcilePlanningTurnMode(combat);
+    await createPhaseReport(combat, next);
     ui.combat?.render?.();
     return next;
   }
@@ -233,7 +240,7 @@ export class PhaseController {
    */
   static async _advanceUnlocked(combat, requestedPhase, { forceCycle = false } = {}) {
     if (!game.user.isGM) {
-      ui.notifications.warn(localize("AOV_SKJADLBORG.Warnings.GmOnly"));
+      ui.notifications.warn(localize("AOV_SKJALDBORG.Warnings.GmOnly"));
       return null;
     }
     if (!combat) return null;
@@ -246,7 +253,7 @@ export class PhaseController {
     const fullCycle = forceCycle || (requestedPhase === null && targetPhase === currentPhase);
 
     if (!configuredPhases.includes(targetPhase)) {
-      ui.notifications.warn(localize("AOV_SKJADLBORG.Warnings.DisabledPhase"));
+      ui.notifications.warn(localize("AOV_SKJALDBORG.Warnings.DisabledPhase"));
       return state;
     }
     if (targetPhase === currentPhase && !fullCycle) return state;
@@ -260,27 +267,29 @@ export class PhaseController {
       const writesSettled = await settleMovementWrites(combat.id, { quietMs: 500, timeoutMs: 3000 });
       const pendingDrafts = pendingMovementDraftNames(combat);
       if (!writesSettled) {
-        ui.notifications.warn(game.i18n.format("AOV_SKJADLBORG.Warnings.MovementPlansPending", {
-          names: pendingDrafts.join(", ") || game.i18n.localize("AOV_SKJADLBORG.Warnings.UnknownMovementPlan")
+        ui.notifications.warn(game.i18n.format("AOV_SKJALDBORG.Warnings.MovementPlansPending", {
+          names: pendingDrafts.join(", ") || game.i18n.localize("AOV_SKJALDBORG.Warnings.UnknownMovementPlan")
         }));
         return state;
       }
       if (pendingDrafts.length) {
-        ui.notifications.warn(game.i18n.format("AOV_SKJADLBORG.Warnings.MovementDraftsSkipped", {
+        ui.notifications.warn(game.i18n.format("AOV_SKJALDBORG.Warnings.MovementDraftsSkipped", {
           names: pendingDrafts.join(", ")
         }));
       }
       const validation = this.canAdvanceFromIntent(combat);
       if (!validation.ok) {
-        ui.notifications.warn(game.i18n.format("AOV_SKJADLBORG.Warnings.Uncommitted", { names: validation.missing.join(", ") }));
+        ui.notifications.warn(game.i18n.format("AOV_SKJALDBORG.Warnings.Uncommitted", { names: validation.missing.join(", ") }));
         return state;
       }
     }
 
     if (currentPhase === PHASES.MOVEMENT && isMovementRunActive(combat)) {
-      ui.notifications.warn(localize("AOV_SKJADLBORG.Warnings.MovementRunning"));
+      ui.notifications.warn(localize("AOV_SKJALDBORG.Warnings.MovementRunning"));
       return state;
     }
+
+    await settlePlanningInitiativeWrites(combat);
 
     // Streamlined declarations can update the Combat-level queue while the GM
     // is using tracker controls. Snapshot only after those authoritative writes
@@ -331,7 +340,7 @@ export class PhaseController {
       if (crossedPhase === PHASES.BOOKKEEPING) {
         bookkeepingLedger = bookkeepingLedgerFromQueue(queue);
         if (!isPhaseEnabled(PHASES.BOOKKEEPING)) {
-          Hooks.callAll?.("aovSkjadlborgImmediateBookkeeping", combat, bookkeepingLedger, {
+          Hooks.callAll?.("aovSkjaldborgImmediateBookkeeping", combat, bookkeepingLedger, {
             phase: currentPhase,
             reason: "phase-disabled"
           });
@@ -376,8 +385,15 @@ export class PhaseController {
     });
 
     let next = await updateCombatState(combat, patch);
-    await this.resetTurnToFirst(combat);
-    await createPhaseReport(combat, next, "AOV_SKJADLBORG.Chat.PhaseAdvanced");
+    if (targetPhase === PHASES.INTENT && isDynamicPlanningInitiativeEnabled()) {
+      await initializePlanningInitiativeTracking(combat);
+      await this.clearCurrentTurn(combat, "planning-simultaneous");
+    } else if (targetPhase === PHASES.MOVEMENT) {
+      await this.clearCurrentTurn(combat, "movement-simultaneous");
+    } else {
+      await this.resetTurnToFirst(combat);
+    }
+    await createPhaseReport(combat, next);
     ui.combat?.render?.();
 
     // In the tactical structure, all predeclared routes execute together while
@@ -403,7 +419,7 @@ export class PhaseController {
       }
       catch (exception) {
         warn(exception);
-        ui.notifications.error(exception?.message ?? localize("AOV_SKJADLBORG.MovementAutomation.MoveFailed"));
+        ui.notifications.error(exception?.message ?? localize("AOV_SKJALDBORG.MovementAutomation.MoveFailed"));
         throw exception;
       }
     }
@@ -517,7 +533,7 @@ export class PhaseController {
    */
   static async advanceTurn(combat = game.combat) {
     if (!game.user.isGM) {
-      ui.notifications.warn(localize("AOV_SKJADLBORG.Warnings.GmOnly"));
+      ui.notifications.warn(localize("AOV_SKJALDBORG.Warnings.GmOnly"));
       return null;
     }
     if (!combat?.started) return null;
@@ -545,6 +561,16 @@ export class PhaseController {
     let state = getCombatState(combat);
     if (!state.enabled) state = await this.initialize(combat);
 
+    // Simultaneous Planning and visible Movement have no combatant turn cursor.
+    // Native Next Turn therefore means “advance to the next configured phase”;
+    // the relevant phase gates are still enforced by advance().
+    if (
+      (state.phase === PHASES.INTENT && isDynamicPlanningInitiativeEnabled())
+      || state.phase === PHASES.MOVEMENT
+    ) {
+      return this.advance(combat);
+    }
+
     const turns = Array.from(combat.turns ?? []);
     if (!turns.length) return state;
 
@@ -564,6 +590,67 @@ export class PhaseController {
     }
 
     return this.advance(combat);
+  }
+
+  /**
+   * Reconcile the active Combat turn cursor with the advanced Planning mode.
+   * When enabled, Planning deliberately has no current combatant; when disabled
+   * again, the first sorted combatant is restored.
+   *
+   * @param {Combat|null} [combat=game.combat] Foundry Combat document.
+   * @returns {Promise<void>}
+   */
+  static async reconcilePlanningTurnMode(combat = game.combat) {
+    if (!game.user?.isGM || !combat?.started) return;
+    if (isDynamicPlanningInitiativeActive(combat)) {
+      await initializePlanningInitiativeTracking(combat);
+      await this.clearCurrentTurn(combat, "planning-mode-reconcile");
+      return;
+    }
+    const state = getCombatState(combat);
+    if (state.phase === PHASES.INTENT && combat.turn == null) {
+      await this.resetTurnToFirst(combat);
+    }
+  }
+
+  /**
+   * Clear the Foundry turn cursor without changing round or phase state.
+   *
+   * @param {Combat} combat Foundry Combat document.
+   * @param {string} reason Diagnostic reason.
+   * @returns {Promise<void>}
+   */
+  static async clearCurrentTurn(combat, reason = "planning-simultaneous") {
+    if (!combat?.started || combat.turn == null) return;
+    await combat.update({ turn: null }, { ...internalUpdateOptions(reason), turnEvents: false });
+  }
+
+  /**
+   * Set an arbitrary tracker participant as the current Combatant. This GM-only
+   * escape hatch is exposed from the Combat context menu and intentionally
+   * bypasses phase navigation interception.
+   *
+   * @param {Combat|null} [combat=game.combat] Foundry Combat document.
+   * @param {string|null} combatantId Target Combatant id.
+   * @returns {Promise<Combatant|null>} Selected Combatant.
+   */
+  static async setCurrentCombatant(combat = game.combat, combatantId = null) {
+    if (!game.user?.isGM) {
+      ui.notifications.warn(localize("AOV_SKJALDBORG.Warnings.GmOnly"));
+      return null;
+    }
+    if (!combat?.started || !combatantId) return null;
+    const turns = Array.from(combat.turns ?? []);
+    const turn = turns.findIndex(candidate => candidate.id === combatantId);
+    if (turn < 0) return null;
+    const combatant = turns[turn];
+    if (combat.turn !== turn) {
+      const current = combat.turn == null ? -1 : Number(combat.turn);
+      const direction = turn === current ? 0 : turn > current ? 1 : -1;
+      await combat.update({ turn }, internalUpdateOptions("set-current-combatant", direction));
+    }
+    ui.combat?.render?.();
+    return combatant;
   }
 
   /**
@@ -589,7 +676,7 @@ export class PhaseController {
    */
   static async setActionStatus(combat, actionId, status = RESOLUTION_STATUS.RESOLVED) {
     if (!game.user.isGM) {
-      ui.notifications.warn(localize("AOV_SKJADLBORG.Warnings.GmOnly"));
+      ui.notifications.warn(localize("AOV_SKJALDBORG.Warnings.GmOnly"));
       return false;
     }
     const updated = await setActionStatus(combat, actionId, status);
@@ -603,7 +690,7 @@ export class PhaseController {
       const ledger = bookkeepingLedgerFromQueue(state.resolutionQueue ?? []);
       await updateCombatState(combat, { bookkeepingLedger: ledger });
       const action = (state.resolutionQueue ?? []).find(candidate => candidate.id === actionId) ?? null;
-      Hooks.callAll?.("aovSkjadlborgImmediateBookkeeping", combat, ledger, {
+      Hooks.callAll?.("aovSkjaldborgImmediateBookkeeping", combat, ledger, {
         phase: state.phase,
         reason: "resolution-outcome",
         action
@@ -637,7 +724,7 @@ export class PhaseController {
         intent: {
           status: "committed",
           actionCategory: first.actionCategory ?? "other",
-          publicText: game.i18n.localize("AOV_SKJADLBORG.Actions.Carryover"),
+          publicText: game.i18n.localize("AOV_SKJALDBORG.Actions.Carryover"),
           privateText: "",
           modifiers: {
             drawWeapon: false,

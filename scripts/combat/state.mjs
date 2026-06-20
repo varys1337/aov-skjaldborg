@@ -1,4 +1,4 @@
-import { ENGAGEMENT_STATUS, FLAG_KEYS, INTENT_STATUS, MODULE_ID, MODULE_VERSION, MOVEMENT_PLAN_STATUS, PHASES } from "../constants.mjs";
+import { ACTION_CATEGORIES, ENGAGEMENT_STATUS, FLAG_KEYS, INTENT_STATUS, MODULE_ID, MODULE_VERSION, MOVEMENT_PLAN_STATUS, PHASES } from "../constants.mjs";
 import { AoVAdapter } from "../adapter/aov-adapter.mjs";
 import { firstEnabledPhase, getEnabledPhases } from "./phase-structure.mjs";
 
@@ -94,6 +94,7 @@ export function defaultCombatState(combat) {
  */
 export function defaultCombatantState() {
   return {
+    version: MODULE_VERSION,
     intent: {
       status: INTENT_STATUS.UNCOMMITTED,
       actionCategory: "attack",
@@ -144,6 +145,13 @@ export function defaultCombatantState() {
       reason: ""
     },
     dexLedger: null,
+    planningInitiative: {
+      logicalRound: null,
+      baselineInitiative: null,
+      externalAdjustment: 0,
+      projectedInitiative: null,
+      updatedAt: 0
+    },
     scheduledActions: [],
     reactionCount: 0,
     gmNotes: "",
@@ -208,7 +216,11 @@ export async function clearCombatState(combat) {
  */
 export function getCombatantState(combatant) {
   const raw = combatant?.getFlag(MODULE_ID, FLAG_KEYS.COMBATANT_STATE) ?? {};
-  return foundry.utils.mergeObject(defaultCombatantState(), clone(raw), { inplace: false });
+  const state = foundry.utils.mergeObject(defaultCombatantState(), clone(raw), { inplace: false });
+  if (state.intent?.actionCategory === "flee") {
+    state.intent.actionCategory = ACTION_CATEGORIES.RETREAT;
+  }
+  return state;
 }
 
 /**
@@ -293,5 +305,5 @@ export async function resetCombatantRoundState(combat) {
  * @returns {string}
  */
 export function phaseLabelKey(phase) {
-  return `AOV_SKJADLBORG.Phases.${phase ?? PHASES.INTENT}`;
+  return `AOV_SKJALDBORG.Phases.${phase ?? PHASES.INTENT}`;
 }
