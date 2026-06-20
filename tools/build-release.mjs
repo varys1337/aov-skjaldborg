@@ -15,7 +15,7 @@ import { deflateRawSync } from "node:zlib";
 const root = process.cwd();
 const dist = join(root, "dist");
 const staging = join(dist, "package");
-const archiveName = "aov-skjadlborg.zip";
+const archiveName = "aov-skjaldborg.zip";
 const archivePath = join(dist, archiveName);
 const manifestAssetPath = join(dist, "module.json");
 const checksumPath = join(dist, "SHA256SUMS.txt");

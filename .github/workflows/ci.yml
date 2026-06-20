@@ -39,14 +39,14 @@ jobs:
         run: npm run build
 
       - name: Verify release archive
-        run: unzip -t dist/aov-skjadlborg.zip
+        run: unzip -t dist/aov-skjaldborg.zip
 
       - name: Upload CI build
         uses: actions/upload-artifact@v4
         with:
-          name: aov-skjadlborg-${{ github.sha }}
+          name: aov-skjaldborg-${{ github.sha }}
           path: |
-            dist/aov-skjadlborg.zip
+            dist/aov-skjaldborg.zip
             dist/module.json
             dist/SHA256SUMS.txt
           if-no-files-found: error

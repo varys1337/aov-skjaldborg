@@ -5,7 +5,9 @@ import process from "node:process";
 const root = process.cwd();
 const repository = "varys1337/aov-skjaldborg";
 const repositoryUrl = `https://github.com/${repository}`;
-const archiveName = "aov-skjadlborg.zip";
+const moduleId = "aov-skjaldborg";
+const moduleTitle = "Age of Vikings - Skjaldborg";
+const archiveName = "aov-skjaldborg.zip";
 const errors = [];
 
 const manifest = readJson("module.json");
@@ -14,14 +16,17 @@ const packageLock = existsSync(join(root, "package-lock.json")) ? readJson("pack
 const constants = readText("scripts/constants.mjs");
 const runtimeVersion = constants?.match(/MODULE_VERSION\s*=\s*["']([^"']+)["']/)?.[1];
 
-requireCondition(manifest?.id === "aov-skjadlborg", "module.json id must be aov-skjadlborg");
-requireCondition(manifest?.title === "Age of Vikings - Skjadlborg", "module.json title is unexpected");
+requireCondition(manifest?.id === moduleId, `module.json id must be ${moduleId}`);
+requireCondition(manifest?.title === moduleTitle, `module.json title must be ${moduleTitle}`);
 requireCondition(isSemver(manifest?.version), "module.json version must use semantic versioning");
+requireCondition(packageJson?.name === moduleId, `package.json name must be ${moduleId}`);
 requireCondition(packageJson?.version === manifest?.version, "package.json version must match module.json");
 requireCondition(runtimeVersion === manifest?.version, "scripts/constants.mjs MODULE_VERSION must match module.json");
 
 if (packageLock) {
+  requireCondition(packageLock.name === moduleId, `package-lock.json name must be ${moduleId}`);
   requireCondition(packageLock.version === manifest?.version, "package-lock.json version must match module.json");
+  requireCondition(packageLock.packages?.[""]?.name === moduleId, `package-lock.json root package name must be ${moduleId}`);
   requireCondition(
     packageLock.packages?.[""]?.version === manifest?.version,
     "package-lock.json root package version must match module.json"
@@ -35,7 +40,7 @@ requireCondition(
 );
 requireCondition(
   manifest?.download === `${repositoryUrl}/releases/download/v${manifest?.version}/${archiveName}`,
-  "module.json download URL must target the matching version tag"
+  "module.json download URL must target the matching version tag and corrected archive name"
 );
 requireCondition(manifest?.readme === `${repositoryUrl}/blob/main/README.md`, "module.json readme URL is incorrect");
 requireCondition(manifest?.bugs === `${repositoryUrl}/issues`, "module.json bugs URL is incorrect");
@@ -43,7 +48,11 @@ requireCondition(manifest?.changelog === `${repositoryUrl}/releases`, "module.js
 requireCondition(Array.isArray(manifest?.esmodules) && manifest.esmodules.length > 0, "At least one esmodule is required");
 requireCondition(Array.isArray(manifest?.styles), "module.json styles must be an array");
 requireCondition(Array.isArray(manifest?.languages), "module.json languages must be an array");
-requireCondition(Array.isArray(manifest?.system) && manifest.system.includes("aov"), "Module must target the aov system");
+requireCondition(
+  Array.isArray(manifest?.relationships?.systems)
+    && manifest.relationships.systems.some(relationship => relationship?.id === "aov"),
+  "Module relationships must target the aov system"
+);
 requireCondition(manifest?.socket === true, "Module socket support must remain enabled");
 
 for (const file of manifest?.esmodules ?? []) requireRuntimeFile(file, "esmodule");

@@ -39,7 +39,11 @@
     }
   ],
   "socket": true,
-  "readme": "README.md",
-  "media": [],
-  "download": "https://github.com/varys1337/aov-skjaldborg/releases/download/v0.3.0/aov-skjadlborg.zip"
+  "url": "https://github.com/varys1337/aov-skjaldborg",
+  "manifest": "https://github.com/varys1337/aov-skjaldborg/releases/latest/download/module.json",
+  "download": "https://github.com/varys1337/aov-skjaldborg/releases/download/v0.3.0/aov-skjaldborg.zip",
+  "readme": "https://github.com/varys1337/aov-skjaldborg/blob/main/README.md",
+  "bugs": "https://github.com/varys1337/aov-skjaldborg/issues",
+  "changelog": "https://github.com/varys1337/aov-skjaldborg/releases",
+  "media": []
 }
