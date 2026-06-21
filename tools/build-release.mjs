@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import {
   copyFileSync,
   cpSync,
+  existsSync,
   mkdirSync,
   readFileSync,
   readdirSync,
@@ -25,8 +26,10 @@ const sourceManifest = JSON.parse(readFileSync(join(root, "module.json"), "utf8"
 const tag = readTagArgument() ?? `v${sourceManifest.version}`;
 const normalizedTag = tag.startsWith("v") ? tag : `v${tag}`;
 
-const runtimeFiles = ["README.md", "previous-releases.md"];
-const runtimeDirectories = ["docs", "lang", "scripts", "styles", "templates"];
+const requiredRuntimeFiles = ["README.md"];
+const optionalRuntimeFiles = ["previous-releases.md"];
+const requiredRuntimeDirectories = ["lang", "scripts", "styles", "templates"];
+const optionalRuntimeDirectories = ["docs"];
 
 const crcTable = Array.from({ length: 256 }, (_, index) => {
   let value = index;
@@ -54,11 +57,19 @@ const releaseManifest = {
 rmSync(dist, { recursive: true, force: true });
 mkdirSync(staging, { recursive: true });
 
-for (const file of runtimeFiles) {
+for (const file of requiredRuntimeFiles) {
   copyFileSync(join(root, file), join(staging, file));
 }
-for (const directory of runtimeDirectories) {
+for (const file of optionalRuntimeFiles) {
+  const source = join(root, file);
+  if (existsSync(source)) copyFileSync(source, join(staging, file));
+}
+for (const directory of requiredRuntimeDirectories) {
   cpSync(join(root, directory), join(staging, directory), { recursive: true });
+}
+for (const directory of optionalRuntimeDirectories) {
+  const source = join(root, directory);
+  if (existsSync(source)) cpSync(source, join(staging, directory), { recursive: true });
 }
 
 const manifestText = `${JSON.stringify(releaseManifest, null, 2)}\n`;
@@ -105,7 +116,7 @@ function writeZip(sourceDirectory, destination) {
   const timestamp = dosTimestamp(new Date(Number(process.env.SOURCE_DATE_EPOCH || 1577836800) * 1000));
 
   for (const file of collectFiles(sourceDirectory)) {
-    const name = relative(sourceDirectory, file).replaceAll("\\", "/");
+    const name = relative(sourceDirectory, file).replaceAll("\\\\", "/");
     const nameBuffer = Buffer.from(name, "utf8");
     const data = readFileSync(file);
     const compressed = deflateRawSync(data, { level: 9 });
