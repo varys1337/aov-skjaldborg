@@ -1,7 +1,7 @@
 import { MODULE_ID, SOCKET_NAME } from "./constants.mjs";
 import { AoVAdapter } from "./adapter/aov-adapter.mjs";
 import { getCombatState } from "./combat/state.mjs";
-import { detectV14Capabilities, getLastCapabilityReport } from "./compat/capabilities.mjs";
+import { detectV14Capabilities, getLastCapabilityReport, statusEffectCapabilityDetail } from "./compat/capabilities.mjs";
 import { getEngagedStatusEffectMode } from "./combat/engagement-status.mjs";
 import {
   getAoVMessageModeCompatibilityStatus,
@@ -19,6 +19,18 @@ import { getAdjustInitiativeIntegrationStatus } from "./compat/aov-adjust-initia
  */
 function check(id, ok, detail = "") {
   return { id, ok: !!ok, detail };
+}
+
+/**
+ * Build a diagnostic row for contextual checks that are informative but not
+ * installation failures.
+ *
+ * @param {string} id Check id.
+ * @param {string} detail Detail for console output.
+ * @returns {{id: string, ok: boolean, detail: string, optional: boolean}}
+ */
+function optionalCheck(id, detail = "") {
+  return { id, ok: true, detail, optional: true };
 }
 
 /**
@@ -53,6 +65,7 @@ export async function runDiagnostics() {
   const hardBlockers = capabilities.hardBlockers ?? capabilities.missing ?? [];
   const warnings = capabilities.warnings ?? [];
   const degradedFeatures = capabilities.degradedFeatures ?? [];
+  const engagementStatusMode = getEngagedStatusEffectMode();
   results.push(check("foundry-generation", capabilities.foundry.generationOk, `generation=${capabilities.foundry.generation}`));
   results.push(check("foundry-version", true, `${capabilities.foundry.version}; minimum confirmed=${capabilities.foundry.versionOk}`));
   results.push(check("aov-version", true, `id=${capabilities.system.id}; version=${capabilities.system.version}; minimum confirmed=${capabilities.system.versionOk}`));
@@ -69,8 +82,8 @@ export async function runDiagnostics() {
   results.push(check("scene-move-tokens", true, capabilities.movement.sceneMoveTokens ? "native" : "per-token fallback"));
   results.push(check("token-move", capabilities.movement.tokenMove));
   results.push(check("token-complete-movement-path", true, capabilities.movement.completeMovementPath ? "native" : "fallback expansion"));
-  results.push(check("status-effects-v14", true, capabilities.effects.statusEffectsObject ? "object catalog present" : "catalog unavailable"));
-  results.push(check("status-effect-mode", true, getEngagedStatusEffectMode()));
+  results.push(check("status-effects-v14", true, capabilities.effects.statusEffectsObject ? "object catalog present" : "catalog unavailable; module fallback active when ActiveEffect is available"));
+  results.push(check("status-effect-mode", true, `${engagementStatusMode}; ${statusEffectCapabilityDetail({ ...capabilities, statusEffectMode: engagementStatusMode })}`));
   results.push(check("active-effect-class", true, String(capabilities.effects.activeEffectClass)));
   results.push(check("aov-combat-class", capabilities.combat.combatClass, `${capabilities.combat.className}; name recognized=${capabilities.combat.aovCombatClass}`));
   results.push(check("message-mode-compatibility", isAoVMessageModeCompatible(), "Combat#rollInitiative does not access core.rollMode"));
@@ -93,7 +106,9 @@ export async function runDiagnostics() {
   results.push(check("v14-migration-last-run", true, String(game.settings.get(MODULE_ID, "v14MigrationLastRun") ?? "")));
   results.push(check("combat-class-preserved", CONFIG.Combat?.documentClass?.name !== "SkjaldborgCombat", CONFIG.Combat?.documentClass?.name));
   results.push(check("tracker-class-preserved", CONFIG.ui?.combat?.name !== "SkjaldborgCombatTracker", CONFIG.ui?.combat?.name));
-  results.push(check("active-combat", !!combat, combat?.id ?? ""));
+  results.push(combat
+    ? check("active-combat", true, combat.id ?? "")
+    : optionalCheck("active-combat", "not active; combat-state checks skipped"));
   if (combat) {
     const state = getCombatState(combat);
     results.push(check("combat-state-readable", !!state && typeof state.phase === "string", state.phase));

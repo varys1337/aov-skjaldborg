@@ -22,6 +22,7 @@ import { MovementDebugSettings } from "./apps/movement-debug-settings.mjs";
 import { ReportSettings } from "./apps/report-settings.mjs";
 import { PhaseStructureSettings } from "./apps/phase-structure-settings.mjs";
 import { debug } from "./logger.mjs";
+import { RenderCoordinator } from "./ui/render-coordinator.mjs";
 
 /**
  * Register all world and client settings used by the module.
@@ -203,7 +204,7 @@ export function registerSettings() {
     type: Boolean,
     default: false,
     onChange: () => {
-      ui.combat?.render?.();
+      RenderCoordinator.invalidateCombatTracker("setting-enabled");
     }
   });
 
@@ -218,7 +219,7 @@ export function registerSettings() {
       if (game.user?.isGM) {
         void game.aovSkjaldborg?.phase?.reconcilePlanningTurnMode?.(game.combat);
       }
-      ui.combat?.render?.();
+      RenderCoordinator.invalidateCombatTracker("setting-dynamic-planning");
     }
   });
 
@@ -234,7 +235,7 @@ export function registerSettings() {
       if (game.user?.isGM && combat?.getFlag?.(MODULE_ID, "combatState")?.enabled) {
         void game.aovSkjaldborg?.phase?.synchronizeRequireAllCommit?.(combat, value === true);
       }
-      ui.combat?.render?.();
+      RenderCoordinator.invalidateCombatTracker("setting-require-all-commit");
     }
   });
 
@@ -245,7 +246,7 @@ export function registerSettings() {
       config: false,
       type: Boolean,
       default: true,
-      onChange: () => ui.combat?.render?.()
+      onChange: () => RenderCoordinator.invalidateCombatTracker("setting-phase-structure")
     });
   }
 
@@ -419,6 +420,15 @@ export function registerSettings() {
     config: false,
     type: String,
     default: ""
+  });
+
+  game.settings.register(MODULE_ID, "performanceDiagnostics", {
+    name: "AOV_SKJALDBORG.Settings.PerformanceDiagnostics.Name",
+    hint: "AOV_SKJALDBORG.Settings.PerformanceDiagnostics.Hint",
+    scope: "client",
+    config: false,
+    type: Boolean,
+    default: false
   });
 
   game.settings.register(MODULE_ID, "combatTrackingMigrationVersion", {

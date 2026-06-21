@@ -10,7 +10,7 @@ const repositoryUrl = "https://github.com/varys1337/aov-skjaldborg";
 const archiveName = "aov-skjaldborg.zip";
 
 if (!version || !semver.test(version)) {
-  console.error("Usage: npm run set-version -- <major.minor.patch>");
+  console.error("Usage: npm run set-version -- <major.minor.patch[-prerelease]>");
   process.exit(1);
 }
 
@@ -25,18 +25,13 @@ updateJson("module.json", manifest => {
 });
 
 updateJson("package.json", packageJson => {
-  packageJson.name = "aov-skjaldborg";
   packageJson.version = version;
 });
 
 if (existsSync(join(root, "package-lock.json"))) {
   updateJson("package-lock.json", packageLock => {
-    packageLock.name = "aov-skjaldborg";
     packageLock.version = version;
-    if (packageLock.packages?.[""]) {
-      packageLock.packages[""].name = "aov-skjaldborg";
-      packageLock.packages[""].version = version;
-    }
+    if (packageLock.packages?.[""]) packageLock.packages[""].version = version;
   });
 }
 
@@ -52,7 +47,7 @@ writeFileSync(
   "utf8"
 );
 
-console.log(`Updated module, package, lockfile, runtime, and release URLs to ${version}.`);
+console.log(`Updated module, package, lockfile, and runtime versions to ${version}.`);
 
 function updateJson(relativePath, mutate) {
   const path = join(root, relativePath);

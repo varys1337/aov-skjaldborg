@@ -22,6 +22,8 @@ import { movementDebug, movementDebugWarn, newMovementDebugRunId } from "./movem
 import { settleMovementWrites } from "./authoritative-write-queue.mjs";
 import { applyMovementDexResults } from "./resolution-queue.mjs";
 import { isMovementPlanningPhase, shouldExecuteMovementImmediately } from "./phase-structure.mjs";
+import { RenderCoordinator } from "../ui/render-coordinator.mjs";
+import { performanceDiagnostics } from "../performance/performance-monitor.mjs";
 
 export { cleanMovementPoint, normalizeMovementRoute } from "./movement-route.mjs";
 
@@ -29,9 +31,11 @@ const activeRuns = new Map();
 const movementRunLocks = new Map();
 const activeEngagementPairs = new Map();
 const movementRulerDrafts = new Map();
+const movementCaptureNotificationBatches = new Map();
 const MOVEMENT_RULER_CAPTURE_PATCH = Symbol.for("aov-skjaldborg.movement-ruler-capture");
 const DEFAULT_GRID_SIZE = 100;
 const DEFAULT_MOVEMENT_TICK_DELAY_MS = 250;
+const MOVEMENT_CAPTURE_NOTIFICATION_WINDOW_MS = 350;
 const MAX_BLOCKED_TICKS = 8;
 const FRIENDLY_DISPOSITION = 1;
 const HOSTILE_DISPOSITION = -1;
@@ -53,6 +57,49 @@ const RAW_WEAPON_LENGTHS_METERS = Object.freeze({
  */
 function gridSize() {
   return Number(canvas.scene?.grid?.size ?? canvas.grid?.size) || DEFAULT_GRID_SIZE;
+}
+
+/**
+ * Batch movement-captured confirmations without flooding the UI during rapid
+ * ruler corrections.
+ *
+ * @param {{combatId?: string|null, combatantId?: string|null, tokenId?: string|null}} detail Capture detail.
+ * @returns {void}
+ */
+function notifyMovementPlanCaptured(detail = {}) {
+  const notificationKey = detail.combatId || "no-combat";
+  const batch = movementCaptureNotificationBatches.get(notificationKey) ?? {
+    combatantIds: new Set(),
+    tokenIds: new Set(),
+    count: 0,
+    timer: null
+  };
+  batch.count += 1;
+  if (detail.combatantId) batch.combatantIds.add(detail.combatantId);
+  if (detail.tokenId) batch.tokenIds.add(detail.tokenId);
+  if (batch.timer) {
+    performanceDiagnostics.count("movement.capture.notification.suppressed", 1, {
+      combatId: detail.combatId ?? null,
+      combatantId: detail.combatantId ?? null,
+      tokenId: detail.tokenId ?? null
+    });
+    return;
+  }
+
+  batch.timer = globalThis.setTimeout(() => {
+    movementCaptureNotificationBatches.delete(notificationKey);
+    const combatantCount = Math.max(batch.combatantIds.size, batch.tokenIds.size, batch.count);
+    const message = combatantCount > 1
+      ? game.i18n.format("AOV_SKJALDBORG.MovementAutomation.PlansCaptured", { count: combatantCount })
+      : game.i18n.localize("AOV_SKJALDBORG.MovementAutomation.PlanCaptured");
+    ui.notifications.info(message);
+    performanceDiagnostics.count("movement.capture.notification.shown", 1, {
+      combatId: detail.combatId ?? null,
+      count: combatantCount
+    });
+  }, MOVEMENT_CAPTURE_NOTIFICATION_WINDOW_MS);
+
+  movementCaptureNotificationBatches.set(notificationKey, batch);
 }
 
 /**
@@ -198,6 +245,8 @@ function gridRectsOverlap(first, second) {
  * @returns {object[]} Stoppable movement waypoints.
  */
 export function movementExecutionWaypoints(document, storedWaypoints) {
+  const measureId = performanceDiagnostics.markStart("movement.executionWaypoints");
+  try {
   const requested = [];
   if (Array.isArray(storedWaypoints)) {
     for (const waypoint of storedWaypoints) appendRoutePoint(requested, waypoint);
@@ -311,6 +360,12 @@ export function movementExecutionWaypoints(document, storedWaypoints) {
     checkpoints
   }), { level: MOVEMENT_DEBUG_LEVELS.VERBOSE, tokenId: document?.id ?? document?._id ?? null });
   return checkpoints;
+  } finally {
+    performanceDiagnostics.markEnd(measureId, {
+      tokenId: document?.id ?? document?._id ?? null,
+      storedCount: storedWaypoints?.length ?? 0
+    });
+  }
 }
 
 /**
@@ -738,7 +793,7 @@ function bankRulerMovementDraft(document, rulerData, requestGm) {
     combatantId: decision.combatant.id,
     movement: draftPlan
   }).then(() => {
-    ui.combat?.render?.();
+    RenderCoordinator.invalidateCombatTracker("movement-plan-recorded");
   }).catch(warn);
 }
 
@@ -789,7 +844,7 @@ function restoreCancelledRulerDraft(draft, requestGm) {
     combatId: combat.id,
     combatantId: combatant.id,
     movement: restored
-  }).then(() => ui.combat?.render?.()).catch(warn);
+  }).then(() => RenderCoordinator.invalidateCombatTracker("movement-plan-cancelled")).catch(warn);
 }
 
 /**
@@ -1644,7 +1699,7 @@ async function engagePair(combat, first, second) {
     await showScrollingText(document, game.i18n.localize("AOV_SKJALDBORG.MovementAutomation.Engaged"));
   }));
 
-  ui.combat?.render?.();
+  RenderCoordinator.invalidateCombatTracker("movement-engagement");
   debug("engaged movement pair", { combatId: combat.id, first: first.id, second: second.id });
 }
 
@@ -2336,7 +2391,7 @@ async function startMovementPhaseUnlocked(combat) {
   // completed, stopped, or failed. At this point each stored distance is the
   // authoritative travelled distance rather than the route planned earlier.
   await applyMovementDexResults(combat);
-  ui.combat?.render?.();
+  RenderCoordinator.invalidateCombatTracker("movement-run-complete");
   debug("movement run complete", {
     combatId: combat.id,
     results: contexts.map(context => ({ combatantId: context.combatant.id, status: context.status }))
@@ -2472,8 +2527,17 @@ export function registerMovementHooks(requestGm) {
     }).then(result => {
       if (result === null) return;
       if (key) movementRulerDrafts.delete(key);
-      ui.notifications.info(game.i18n.localize("AOV_SKJALDBORG.MovementAutomation.PlanCaptured"));
-      ui.combat?.render?.();
+      performanceDiagnostics.count("movement.capture.write", 1, {
+        combatId: decision.combat.id,
+        combatantId: decision.combatant.id,
+        tokenId: document?.id ?? document?._id ?? null
+      });
+      notifyMovementPlanCaptured({
+        combatId: decision.combat.id,
+        combatantId: decision.combatant.id,
+        tokenId: document?.id ?? document?._id ?? null
+      });
+      RenderCoordinator.invalidateCombatTracker("movement-captured");
     }).catch(exception => {
       warn(exception);
       ui.notifications.error(exception?.message ?? game.i18n.localize("AOV_SKJALDBORG.MovementAutomation.MoveFailed"));

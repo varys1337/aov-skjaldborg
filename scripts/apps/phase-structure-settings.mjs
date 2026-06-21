@@ -4,6 +4,7 @@ import {
   PHASE_STRUCTURE_SETTING_KEYS,
   PHASES
 } from "../constants.mjs";
+import { RenderCoordinator } from "../ui/render-coordinator.mjs";
 
 const { ApplicationV2, HandlebarsApplicationMixin } = foundry.applications.api;
 
@@ -113,7 +114,7 @@ export class PhaseStructureSettings extends HandlebarsApplicationMixin(Applicati
     )));
 
     await game.aovSkjaldborg?.phase?.reconcilePhaseStructure?.(game.combat);
-    ui.combat?.render?.();
+    RenderCoordinator.invalidateCombatTracker("phase-structure-settings");
   }
 
   /**

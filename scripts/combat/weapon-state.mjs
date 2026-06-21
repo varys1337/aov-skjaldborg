@@ -50,6 +50,128 @@ export function isCarriedWeapon(item) {
 }
 
 /**
+ * Normalize authored weapon/category text for compatibility comparisons.
+ * AoV weapon categories are normally stored as CIDs, but imported or
+ * hand-authored Items may also contain human-readable values.
+ *
+ * @param {unknown} value Candidate descriptor.
+ * @returns {string}
+ */
+function normalizeWeaponDescriptor(value) {
+  return String(value ?? "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+const HAND_TO_HAND_DESCRIPTORS = Object.freeze(new Set([
+  "handtohand",
+  "handtohandweapons",
+  "unarmed",
+  "unarmedcombat",
+  "fist",
+  "kick",
+  "grapple"
+]));
+
+/**
+ * Test a descriptor for the AoV Hand-to-hand weapon category or one of the
+ * three canonical unarmed attacks.
+ *
+ * @param {unknown} value Category CID/name or weapon name.
+ * @returns {boolean}
+ */
+function isHandToHandDescriptor(value) {
+  const normalized = normalizeWeaponDescriptor(value);
+  if (!normalized) return false;
+  if (HAND_TO_HAND_DESCRIPTORS.has(normalized)) return true;
+  return normalized.includes("handtohand") || normalized.includes("unarmed");
+}
+
+/**
+ * Return whether an actor-owned weapon is a natural weapon. Natural attacks
+ * are intrinsic and remain available regardless of carried/packed state.
+ *
+ * @param {Item|object|null|undefined} item Candidate owned Item.
+ * @returns {boolean}
+ */
+export function isNaturalAttackWeapon(item) {
+  return item?.type === "weapon"
+    && normalizeWeaponDescriptor(item.system?.weaponType) === "naturalwpn";
+}
+
+/**
+ * Resolve whether a weapon belongs to the Hand-to-hand category. The fast
+ * path supports readable category values and the canonical Fist/Kick/Grapple
+ * names. The CID path uses AoV's public category resolver when available.
+ *
+ * @param {Item|object|null|undefined} item Candidate owned Item.
+ * @returns {Promise<boolean>}
+ */
+export async function isHandToHandAttackWeapon(item) {
+  if (item?.type !== "weapon") return false;
+  if (isHandToHandDescriptor(item.name)) return true;
+  if (isHandToHandDescriptor(item.system?.weaponCat)) return true;
+  if (isHandToHandDescriptor(item.system?.weaponCatName)) return true;
+
+  const categoryCid = String(item.system?.weaponCat ?? "").trim();
+  const resolver = globalThis.game?.aov?.cid?.fromCID;
+  if (!categoryCid || typeof resolver !== "function") return false;
+
+  try {
+    const resolved = await resolver.call(globalThis.game.aov.cid, categoryCid);
+    const categories = Array.isArray(resolved) ? resolved : [resolved];
+    return categories.some(category =>
+      isHandToHandDescriptor(category?.name)
+      || isHandToHandDescriptor(category?.system?.name)
+      || isHandToHandDescriptor(category?.flags?.aov?.cidFlag?.id)
+    );
+  } catch (exception) {
+    debug("Unable to resolve an AoV weapon category while preparing attack options", {
+      itemId: item?.id,
+      categoryCid,
+      exception
+    });
+    return false;
+  }
+}
+
+/**
+ * Return the weapons that can be used immediately for an Attack workflow.
+ *
+ * Physical weapons are restricted to the module-managed readied weapon.
+ * Hand-to-hand attacks and natural weapons are intrinsic and remain available
+ * without being readied. This intentionally differs from getCarriedWeapons(),
+ * which is still used by the draw/sheathe workflow.
+ *
+ * @param {Actor|object|null|undefined} actor Actor document.
+ * @returns {Promise<Array<Item|object>>}
+ */
+export async function getAttackWeapons(actor) {
+  const readied = getReadiedWeapon(actor);
+  const candidates = actorItems(actor).filter(item => item?.type === "weapon");
+  const intrinsic = [];
+
+  for (const item of candidates) {
+    if (isNaturalAttackWeapon(item) || await isHandToHandAttackWeapon(item)) {
+      intrinsic.push(item);
+    }
+  }
+
+  const unique = new Map();
+  if (readied) unique.set(String(readied.id), readied);
+  for (const item of intrinsic) unique.set(String(item.id), item);
+
+  const locale = globalThis.game?.i18n?.lang;
+  const sortedIntrinsic = Array.from(unique.values())
+    .filter(item => item?.id !== readied?.id)
+    .sort((a, b) => String(a.name ?? "").localeCompare(String(b.name ?? ""), locale));
+
+  return readied ? [readied, ...sortedIntrinsic] : sortedIntrinsic;
+}
+
+/**
  * Return the actor's carried weapons in deterministic name order.
  *
  * @param {Actor|object|null|undefined} actor Actor document.

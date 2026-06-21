@@ -3,6 +3,7 @@ import { ACTION_CATEGORIES, RESOLUTION_STATUS } from "../constants.mjs";
 import { getCombatState, getCombatantState, phaseLabelKey } from "../combat/state.mjs";
 import { getEnabledPhases, shouldExecuteMovementImmediately } from "../combat/phase-structure.mjs";
 import { requestGm } from "../socket.mjs";
+import { RenderCoordinator } from "../ui/render-coordinator.mjs";
 
 const { ApplicationV2, HandlebarsApplicationMixin } = foundry.applications.api;
 
@@ -237,8 +238,8 @@ export class CombatHUD extends HandlebarsApplicationMixin(ApplicationV2) {
       ...payload
     });
     if (action === "submitIntent") this.initialActionCategory = null;
-    this.render(false);
-    ui.combat?.render?.();
+    void this.render(false);
+    RenderCoordinator.invalidateCombatTracker(`combat-hud-${action}`);
     return result;
   }
 

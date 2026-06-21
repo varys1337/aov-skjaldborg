@@ -238,6 +238,22 @@ export async function setCombatantState(combatant, state) {
 }
 
 /**
+ * Build a Combatant embedded-document update for module state.
+ *
+ * @param {Combatant} combatant Combatant document.
+ * @param {Partial<import("../types.mjs").SkjaldborgCombatantState>} patch State patch.
+ * @returns {object}
+ */
+export function combatantStateUpdateData(combatant, patch) {
+  const next = foundry.utils.mergeObject(getCombatantState(combatant), patch, { inplace: false });
+  next.updatedAt = Date.now();
+  return {
+    _id: combatant.id,
+    [`flags.${MODULE_ID}.${FLAG_KEYS.COMBATANT_STATE}`]: next
+  };
+}
+
+/**
  * Merge and persist a partial Combatant state update.
  *
  * @param {Combatant} combatant Foundry Combatant document.
@@ -245,10 +261,7 @@ export async function setCombatantState(combatant, state) {
  * @returns {Promise<import("../types.mjs").SkjaldborgCombatantState>}
  */
 export async function updateCombatantState(combatant, patch) {
-  return setCombatantState(
-    combatant,
-    foundry.utils.mergeObject(getCombatantState(combatant), patch, { inplace: false })
-  );
+  return setCombatantState(combatant, patch);
 }
 
 /**

@@ -1,5 +1,6 @@
 import { MODULE_ID, MOVEMENT_DEBUG_CATEGORIES, MOVEMENT_DEBUG_LEVELS } from "../constants.mjs";
 import { movementDebug, movementDebugWarn } from "./movement-debugger.mjs";
+import { performanceDiagnostics } from "../performance/performance-monitor.mjs";
 
 const DEFAULT_WAYPOINT_LIMIT = 250;
 const TRUNCATION_NOTIFICATION_THROTTLE_MS = 5000;
@@ -205,6 +206,8 @@ function movementRouteCandidates(movement, { document = null, origin = null, des
  * @returns {{route: object[], waypoints: object[], destination: object|null, source: string|null, truncated: boolean, candidates: object[]}}
  */
 export function normalizeMovementRoute(movement = {}, { limit = DEFAULT_WAYPOINT_LIMIT, document = null, origin = null } = {}) {
+  const measureId = performanceDiagnostics.markStart("movement.normalizeRoute");
+  try {
   const declaredOrigin = cleanMovementPoint(origin)
     ?? cleanMovementPoint(movement.origin)
     ?? cleanMovementPoint(document?._source)
@@ -277,4 +280,10 @@ export function normalizeMovementRoute(movement = {}, { limit = DEFAULT_WAYPOINT
     truncated,
     candidates: candidateSummary
   };
+  } finally {
+    performanceDiagnostics.markEnd(measureId, {
+      tokenId: document?.id ?? document?._id ?? null,
+      limit
+    });
+  }
 }

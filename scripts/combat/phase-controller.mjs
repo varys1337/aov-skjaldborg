@@ -1,5 +1,5 @@
 import { AoVAdapter } from "../adapter/aov-adapter.mjs";
-import { MODULE_ID, PHASE_ORDER, PHASES, RESOLUTION_STATUS } from "../constants.mjs";
+import { MODULE_ID, MOVEMENT_PLAN_STATUS, PHASE_ORDER, PHASES, RESOLUTION_STATUS } from "../constants.mjs";
 import { warn } from "../logger.mjs";
 import { createPhaseReport } from "./chat-report.mjs";
 import { isMovementRunActive, startMovementPhase } from "./movement-controller.mjs";
@@ -28,12 +28,14 @@ import {
   clearCombatState,
   getCombatState,
   getCombatantState,
+  combatantStateUpdateData,
   updateCombatantState,
   resetCombatantRoundState,
   setCombatState,
   snapshotCombat,
   updateCombatState
 } from "./state.mjs";
+import { RenderCoordinator } from "../ui/render-coordinator.mjs";
 
 /**
  * Combat documents currently executing a module-owned core navigation call.
@@ -129,6 +131,53 @@ export function pendingMovementDraftNames(combat) {
 }
 
 /**
+ * Clear non-executable ruler drafts after reporting them during phase advance.
+ *
+ * @param {Combat} combat Foundry Combat document.
+ * @returns {Promise<string[]>} Cleared Combatant names.
+ */
+async function clearPendingMovementDrafts(combat) {
+  const updates = [];
+  const names = [];
+  const now = Date.now();
+  for (const combatant of combat?.combatants ?? []) {
+    const movement = getCombatantState(combatant).movement;
+    const route = Array.isArray(movement?.route) && movement.route.length
+      ? movement.route
+      : movement?.waypoints;
+    if (movement?.draft !== true || !Array.isArray(route) || !route.length) continue;
+    names.push(combatant.name);
+    const routeRevision = Math.max(now, Number(movement.routeRevision ?? 0) + 1);
+    updates.push(combatantStateUpdateData(combatant, {
+      movement: {
+        ...foundry.utils.deepClone(movement),
+        mode: "none",
+        destination: null,
+        route: [],
+        waypoints: [],
+        distance: 0,
+        planStatus: MOVEMENT_PLAN_STATUS.NONE,
+        stoppedReason: "draft-skipped",
+        routeRevision,
+        routeId: "",
+        captureSource: "draft-skipped",
+        capturedAt: now,
+        draft: false
+      }
+    }));
+  }
+  if (updates.length) {
+    await combat.updateEmbeddedDocuments("Combatant", updates, {
+      [MODULE_ID]: {
+        internal: true,
+        reason: "movement-drafts-skipped"
+      }
+    });
+  }
+  return names;
+}
+
+/**
  * Convert a resolution queue into the bookkeeping result ledger.
  *
  * @param {object[]} queue Resolution actions.
@@ -172,7 +221,7 @@ export class PhaseController {
     await setCombatState(combat, next);
     await this.reconcilePlanningTurnMode(combat);
     await createPhaseReport(combat, next);
-    ui.combat?.render?.();
+    RenderCoordinator.invalidateCombatTracker("phase-start-workflow");
     return next;
   }
 
@@ -185,7 +234,7 @@ export class PhaseController {
   static async disable(combat = game.combat) {
     if (!combat) return null;
     await clearCombatState(combat);
-    ui.combat?.render?.();
+    RenderCoordinator.invalidateCombatTracker("phase-clear-workflow");
     return true;
   }
 
@@ -276,6 +325,7 @@ export class PhaseController {
         ui.notifications.warn(game.i18n.format("AOV_SKJALDBORG.Warnings.MovementDraftsSkipped", {
           names: pendingDrafts.join(", ")
         }));
+        await clearPendingMovementDrafts(combat);
       }
       const validation = this.canAdvanceFromIntent(combat);
       if (!validation.ok) {
@@ -394,7 +444,7 @@ export class PhaseController {
       await this.resetTurnToFirst(combat);
     }
     await createPhaseReport(combat, next);
-    ui.combat?.render?.();
+    RenderCoordinator.invalidateCombatTracker("phase-advance");
 
     // In the tactical structure, all predeclared routes execute together while
     // Movement remains visibly active. Await completion so another native Next
@@ -452,7 +502,7 @@ export class PhaseController {
     if (!game.user?.isGM || !combat) return null;
     const state = getCombatState(combat);
     if (!state.enabled || getEnabledPhases().includes(state.phase)) {
-      ui.combat?.render?.();
+      RenderCoordinator.invalidateCombatTracker("phase-structure-reconciled");
       return state;
     }
     return this.advance(combat, nextEnabledPhase(state.phase));
@@ -585,7 +635,7 @@ export class PhaseController {
 
     if (currentTurn < 0 || nextTurn > currentTurn) {
       await runInternalCombatUpdate(combat, () => combat.nextTurn());
-      ui.combat?.render?.();
+      RenderCoordinator.invalidateCombatTracker("phase-next-turn");
       return getCombatState(combat);
     }
 
@@ -649,7 +699,7 @@ export class PhaseController {
       const direction = turn === current ? 0 : turn > current ? 1 : -1;
       await combat.update({ turn }, internalUpdateOptions("set-current-combatant", direction));
     }
-    ui.combat?.render?.();
+    RenderCoordinator.invalidateCombatTracker("phase-set-current-combatant");
     return combatant;
   }
 
@@ -696,7 +746,7 @@ export class PhaseController {
         action
       });
     }
-    ui.combat?.render?.();
+    RenderCoordinator.invalidateCombatTracker("phase-reset");
     return updated;
   }
 

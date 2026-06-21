@@ -44,7 +44,13 @@ jobs:
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
+        shell: bash
         run: |
+          prerelease_flag=""
+          if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
+            prerelease_flag="--prerelease"
+          fi
+
           gh release create "${GITHUB_REF_NAME}" \
             dist/aov-skjaldborg.zip \
             dist/module.json \
@@ -52,4 +58,5 @@ jobs:
             --repo "${GITHUB_REPOSITORY}" \
             --title "Age of Vikings - Skjaldborg ${GITHUB_REF_NAME}" \
             --generate-notes \
-            --verify-tag
+            --verify-tag \
+            ${prerelease_flag}

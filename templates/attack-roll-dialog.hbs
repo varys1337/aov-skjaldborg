@@ -1,0 +1,132 @@
+<div class="skj-attack-roll-dialog">
+  <header class="skj-attack-roll-dialog__header">
+    <div class="skj-attack-roll-dialog__identity">
+      <div class="skj-attack-roll-dialog__target-summary">
+        <span class="skj-attack-roll-dialog__target-portrait" aria-hidden="true">
+          {{#if targetImg}}
+            {{#if targetImgIsVideo}}
+            <video src="{{targetImg}}" autoplay muted loop playsinline></video>
+            {{else}}
+            <img src="{{targetImg}}" alt="" />
+            {{/if}}
+          {{else}}
+          <i class="fa-solid fa-user-shield"></i>
+          {{/if}}
+        </span>
+        <span class="skj-attack-roll-dialog__target-copy">
+          <span class="skj-attack-roll-dialog__actor">{{actorName}}</span>
+          <span class="skj-attack-roll-dialog__versus" title="{{targetName}}">
+            <i class="fa-solid fa-crosshairs" aria-hidden="true"></i>
+            {{localize "AOV_SKJALDBORG.AttackDialog.Target"}}: <strong>{{targetName}}</strong>
+          </span>
+        </span>
+      </div>
+      <label class="skj-attack-roll-dialog__weapon">
+        <span>{{localize "AOV_SKJALDBORG.AttackDialog.Weapon"}}</span>
+        <select name="weaponId" class="skj-attack-roll-dialog__weapon-select">
+          {{#each weapons}}
+          <option value="{{id}}" {{#if selected}}selected{{/if}}>{{label}}</option>
+          {{/each}}
+        </select>
+      </label>
+    </div>
+
+    <div class="skj-attack-roll-dialog__target-card">
+      <span class="skj-attack-roll-dialog__target-label">{{localize "AOV_SKJALDBORG.AttackDialog.Attack"}}</span>
+      <strong data-target-number>{{targetNumber}}%</strong>
+      <span data-target-caption>{{localize "AOV_SKJALDBORG.AttackDialog.Modifiers.Standard"}}</span>
+    </div>
+  </header>
+
+  <section class="skj-attack-roll-dialog__body">
+    <div class="skj-attack-roll-dialog__row skj-attack-roll-dialog__row--modifier">
+      <label for="skj-attack-situational-modifier">{{localize "AOV_SKJALDBORG.AttackDialog.Situation"}}</label>
+      <select id="skj-attack-situational-modifier" name="situationalModifier">
+        {{#each modifiers}}
+        <option value="{{value}}" {{#if selected}}selected{{/if}}>{{label}} ({{value}}%)</option>
+        {{/each}}
+      </select>
+      <button
+        type="button"
+        class="skj-attack-roll-dialog__damage {{#if damageTypeSelectable}}is-switchable{{else}}is-fixed{{/if}}"
+        data-damage-type-control
+        data-tooltip="{{damageTypeTooltip}}"
+        aria-label="{{damageTypeTooltip}}"
+        aria-disabled="{{#unless damageTypeSelectable}}true{{else}}false{{/unless}}"
+      >
+        <span class="skj-attack-roll-dialog__damage-label" data-weapon-damage-label>{{damageTypeLabel}}</span>
+        <span class="skj-attack-roll-dialog__damage-type" data-weapon-damage-type>[{{damageType}}]</span>
+        <span class="skj-attack-roll-dialog__damage-formula" data-weapon-damage-formula>{{damage}}</span>
+      </button>
+      <input type="hidden" name="damageType" value="{{damageTypeKey}}" data-selected-damage-type>
+    </div>
+
+    <fieldset class="skj-attack-roll-dialog__fieldset">
+      <legend>{{localize "AOV_SKJALDBORG.AttackDialog.Augmentation"}}</legend>
+      <div class="skj-attack-roll-dialog__segments">
+        <label class="skj-attack-roll-dialog__segment {{#unless hasSkills}}is-disabled{{/unless}}">
+          <input type="checkbox" name="augmentOptions" value="skill" {{#unless hasSkills}}disabled{{/unless}} />
+          <span>{{localize "AOV_SKJALDBORG.AttackDialog.Skill"}}</span>
+        </label>
+        <label class="skj-attack-roll-dialog__segment {{#unless hasPassions}}is-disabled{{/unless}}">
+          <input type="checkbox" name="augmentOptions" value="passion" {{#unless hasPassions}}disabled{{/unless}} />
+          <span>{{localize "AOV_SKJALDBORG.AttackDialog.Passion"}}</span>
+        </label>
+        <label class="skj-attack-roll-dialog__segment {{#unless hasDevotions}}is-disabled{{/unless}}">
+          <input type="checkbox" name="augmentOptions" value="devotion" {{#unless hasDevotions}}disabled{{/unless}} />
+          <span>{{localize "AOV_SKJALDBORG.AttackDialog.Devotion"}}</span>
+        </label>
+        <label class="skj-attack-roll-dialog__segment">
+          <input type="checkbox" name="augmentOptions" value="custom" />
+          <span>{{localize "AOV_SKJALDBORG.AttackDialog.Custom"}}</span>
+        </label>
+      </div>
+    </fieldset>
+
+    <section class="skj-attack-roll-dialog__details">
+      <div class="skj-attack-roll-dialog__detail" data-augment-detail="skill" hidden>
+        <label>{{localize "AOV_SKJALDBORG.AttackDialog.Skill"}}</label>
+        <select name="skillId">
+          {{#each skills}}
+          <option value="{{id}}">{{label}}</option>
+          {{/each}}
+        </select>
+      </div>
+
+      <div class="skj-attack-roll-dialog__detail" data-augment-detail="passion" hidden>
+        <label>{{localize "AOV_SKJALDBORG.AttackDialog.Passion"}}</label>
+        <select name="passionId">
+          {{#each passions}}
+          <option value="{{id}}">{{label}}</option>
+          {{/each}}
+        </select>
+      </div>
+
+      <div class="skj-attack-roll-dialog__detail" data-augment-detail="devotion" hidden>
+        <label>{{localize "AOV_SKJALDBORG.AttackDialog.Devotion"}}</label>
+        <select name="devotionId">
+          {{#each devotions}}
+          <option value="{{id}}">{{label}}</option>
+          {{/each}}
+        </select>
+      </div>
+
+      <div class="skj-attack-roll-dialog__detail skj-attack-roll-dialog__detail--custom" data-augment-detail="custom" hidden>
+        <label>{{localize "AOV_SKJALDBORG.AttackDialog.Custom"}}</label>
+        <input type="text" name="customAugmentReason" placeholder="{{localize "AOV_SKJALDBORG.AttackDialog.CustomReason"}}" />
+        <input type="number" name="customAugmentValue" value="0" step="1" />
+      </div>
+    </section>
+
+    <div class="skj-attack-roll-dialog__actions">
+      <div class="skj-attack-roll-dialog__summary" title="{{localize "AOV_SKJALDBORG.AttackDialog.ScaffoldHint"}}">
+        <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+        <span data-modifier-summary>{{initialSummary}}</span>
+      </div>
+      <button type="button" class="skj-attack-roll-dialog__roll-button" data-action="submitAttack">
+        <i class="fa-solid fa-dice" aria-hidden="true"></i>
+        <span>{{localize "AOV_SKJALDBORG.AttackDialog.RollAttack"}}</span>
+      </button>
+    </div>
+  </section>
+</div>

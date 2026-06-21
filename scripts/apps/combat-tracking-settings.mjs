@@ -1,5 +1,6 @@
 import { MODULE_ID, ROUNDING_POLICIES } from "../constants.mjs";
 import { normalizeNumberSetting } from "../utils/settings.mjs";
+import { RenderCoordinator } from "../ui/render-coordinator.mjs";
 
 const { ApplicationV2, HandlebarsApplicationMixin } = foundry.applications.api;
 
@@ -100,6 +101,6 @@ export class CombatTrackingSettings extends HandlebarsApplicationMixin(Applicati
     await Promise.all(Object.entries(values).map(([key, value]) => (
       game.settings.set(MODULE_ID, key, value)
     )));
-    ui.combat?.render?.();
+    RenderCoordinator.invalidateCombatTracker("combat-tracking-settings");
   }
 }

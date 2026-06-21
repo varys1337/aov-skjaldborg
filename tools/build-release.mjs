@@ -1,4 +1,3 @@
-import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   copyFileSync,
@@ -23,9 +22,11 @@ const checksumPath = join(dist, "SHA256SUMS.txt");
 const repository = process.env.GITHUB_REPOSITORY || "varys1337/aov-skjaldborg";
 const repositoryUrl = `https://github.com/${repository}`;
 const sourceManifest = JSON.parse(readFileSync(join(root, "module.json"), "utf8"));
-const explicitTag = readTagArgument();
-const tag = explicitTag ?? `v${sourceManifest.version}`;
+const tag = readTagArgument() ?? `v${sourceManifest.version}`;
 const normalizedTag = tag.startsWith("v") ? tag : `v${tag}`;
+
+const runtimeFiles = ["README.md", "previous-releases.md"];
+const runtimeDirectories = ["docs", "lang", "scripts", "styles", "templates"];
 
 const crcTable = Array.from({ length: 256 }, (_, index) => {
   let value = index;
@@ -53,10 +54,10 @@ const releaseManifest = {
 rmSync(dist, { recursive: true, force: true });
 mkdirSync(staging, { recursive: true });
 
-for (const file of ["README.md", "LICENSE"]) {
+for (const file of runtimeFiles) {
   copyFileSync(join(root, file), join(staging, file));
 }
-for (const directory of ["lang", "scripts", "styles", "templates"]) {
+for (const directory of runtimeDirectories) {
   cpSync(join(root, directory), join(staging, directory), { recursive: true });
 }
 
@@ -74,52 +75,6 @@ writeFileSync(checksumPath, `${checksums.join("\n")}\n`, "utf8");
 console.log(`Built ${relative(root, archivePath)} for ${normalizedTag}.`);
 console.log(`Release manifest: ${relative(root, manifestAssetPath)}`);
 console.log(`Checksums: ${relative(root, checksumPath)}`);
-
-maybeCreateLocalReleaseTag({ explicitTag, normalizedTag });
-
-function maybeCreateLocalReleaseTag({ explicitTag, normalizedTag }) {
-  // Only an explicitly requested local release build may prepare a tag. Ordinary
-  // development builds and GitHub Actions builds must remain side-effect free.
-  if (!explicitTag || isCiEnvironment()) return;
-
-  const insideWorkTree = spawnSync("git", ["rev-parse", "--is-inside-work-tree"], {
-    cwd: root,
-    encoding: "utf8"
-  });
-  if (insideWorkTree.status !== 0 || insideWorkTree.stdout.trim() !== "true") return;
-
-  const status = spawnSync("git", ["status", "--porcelain"], {
-    cwd: root,
-    encoding: "utf8"
-  });
-  if (status.error) {
-    console.warn(`Unable to inspect the Git working tree: ${status.error.message}`);
-    return;
-  }
-  if (status.status !== 0) {
-    console.warn("Unable to inspect the Git working tree; release tagging was deferred.");
-    return;
-  }
-
-  if (status.stdout.trim()) {
-    console.log(
-      `Release tag ${normalizedTag} was not created yet because tracked or untracked changes are pending. `
-        + `Commit with the matching message (for example, Release ${normalizedTag}); the post-commit hook will create it.`
-    );
-    return;
-  }
-
-  execFileSync(
-    process.execPath,
-    [join(root, "tools", "create-release-tag.mjs"), "--current-version", "--require-clean"],
-    { cwd: root, stdio: "inherit" }
-  );
-}
-
-function isCiEnvironment() {
-  const values = [process.env.CI, process.env.GITHUB_ACTIONS];
-  return values.some(value => ["1", "true", "yes"].includes(String(value ?? "").toLowerCase()));
-}
 
 function readTagArgument() {
   const index = process.argv.indexOf("--tag");

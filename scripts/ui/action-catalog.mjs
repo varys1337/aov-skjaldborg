@@ -4,6 +4,7 @@ import { defaultCombatantState, getCombatState, getCombatantState } from "../com
 import { requestGm } from "../socket.mjs";
 import { error } from "../logger.mjs";
 import { clearReadiedWeapon, getReadiedWeapon, getReadiedWeaponId } from "../combat/weapon-state.mjs";
+import { RenderCoordinator } from "./render-coordinator.mjs";
 import {
   clearActorPreparedIntent,
   getActorPreparedIntent,
@@ -1197,6 +1198,6 @@ export async function commitIntentCategory(actor, combatant, combat, category, {
     intent
   });
   await clearActorPreparedIntent(actor);
-  ui.combat?.render?.();
+  RenderCoordinator.invalidateCombatTracker("intent-commit");
   return result;
 }

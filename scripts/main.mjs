@@ -35,9 +35,16 @@ import { captureExternalPlanningInitiativeChange } from "./combat/planning-initi
 import { registerPreparedIntentHooks } from "./combat/prepared-intent.mjs";
 import { capabilityFailureSummary, capabilityWarningSummary, detectV14Capabilities } from "./compat/capabilities.mjs";
 import { installAoVMessageModeCompatibility } from "./compat/aov-message-mode.mjs";
+import { RenderCoordinator } from "./ui/render-coordinator.mjs";
+import { performanceDiagnostics } from "./performance/performance-monitor.mjs";
 
 let adjustInitiativeIntegrationInstalled = false;
 let messageModeCompatibilityInstalled = false;
+
+RenderCoordinator.register("combatTracker", detail => {
+  performanceDiagnostics.count("combatTracker.render.request", 1, detail);
+  ui.combat?.render?.();
+});
 
 /**
  * Select one active GM for document-observer work which is not already routed
@@ -90,7 +97,8 @@ Hooks.once("ready", async () => {
     game.aovSkjaldborg = {
       adapter: AoVAdapter,
       diagnostics: {
-        run: runDiagnostics
+        run: runDiagnostics,
+        performance: performanceDiagnostics
       },
       capabilities
     };
@@ -148,7 +156,8 @@ Hooks.once("ready", async () => {
       refreshTokenIntentIndicators
     },
     diagnostics: {
-      run: runDiagnostics
+      run: runDiagnostics,
+      performance: performanceDiagnostics
     }
   };
   debug("ready");
@@ -159,7 +168,7 @@ Hooks.once("ready", async () => {
  */
 Hooks.on("updateCombat", combat => {
   if (!combat?.getFlag?.(MODULE_ID, "combatState")?.enabled) return;
-  ui.combat?.render?.();
+  RenderCoordinator.invalidate("combatTracker", { reason: "combat-update" });
 });
 
 /**
@@ -181,5 +190,5 @@ Hooks.on("updateCombatant", (combatant, changed, options = {}) => {
         : undefined)
       .catch(cause => warn(cause));
   }
-  ui.combat?.render?.();
+  RenderCoordinator.invalidate("combatTracker", { reason: "combatant-update" });
 });

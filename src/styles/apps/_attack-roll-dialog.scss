@@ -1,0 +1,517 @@
+/* Age of Vikings - Skjaldborg: target-aware Attack Roll dialog source.
+ * Kept as a separate SCSS partial while compiling into styles/skjaldborg.css. */
+
+/* ------------------------------------------------------------------------- */
+/* Attack workflow dialog scaffold                                           */
+/* ------------------------------------------------------------------------- */
+
+.application.dialog.skj-attack-roll-window {
+  --skj-roll-text: #f2eadb;
+  --skj-roll-muted: rgba(242, 234, 219, 0.68);
+  --skj-roll-surface: rgba(10, 12, 12, 0.9);
+  --skj-roll-surface-soft: rgba(14, 17, 16, 0.68);
+  --skj-roll-frame: rgba(84, 183, 126, 0.62);
+  --skj-roll-frame-soft: rgba(84, 183, 126, 0.24);
+  --skj-roll-active: rgba(56, 121, 163, 0.82);
+  --skj-roll-hover: rgba(126, 45, 30, 0.84);
+  --skj-roll-accent: #f0d9ac;
+  --skj-roll-warning: #e5b95d;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 0.82rem;
+}
+
+.application.dialog.skj-attack-roll-window.skj-theme-classic {
+  --skj-roll-frame: rgba(196, 137, 78, 0.62);
+  --skj-roll-frame-soft: rgba(196, 137, 78, 0.24);
+  --skj-roll-active: rgba(109, 67, 38, 0.9);
+}
+
+.application.dialog.skj-attack-roll-window .window-header {
+  background: rgba(4, 7, 7, 0.96);
+  border-bottom: 1px solid var(--skj-roll-frame-soft);
+  color: var(--skj-roll-text);
+  font-size: 0.82rem;
+  min-height: 1.9rem;
+  padding-inline: 0.42rem;
+}
+
+.application.dialog.skj-attack-roll-window .window-header .window-title {
+  font-size: 0.88rem;
+}
+
+.application.dialog.skj-attack-roll-window .window-header button {
+  font-size: 0.86rem;
+  height: 1.55rem;
+  min-height: 1.55rem;
+  min-width: 1.55rem;
+  width: 1.55rem;
+}
+
+.application.dialog.skj-attack-roll-window .window-content,
+.application.dialog.skj-attack-roll-window .window-content.skj-attack-roll-content {
+  background:
+    linear-gradient(rgba(7, 10, 10, 0.91), rgba(7, 9, 9, 0.96)),
+    url("/systems/aov/art-assets/darkstone.jpg") repeat;
+  border: 1px solid var(--skj-roll-frame-soft);
+  color: var(--skj-roll-text);
+  overflow: hidden;
+  padding: 0;
+}
+
+.application.dialog.skj-attack-roll-window.skj-theme-classic .window-content,
+.application.dialog.skj-attack-roll-window.skj-theme-classic .window-content.skj-attack-roll-content {
+  background:
+    linear-gradient(rgba(23, 13, 8, 0.93), rgba(13, 9, 7, 0.97)),
+    radial-gradient(circle at top, rgba(112, 63, 31, 0.2), transparent 58%);
+}
+
+.application.dialog.skj-attack-roll-window .dialog-buttons {
+  display: none;
+}
+
+.skj-attack-roll-dialog {
+  display: flex;
+  flex-direction: column;
+  max-height: 72vh;
+  min-width: 326px;
+  width: min(390px, 92vw);
+}
+
+.skj-attack-roll-dialog select,
+.skj-attack-roll-dialog input {
+  background: rgba(3, 6, 6, 0.82);
+  border: 1px solid var(--skj-roll-frame-soft);
+  border-radius: 4px;
+  color: var(--skj-roll-text);
+  font-family: inherit;
+  font-size: 0.78rem;
+  min-height: 1.75rem;
+  padding: 0.2rem 0.45rem;
+}
+
+.skj-attack-roll-dialog select:focus,
+.skj-attack-roll-dialog input:focus {
+  border-color: var(--skj-roll-frame);
+  box-shadow: 0 0 0 1px var(--skj-roll-frame-soft);
+  outline: none;
+}
+
+.skj-attack-roll-dialog__header {
+  align-items: stretch;
+  background:
+    linear-gradient(110deg, rgba(10, 43, 31, 0.9), rgba(5, 13, 12, 0.95)),
+    url("/systems/aov/art-assets/darkstone.jpg") repeat;
+  border-bottom: 1px solid var(--skj-roll-frame);
+  display: grid;
+  gap: 0.6rem;
+  grid-template-columns: minmax(0, 1fr) 96px;
+  padding: 0.72rem;
+}
+
+.skj-theme-classic .skj-attack-roll-dialog__header {
+  background: linear-gradient(110deg, rgba(82, 39, 20, 0.92), rgba(20, 11, 8, 0.96));
+}
+
+.skj-attack-roll-dialog__identity {
+  display: grid;
+  gap: 0.28rem;
+  min-width: 0;
+}
+
+.skj-attack-roll-dialog__target-summary {
+  align-items: center;
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: 44px minmax(0, 1fr);
+  min-width: 0;
+}
+
+.skj-attack-roll-dialog__target-portrait {
+  align-items: center;
+  background: rgba(2, 5, 5, 0.72);
+  border: 1px solid var(--skj-roll-frame);
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.035);
+  display: flex;
+  height: 44px;
+  justify-content: center;
+  overflow: hidden;
+  width: 44px;
+}
+
+.skj-attack-roll-dialog__target-portrait img,
+.skj-attack-roll-dialog__target-portrait video {
+  display: block;
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.skj-attack-roll-dialog__target-portrait > i {
+  color: var(--skj-roll-muted);
+  font-size: 0.96rem;
+}
+
+.skj-attack-roll-dialog__target-copy {
+  display: grid;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.skj-attack-roll-dialog__actor {
+  color: var(--skj-roll-muted);
+  font-size: 0.76rem;
+  line-height: 1.1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skj-attack-roll-dialog__versus {
+  align-items: center;
+  color: var(--skj-roll-muted);
+  display: flex;
+  font-size: 0.86rem;
+  gap: 0.3rem;
+  line-height: 1.12;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skj-attack-roll-dialog__versus strong {
+  color: var(--skj-roll-text);
+  font-size: 0.94rem;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.skj-attack-roll-dialog__weapon {
+  align-items: center;
+  display: grid;
+  gap: 0.38rem;
+  grid-template-columns: 50px minmax(0, 190px);
+  margin: 0.02rem 0 0;
+  max-width: 248px;
+  width: 100%;
+}
+
+.skj-attack-roll-dialog__weapon > span {
+  color: var(--skj-roll-muted);
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  line-height: 1;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.skj-attack-roll-dialog__weapon-select {
+  box-sizing: border-box;
+  font-size: 0.82rem;
+  max-width: 100%;
+  min-width: 0;
+  width: 190px;
+}
+
+.skj-attack-roll-dialog__target-card {
+  align-items: center;
+  background: rgba(2, 5, 5, 0.66);
+  border: 1px solid var(--skj-roll-frame);
+  border-radius: 14px;
+  display: grid;
+  justify-items: center;
+  min-width: 0;
+  padding: 0.38rem;
+}
+
+.skj-attack-roll-dialog__target-card strong {
+  color: var(--skj-roll-accent);
+  font-size: 1.55rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.skj-attack-roll-dialog__target-card span {
+  color: var(--skj-roll-muted);
+  font-size: 0.61rem;
+  line-height: 1.1;
+  text-align: center;
+}
+
+.skj-attack-roll-dialog__target-label {
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.skj-attack-roll-dialog__body {
+  display: grid;
+  gap: 0.58rem;
+  overflow-y: auto;
+  padding: 0.72rem;
+}
+
+.skj-attack-roll-dialog__row,
+.skj-attack-roll-dialog__detail {
+  align-items: center;
+  display: grid;
+  gap: 0.44rem;
+  grid-template-columns: 80px minmax(0, 1fr);
+}
+
+.skj-attack-roll-dialog__row > label,
+.skj-attack-roll-dialog__detail > label {
+  color: var(--skj-roll-muted);
+  font-size: 0.76rem;
+  font-weight: 700;
+  margin: 0;
+}
+
+.skj-attack-roll-dialog__row--modifier {
+  grid-template-columns: 68px minmax(102px, 124px) minmax(0, 1fr);
+}
+
+.skj-attack-roll-dialog__row--modifier > select {
+  min-width: 0;
+  width: 100%;
+}
+
+.skj-attack-roll-dialog__damage {
+  align-items: center;
+  background: var(--skj-roll-surface-soft);
+  border: 1px solid var(--skj-roll-frame-soft);
+  border-radius: 11px;
+  color: var(--skj-roll-accent);
+  display: inline-flex;
+  font-family: inherit;
+  gap: 0.28rem;
+  justify-content: center;
+  justify-self: stretch;
+  min-height: 1.75rem;
+  min-width: 0;
+  padding: 0.16rem 0.38rem;
+  width: 100%;
+  white-space: nowrap;
+}
+
+.skj-attack-roll-dialog__damage.is-fixed {
+  cursor: default;
+}
+
+.skj-attack-roll-dialog__damage.is-switchable {
+  cursor: pointer;
+}
+
+.skj-attack-roll-dialog__damage.is-switchable:hover,
+.skj-attack-roll-dialog__damage.is-switchable:focus {
+  background: var(--skj-roll-hover);
+  border-color: var(--skj-roll-frame);
+  box-shadow: 0 0 0 1px var(--skj-roll-frame-soft);
+  outline: none;
+}
+
+.skj-attack-roll-dialog__damage-label {
+  color: var(--skj-roll-muted);
+  display: inline-block;
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.skj-attack-roll-dialog__damage-type {
+  color: var(--skj-roll-accent);
+  display: inline-flex;
+  font-size: 0.72rem;
+  font-style: normal;
+  font-weight: 800;
+  justify-content: center;
+  letter-spacing: 0.02em;
+  min-width: 1.5rem;
+  text-decoration: none;
+}
+
+.skj-attack-roll-dialog__damage-formula {
+  color: var(--skj-roll-text);
+  display: inline-block;
+  font-size: 0.74rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.skj-attack-roll-dialog__fieldset {
+  border: 1px solid var(--skj-roll-frame-soft);
+  border-radius: 6px;
+  margin: 0;
+  padding: 0.5rem;
+}
+
+.skj-attack-roll-dialog__fieldset legend {
+  color: var(--skj-roll-muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 0 0.22rem;
+}
+
+.skj-attack-roll-dialog__segments {
+  display: grid;
+  gap: 0.32rem;
+  grid-template-columns: repeat(2, minmax(0, 140px));
+  justify-content: center;
+  margin-inline: auto;
+  max-width: 288px;
+  width: 100%;
+}
+
+.skj-attack-roll-dialog__segment {
+  margin: 0;
+  min-width: 0;
+}
+
+.skj-attack-roll-dialog__segment input {
+  height: 1px;
+  min-height: 0;
+  opacity: 0;
+  padding: 0;
+  position: absolute;
+  width: 1px;
+}
+
+.skj-attack-roll-dialog__segment span {
+  align-items: center;
+  background: var(--skj-roll-surface-soft);
+  border: 1px solid var(--skj-roll-frame-soft);
+  border-radius: 13px;
+  color: var(--skj-roll-muted);
+  cursor: pointer;
+  display: flex;
+  font-size: 0.75rem;
+  justify-content: center;
+  min-height: 1.7rem;
+  overflow: hidden;
+  padding: 0.2rem 0.34rem;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skj-attack-roll-dialog__segment input:checked + span {
+  background: var(--skj-roll-active);
+  border-color: var(--skj-roll-frame);
+  color: var(--skj-roll-text);
+  box-shadow: inset 0 0 8px rgba(0, 0, 0, 0.28);
+}
+
+.skj-attack-roll-dialog__segment:not(.is-disabled) span:hover {
+  background: var(--skj-roll-hover);
+  border-color: var(--skj-roll-frame);
+  color: var(--skj-roll-text);
+}
+
+.skj-attack-roll-dialog__segment.is-disabled {
+  opacity: 0.38;
+}
+
+.skj-attack-roll-dialog__segment.is-disabled span {
+  cursor: not-allowed;
+}
+
+.skj-attack-roll-dialog__details {
+  display: grid;
+  gap: 0.42rem;
+  min-height: 0;
+}
+
+.skj-attack-roll-dialog__detail[hidden] {
+  display: none;
+}
+
+.skj-attack-roll-dialog__detail--custom {
+  grid-template-columns: 80px minmax(0, 1fr) 60px;
+}
+
+.skj-attack-roll-dialog__actions {
+  align-items: center;
+  display: grid;
+  gap: 0.35rem;
+  grid-template-columns: minmax(0, 1fr) 96px;
+}
+
+.skj-attack-roll-dialog__summary {
+  align-items: center;
+  background: var(--skj-roll-surface-soft);
+  border: 1px solid var(--skj-roll-frame-soft);
+  border-radius: 11px;
+  color: var(--skj-roll-warning);
+  display: inline-flex;
+  font-size: 0.6875rem;
+  gap: 0.26rem;
+  justify-content: center;
+  justify-self: center;
+  max-width: 100%;
+  min-height: 1.7rem;
+  overflow: hidden;
+  padding: 0.22rem 0.3rem;
+  text-align: center;
+  width: fit-content;
+}
+
+.skj-attack-roll-dialog__summary span {
+  overflow: hidden;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skj-attack-roll-dialog__roll-button {
+  align-items: center;
+  background: linear-gradient(180deg, rgba(45, 105, 73, 0.94), rgba(20, 66, 43, 0.96));
+  border: 1px solid var(--skj-roll-frame);
+  border-radius: 14px;
+  color: var(--skj-roll-text);
+  cursor: pointer;
+  display: inline-flex;
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 700;
+  gap: 0.3rem;
+  justify-content: center;
+  min-height: 2rem;
+  padding: 0.28rem 0.5rem;
+  width: 100%;
+}
+
+.skj-theme-classic .skj-attack-roll-dialog__roll-button {
+  background: linear-gradient(180deg, rgba(115, 67, 36, 0.96), rgba(69, 35, 20, 0.96));
+}
+
+.skj-attack-roll-dialog__roll-button:hover,
+.skj-attack-roll-dialog__roll-button:focus {
+  background: var(--skj-roll-hover);
+  box-shadow: 0 0 0 1px var(--skj-roll-frame-soft);
+  outline: none;
+}
+
+@media (max-width: 460px) {
+  .skj-attack-roll-dialog {
+    min-width: 0;
+    width: 90vw;
+  }
+
+  .skj-attack-roll-dialog__header,
+  .skj-attack-roll-dialog__row,
+  .skj-attack-roll-dialog__row--modifier,
+  .skj-attack-roll-dialog__detail,
+  .skj-attack-roll-dialog__detail--custom,
+  .skj-attack-roll-dialog__actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .skj-attack-roll-dialog__segments {
+    grid-template-columns: minmax(0, 1fr);
+    max-width: none;
+  }
+}

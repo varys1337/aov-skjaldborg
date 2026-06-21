@@ -2,6 +2,7 @@ import { ENGAGED_STATUS_ID, ENGAGEMENT_STATUS, MODULE_ID, MOVEMENT_DEBUG_CATEGOR
 import { warn } from "../logger.mjs";
 import { getCombatantState, updateCombatantState } from "./state.mjs";
 import { movementDebug, movementDebugWarn } from "./movement-debugger.mjs";
+import { RenderCoordinator } from "../ui/render-coordinator.mjs";
 
 const ENGAGED_EFFECT_NAME = "AOV_SKJALDBORG.StatusEffects.Engaged";
 const ENGAGED_EFFECT_ICON = "icons/svg/combat.svg";
@@ -422,7 +423,7 @@ async function clearEngagementFromEffect(effect) {
   finally {
     engagementEffectSyncDepth = Math.max(0, engagementEffectSyncDepth - 1);
   }
-  ui.combat?.render?.();
+  RenderCoordinator.invalidateCombatTracker("engagement-effect-cleanup");
 }
 
 /**

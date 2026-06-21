@@ -2,9 +2,12 @@ import { ACTION_CATEGORIES, INTENT_STATUS } from "../constants.mjs";
 import { AoVAdapter } from "../adapter/aov-adapter.mjs";
 import { getCombatState, getCombatantState } from "../combat/state.mjs";
 import { prepareIntentActions } from "../ui/action-catalog.mjs";
+import { performanceDiagnostics } from "../performance/performance-monitor.mjs";
+import { RenderCoordinator } from "../ui/render-coordinator.mjs";
 
 const INDICATOR_LAYER_ID = "skj-token-intent-layer";
 const DISPLAYABLE_STATUSES = new Set([INTENT_STATUS.COMMITTED, INTENT_STATUS.HELD]);
+const USE_TRANSFORM_POSITIONING = false;
 
 /**
  * @typedef {object} IntentIndicatorEntry
@@ -19,6 +22,7 @@ const DISPLAYABLE_STATUSES = new Set([INTENT_STATUS.COMMITTED, INTENT_STATUS.HEL
 
 /** @type {Map<string, IntentIndicatorEntry>} */
 const indicators = new Map();
+const movingTokenIds = new Set();
 
 let hooksRegistered = false;
 let rebuildFrame = 0;
@@ -146,8 +150,22 @@ function positionIndicator(entry, force = false) {
 
   const clientX = Math.round(clientPoint.x);
   const clientY = Math.round(clientPoint.y);
-  if (force || entry.clientX !== clientX) element.style.left = `${clientX}px`;
-  if (force || entry.clientY !== clientY) element.style.top = `${clientY}px`;
+  if (USE_TRANSFORM_POSITIONING) {
+    const transform = `translate3d(${clientX}px, ${clientY}px, 0)`;
+    if (force || element.style.transform !== transform) {
+      element.style.transform = transform;
+      performanceDiagnostics.count("intentIndicators.domWrites");
+    }
+  } else {
+    if (force || entry.clientX !== clientX) {
+      element.style.left = `${clientX}px`;
+      performanceDiagnostics.count("intentIndicators.domWrites");
+    }
+    if (force || entry.clientY !== clientY) {
+      element.style.top = `${clientY}px`;
+      performanceDiagnostics.count("intentIndicators.domWrites");
+    }
+  }
 
   entry.canvasX = canvasPoint.x;
   entry.canvasY = canvasPoint.y;
@@ -160,11 +178,15 @@ function positionIndicator(entry, force = false) {
  *
  * @returns {void}
  */
-function updateTokenIntentIndicatorPositions() {
+function updateTokenIntentIndicatorPositions({ movingOnly = false } = {}) {
+  performanceDiagnostics.count("intentIndicators.positionChecks");
   const signature = viewportSignature();
   const viewportChanged = signature !== lastViewportSignature;
   lastViewportSignature = signature;
-  for (const entry of indicators.values()) positionIndicator(entry, viewportChanged);
+  const entries = movingOnly && !viewportChanged
+    ? Array.from(indicators.values()).filter(entry => movingTokenIds.has(entry.token?.id))
+    : indicators.values();
+  for (const entry of entries) positionIndicator(entry, viewportChanged);
 }
 
 /**
@@ -175,6 +197,11 @@ function updateTokenIntentIndicatorPositions() {
 export function positionTokenIntentIndicators() {
   positionFrame = 0;
   updateTokenIntentIndicatorPositions();
+}
+
+function invalidateTokenIntentIndicators(detail = {}) {
+  if (detail.positionOnly === true) positionTokenIntentIndicators();
+  else refreshTokenIntentIndicators();
 }
 
 /**
@@ -198,8 +225,11 @@ export function scheduleTokenIntentIndicatorPosition() {
  * @returns {void}
  */
 function tickTokenIntentIndicators() {
-  if (!indicators.size || !canvas?.ready) return;
-  updateTokenIntentIndicatorPositions();
+  if (!indicators.size || !movingTokenIds.size || !canvas?.ready) {
+    detachIndicatorTicker();
+    return;
+  }
+  updateTokenIntentIndicatorPositions({ movingOnly: true });
 }
 
 /**
@@ -238,6 +268,7 @@ export function clearTokenIntentIndicators() {
   lastViewportSignature = "";
   detachIndicatorTicker();
   indicators.clear();
+  movingTokenIds.clear();
   document.getElementById(INDICATOR_LAYER_ID)?.remove();
 }
 
@@ -265,6 +296,7 @@ function intentActionLookup() {
  */
 export function refreshTokenIntentIndicators() {
   rebuildFrame = 0;
+  performanceDiagnostics.count("intentIndicators.rebuild");
   const layer = ensureIndicatorLayer();
   const combat = game.combat;
   if (
@@ -320,8 +352,9 @@ export function refreshTokenIntentIndicators() {
     indicators.set(combatant.id, entry);
     positionIndicator(entry, true);
   }
+  performanceDiagnostics.count("intentIndicators.visible", indicators.size);
 
-  if (indicators.size) attachIndicatorTicker();
+  if (indicators.size && movingTokenIds.size) attachIndicatorTicker();
   else detachIndicatorTicker();
 }
 
@@ -331,8 +364,7 @@ export function refreshTokenIntentIndicators() {
  * @returns {void}
  */
 export function scheduleTokenIntentIndicatorRefresh() {
-  if (rebuildFrame) return;
-  rebuildFrame = requestAnimationFrame(refreshTokenIntentIndicators);
+  RenderCoordinator.invalidate("intentIndicators", { reason: "indicator-refresh" });
 }
 
 /**
@@ -351,6 +383,34 @@ function updateIndicatorTokenReference(token) {
   scheduleTokenIntentIndicatorPosition();
 }
 
+function tokenIdFromDocument(document) {
+  return document?.id ?? document?._id ?? null;
+}
+
+function markTokenMoving(document) {
+  const tokenId = tokenIdFromDocument(document);
+  if (!tokenId) return;
+  movingTokenIds.add(tokenId);
+  if (indicators.size) attachIndicatorTicker();
+  RenderCoordinator.invalidate("intentIndicators", {
+    positionOnly: true,
+    tokenIds: [tokenId],
+    reason: "token-moving"
+  });
+}
+
+function markTokenStatic(document) {
+  const tokenId = tokenIdFromDocument(document);
+  if (!tokenId) return;
+  movingTokenIds.delete(tokenId);
+  RenderCoordinator.invalidate("intentIndicators", {
+    positionOnly: true,
+    tokenIds: [tokenId],
+    reason: "token-static"
+  });
+  if (!movingTokenIds.size) detachIndicatorTicker();
+}
+
 /**
  * Register Foundry v14 canvas and document hooks for visual intent markers.
  *
@@ -360,19 +420,29 @@ export function registerTokenIntentIndicatorHooks() {
   if (hooksRegistered) return;
   hooksRegistered = true;
 
+  RenderCoordinator.register("intentIndicators", invalidateTokenIntentIndicators);
+
   Hooks.on("canvasReady", scheduleTokenIntentIndicatorRefresh);
-  Hooks.on("canvasPan", scheduleTokenIntentIndicatorPosition);
+  Hooks.on("canvasPan", () => RenderCoordinator.invalidate("intentIndicators", { positionOnly: true, reason: "canvas-pan" }));
   Hooks.on("canvasTearDown", clearTokenIntentIndicators);
   Hooks.on("drawToken", scheduleTokenIntentIndicatorRefresh);
   Hooks.on("refreshToken", updateIndicatorTokenReference);
   Hooks.on("destroyToken", scheduleTokenIntentIndicatorRefresh);
-  Hooks.on("updateToken", scheduleTokenIntentIndicatorPosition);
+  Hooks.on("updateToken", (_document, changes) => {
+    if (changes?.x !== undefined || changes?.y !== undefined || changes?.elevation !== undefined) {
+      RenderCoordinator.invalidate("intentIndicators", { positionOnly: true, reason: "token-update-position" });
+    }
+  });
+  Hooks.on("preMoveToken", markTokenMoving);
+  Hooks.on("moveToken", markTokenMoving);
+  Hooks.on("pauseToken", markTokenStatic);
+  Hooks.on("stopToken", markTokenStatic);
   Hooks.on("createCombatant", scheduleTokenIntentIndicatorRefresh);
   Hooks.on("updateCombatant", scheduleTokenIntentIndicatorRefresh);
   Hooks.on("deleteCombatant", scheduleTokenIntentIndicatorRefresh);
   Hooks.on("updateCombat", scheduleTokenIntentIndicatorRefresh);
   Hooks.on("deleteCombat", clearTokenIntentIndicators);
 
-  window.addEventListener("resize", scheduleTokenIntentIndicatorPosition);
+  window.addEventListener("resize", () => RenderCoordinator.invalidate("intentIndicators", { positionOnly: true, reason: "resize" }));
   scheduleTokenIntentIndicatorRefresh();
 }

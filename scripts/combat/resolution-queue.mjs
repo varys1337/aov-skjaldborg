@@ -2,11 +2,13 @@ import { AoVAdapter } from "../adapter/aov-adapter.mjs";
 import { INTENT_STATUS, MODULE_ID, RESOLUTION_STATUS } from "../constants.mjs";
 import { buildScheduledActions, computeDexLedger } from "./dex-ledger.mjs";
 import {
+  combatantStateUpdateData,
   getCombatState,
   getCombatantState,
   updateCombatState,
   updateCombatantState
 } from "./state.mjs";
+import { createDocumentTransaction } from "../utils/document-transaction.mjs";
 
 /** @type {Map<string, Promise<unknown>>} */
 const immediateQueueLocks = new Map();
@@ -156,7 +158,7 @@ export async function buildResolutionQueue(combat, { announcedOnly = false } = {
   const queue = [];
   const carryover = [];
   const initiativeUpdates = [];
-  const combatantUpdates = [];
+  const transaction = createDocumentTransaction();
 
   for (const combatant of combat.combatants) {
     if (!AoVAdapter.isCombatantCapable(combatant)) continue;
@@ -168,11 +170,14 @@ export async function buildResolutionQueue(combat, { announcedOnly = false } = {
       if (action.carryover) carryover.push(action);
       else queue.push(action);
     }
-    combatantUpdates.push(updateCombatantState(combatant, {
+    const stateUpdate = combatantStateUpdateData(combatant, {
       dexLedger: ledger,
       scheduledActions: actions,
       activeGroupId: null
-    }));
+    });
+    transaction.updateCombatant(combat, combatant.id, Object.fromEntries(
+      Object.entries(stateUpdate).filter(([key]) => key !== "_id")
+    ));
     if (requiresInitiativeUpdate(combatant, ledger.projectedInitiative)) {
       initiativeUpdates.push({ _id: combatant.id, initiative: ledger.projectedInitiative });
     }
@@ -182,7 +187,7 @@ export async function buildResolutionQueue(combat, { announcedOnly = false } = {
   for (const action of queue) action.status = RESOLUTION_STATUS.PENDING;
   const simultaneousGroups = buildSimultaneousGroups(queue);
 
-  await Promise.all(combatantUpdates);
+  if (!transaction.empty) await transaction.commit();
   if (initiativeUpdates.length && game.user.isGM) {
     await combat.updateEmbeddedDocuments("Combatant", initiativeUpdates, { turnEvents: false, combatTurn: combat.turn });
   }
@@ -206,20 +211,23 @@ export async function buildResolutionQueue(combat, { announcedOnly = false } = {
 export async function applyMovementDexResults(combat) {
   const ledgers = [];
   const initiativeUpdates = [];
-  const combatantUpdates = [];
+  const transaction = createDocumentTransaction();
 
   for (const combatant of combat?.combatants ?? []) {
     if (!AoVAdapter.isCombatantCapable(combatant)) continue;
     const state = getCombatantState(combatant);
     const ledger = computeDexLedger(combatant, state, { includeMovementPenalty: true });
     ledgers.push(ledger);
-    combatantUpdates.push(updateCombatantState(combatant, { dexLedger: ledger }));
+    const stateUpdate = combatantStateUpdateData(combatant, { dexLedger: ledger });
+    transaction.updateCombatant(combat, combatant.id, Object.fromEntries(
+      Object.entries(stateUpdate).filter(([key]) => key !== "_id")
+    ));
     if (requiresInitiativeUpdate(combatant, ledger.projectedInitiative)) {
       initiativeUpdates.push({ _id: combatant.id, initiative: ledger.projectedInitiative });
     }
   }
 
-  await Promise.all(combatantUpdates);
+  if (!transaction.empty) await transaction.commit();
   if (initiativeUpdates.length && game.user?.isGM) {
     await combat.updateEmbeddedDocuments("Combatant", initiativeUpdates, {
       turnEvents: false,

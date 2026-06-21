@@ -164,7 +164,6 @@ export function detectV14Capabilities() {
   addIfMissing(warnings, "AoV tracker adjDex unavailable", capabilities.combat.trackerAdjDex);
   addIfMissing(warnings, "TokenDocument#getCompleteMovementPath unavailable", capabilities.movement.completeMovementPath);
   addIfMissing(warnings, "Scene#moveTokens unavailable; per-token movement fallback will be used", capabilities.movement.sceneMoveTokens);
-  addIfMissing(warnings, "CONFIG.statusEffects unavailable; engagement status will use fallback or flag-only mode", capabilities.effects.statusEffectsObject);
   addIfMissing(warnings, "ActiveEffect document class unavailable; engagement visual mirroring disabled", capabilities.effects.activeEffectClass);
   addIfMissing(warnings, "Actor#toggleStatusEffect unavailable; status creation fallback required", capabilities.effects.actorToggleStatusEffect);
 
@@ -172,9 +171,11 @@ export function detectV14Capabilities() {
   if (!capabilities.movement.sceneMoveTokens) degraded.push("scene-move-tokens");
   if (!capabilities.movement.completeMovementPath) degraded.push("complete-movement-path");
   if (!capabilities.combat.trackerAdjustInit || !capabilities.combat.trackerAdjDex) degraded.push("adjust-initiative-integration");
-  if (!capabilities.effects.statusEffectsObject || !capabilities.effects.activeEffectClass) degraded.push("engagement-status-effects");
-
   capabilities.statusEffectMode = statusEffectMode(statusEffects, capabilities);
+  if (!capabilities.effects.statusEffectsObject && capabilities.effects.activeEffectClass) {
+    degraded.push("engagement-status-catalog-fallback");
+  }
+  if (!capabilities.effects.activeEffectClass) degraded.push("engagement-status-effects");
   capabilities.runtimeEnabled = hardBlockers.length === 0;
   capabilities.supported = capabilities.runtimeEnabled && warnings.length === 0;
   capabilities.missing = hardBlockers;
@@ -211,4 +212,19 @@ export function capabilityFailureSummary(capabilities) {
 export function capabilityWarningSummary(capabilities) {
   const warnings = capabilities?.warnings ?? [];
   return warnings.length ? warnings.join(", ") : "";
+}
+
+/**
+ * Summarize engagement status-effect capability in user-facing diagnostics.
+ *
+ * @param {object} capabilities Capability report.
+ * @returns {string}
+ */
+export function statusEffectCapabilityDetail(capabilities) {
+  const mode = capabilities?.statusEffectMode ?? "disabled";
+  if (mode === "native") return "native catalog integration";
+  if (mode === "module-fallback") {
+    return "module fallback mode; engagement flags remain authoritative and visual catalog integration is limited";
+  }
+  return "disabled; engagement flags remain authoritative but visual mirroring is unavailable";
 }

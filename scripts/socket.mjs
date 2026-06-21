@@ -20,6 +20,7 @@ import { enqueueCombatantWrite } from "./combat/authoritative-write-queue.mjs";
 import { startMovementPhase } from "./combat/movement-controller.mjs";
 import { shouldExecuteMovementImmediately, shouldQueueResolutionImmediately } from "./combat/phase-structure.mjs";
 import { refreshImmediateResolutionActions } from "./combat/resolution-queue.mjs";
+import { performanceDiagnostics } from "./performance/performance-monitor.mjs";
 import {
   captureExternalPlanningInitiativeChange,
   refreshPlanningInitiative
@@ -475,6 +476,7 @@ export function registerSocket() {
  * @returns {Promise<unknown|null>}
  */
 export async function requestGm(action, payload = {}) {
+  const measureId = performanceDiagnostics.markStart(`socket.${action}`);
   const message = {
     type: SOCKET_MESSAGE_REQUEST,
     schemaVersion: SOCKET_SCHEMA_VERSION,
@@ -486,9 +488,16 @@ export async function requestGm(action, payload = {}) {
     sentAt: Date.now()
   };
 
-  if (game.user.isGM) return handleSocketRequest(message);
+  if (game.user.isGM) {
+    try {
+      return await handleSocketRequest(message);
+    } finally {
+      performanceDiagnostics.markEnd(measureId, { action, localGm: true });
+    }
+  }
   if (!message.to) {
     ui.notifications.warn(game.i18n.localize("AOV_SKJALDBORG.Warnings.NoGm"));
+    performanceDiagnostics.markEnd(measureId, { action, noGm: true });
     return null;
   }
   return new Promise((resolve, reject) => {
@@ -496,14 +505,27 @@ export async function requestGm(action, payload = {}) {
       pendingSocketRequests.delete(message.requestId);
       const errorMessage = socketTimeoutMessage(message.to);
       ui.notifications.warn(errorMessage);
+      performanceDiagnostics.markEnd(measureId, { action, timedOut: true });
       reject(new Error(errorMessage));
     }, SOCKET_REQUEST_TIMEOUT_MS);
-    pendingSocketRequests.set(message.requestId, { resolve, reject, timeout, gmId: message.to });
+    pendingSocketRequests.set(message.requestId, {
+      resolve: result => {
+        performanceDiagnostics.markEnd(measureId, { action, ok: true });
+        resolve(result);
+      },
+      reject: error => {
+        performanceDiagnostics.markEnd(measureId, { action, ok: false });
+        reject(error);
+      },
+      timeout,
+      gmId: message.to
+    });
     try {
       game.socket.emit(SOCKET_NAME, message);
     } catch (exception) {
       pendingSocketRequests.delete(message.requestId);
       globalThis.clearTimeout(timeout);
+      performanceDiagnostics.markEnd(measureId, { action, emitFailed: true });
       reject(exception);
     }
   });

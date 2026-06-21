@@ -1,4 +1,3 @@
-@charset "UTF-8";
 .skj-phasebar {
   border-top: 1px solid var(--color-border-light-tertiary, #c9c1b5);
   margin-top: 4px;
@@ -22,6 +21,7 @@
   margin-top: 4px;
   opacity: 0.85;
 }
+
 
 .skj-actions,
 .skj-hud-phases {
@@ -233,6 +233,7 @@
   opacity: 0.58;
 }
 
+
 /* Player-scoped phase reports are separate private ChatMessages so they can
  * contain a reduced combatant scope. They must never render in a GM chat log. */
 .chat-message.aov-skjaldborg-hidden-report,
@@ -276,10 +277,13 @@
     grid-template-columns: 1fr;
   }
 }
+
+
 .skj-token-hud-button i {
   margin: 0;
   pointer-events: none;
 }
+
 
 .skj-report-settings-content {
   max-height: calc(100vh - 80px);
@@ -367,6 +371,7 @@
   word-break: normal;
 }
 
+
 .skj-chat-dex-table th {
   font-size: 0.88em;
   line-height: 1.1;
@@ -399,9 +404,11 @@
     grid-template-columns: 1fr;
   }
 }
+
 /* ------------------------------------------------------------------------- */
 /* Token action ring                                                         */
 /* ------------------------------------------------------------------------- */
+
 .skj-action-ring-app.application,
 .skj-actor-hotbar.application {
   background: transparent;
@@ -553,6 +560,7 @@
 /* ------------------------------------------------------------------------- */
 /* Actor hotbar                                                              */
 /* ------------------------------------------------------------------------- */
+
 #hotbar.skj-core-hotbar-hidden {
   opacity: 0;
   pointer-events: none;
@@ -840,6 +848,7 @@
     box-shadow: 0 0 27px 9px var(--skj-disposition-glow-strong, rgba(231, 189, 50, 0.82)), 0 7px 18px rgba(0, 0, 0, 0.65);
   }
 }
+
 .skj-avatar {
   border: 0;
   height: 100%;
@@ -899,6 +908,8 @@
   width: 100%;
 }
 
+
+
 .skj-quick-slot > i {
   color: #f5ede7;
   font-size: 18px;
@@ -923,7 +934,7 @@
   transform: none;
 }
 
-.skj-quick-slot[draggable=true] {
+.skj-quick-slot[draggable="true"] {
   cursor: grab;
 }
 
@@ -1006,18 +1017,9 @@
 .skj-workflow-pill.workflow-reactions:active {
   transform: translateY(1px);
 }
-
-.skj-workflow-pill.committed {
-  border-color: #47a96a;
-}
-
-.skj-workflow-pill.held {
-  border-color: #d7a348;
-}
-
-.skj-workflow-pill.uncommitted {
-  border-color: #bb4747;
-}
+.skj-workflow-pill.committed { border-color: #47a96a; }
+.skj-workflow-pill.held { border-color: #d7a348; }
+.skj-workflow-pill.uncommitted { border-color: #bb4747; }
 
 .skj-actor-actions {
   align-self: flex-start;
@@ -1527,8 +1529,8 @@
 }
 
 .skj-intent-grid > .skj-empty-actions {
-  grid-column: 1/-1;
-  grid-row: 1/-1;
+  grid-column: 1 / -1;
+  grid-row: 1 / -1;
 }
 
 .skj-intent-slot {
@@ -1698,7 +1700,7 @@
   transition: border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
 }
 
-.skj-named-action[draggable=true] {
+.skj-named-action[draggable="true"] {
   cursor: grab;
 }
 
@@ -1765,6 +1767,7 @@
   opacity: 1;
   visibility: visible;
 }
+
 
 .skj-magic-action {
   display: block;
@@ -2074,17 +2077,20 @@
 @media (max-width: 760px) {
   .skj-hotbar-layout {
     column-gap: 0;
-    grid-template-columns: minmax(0, min(var(--skj-hotbar-action-width, 420px), 100vw - 24px));
+    grid-template-columns: minmax(0, min(var(--skj-hotbar-action-width, 420px), calc(100vw - 24px)));
   }
+
   .skj-actor-core,
   .skj-hotbar-collapse-toggle {
     display: none;
   }
+
   .skj-actor-actions {
     grid-column: 1;
-    max-width: min(var(--skj-hotbar-action-width, 420px), 100vw - 24px);
-    width: min(var(--skj-hotbar-action-width, 420px), 100vw - 24px);
+    max-width: min(var(--skj-hotbar-action-width, 420px), calc(100vw - 24px));
+    width: min(var(--skj-hotbar-action-width, 420px), calc(100vw - 24px));
   }
+
   .skj-actions-bar,
   .skj-named-action-groups,
   .skj-equipment-groups {
@@ -2092,10 +2098,12 @@
     min-width: 0;
     width: 100%;
   }
+
   .skj-named-action-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
 .skj-action-ui-settings-content {
   max-height: calc(100vh - 80px);
   min-height: 0;
@@ -2118,10 +2126,11 @@
   margin: 0 0 10px;
 }
 
-.skj-action-ui-settings-form input[type=number] {
+.skj-action-ui-settings-form input[type="number"] {
   flex: 0 0 110px;
   width: 110px;
 }
+
 
 /* v0.2.7 actor-hotbar composition and resting-opacity controls. */
 .skj-hotbar-inner {
@@ -2152,18 +2161,21 @@
   align-content: start;
 }
 
+
 /* v0.2.10 portrait quick-access drag sources. */
-[data-quick-source][draggable=true] {
+[data-quick-source][draggable="true"] {
   cursor: grab;
 }
 
-[data-quick-source][draggable=true].dragging {
+[data-quick-source][draggable="true"].dragging {
   opacity: 0.45;
 }
+
 
 /* ------------------------------------------------------------------------- */
 /* v0.2.12 AoV-native surfaces, portrait drop target, and sheet-derived tabs */
 /* ------------------------------------------------------------------------- */
+
 .skj-action-ring-app.skj-theme-aov,
 .skj-actor-hotbar.skj-theme-aov {
   --skj-surface-texture: url("/systems/aov/art-assets/lightstone.jpg");
@@ -2229,7 +2241,9 @@ body.theme-dark .skj-actor-hotbar.skj-theme-aov {
 .skj-theme-aov .skj-ring-close,
 .skj-theme-aov .skj-action-ring-hint {
   background-color: var(--skj-background);
-  background-image: linear-gradient(var(--skj-surface-overlay), var(--skj-surface-overlay)), var(--skj-surface-texture);
+  background-image:
+    linear-gradient(var(--skj-surface-overlay), var(--skj-surface-overlay)),
+    var(--skj-surface-texture);
   background-position: center;
   background-size: auto, 256px 256px;
   border-color: var(--skj-frame);
@@ -2239,7 +2253,9 @@ body.theme-dark .skj-actor-hotbar.skj-theme-aov {
 
 .skj-theme-aov .skj-quick-slot {
   background-color: var(--skj-background);
-  background-image: linear-gradient(var(--skj-surface-overlay-soft), var(--skj-surface-overlay-soft)), var(--skj-surface-texture);
+  background-image:
+    linear-gradient(var(--skj-surface-overlay-soft), var(--skj-surface-overlay-soft)),
+    var(--skj-surface-texture);
   background-position: center;
   background-size: auto, 256px 256px;
   border-color: var(--skj-frame);
@@ -2296,14 +2312,18 @@ body.theme-dark .skj-actor-hotbar.skj-theme-aov {
 .skj-theme-aov .skj-thrall-row:hover,
 .skj-theme-aov .skj-farm-row:hover {
   background-color: var(--skj-background-hover);
-  background-image: linear-gradient(var(--skj-surface-overlay-soft), var(--skj-surface-overlay-soft)), var(--skj-surface-texture);
+  background-image:
+    linear-gradient(var(--skj-surface-overlay-soft), var(--skj-surface-overlay-soft)),
+    var(--skj-surface-texture);
   border-color: var(--skj-hover);
   box-shadow: 0 0 10px var(--skj-hover-glow), 0 3px 7px var(--skj-shadow);
 }
 
 .skj-hotbar-tabs a.active {
   background-color: var(--skj-background);
-  background-image: linear-gradient(var(--skj-active-soft), var(--skj-active-soft)), var(--skj-surface-texture);
+  background-image:
+    linear-gradient(var(--skj-active-soft), var(--skj-active-soft)),
+    var(--skj-surface-texture);
   border-color: var(--skj-active);
   box-shadow: 0 0 9px var(--skj-active-glow), inset 0 1px 0 rgba(255, 255, 255, 0.14);
 }
@@ -2327,7 +2347,9 @@ body.theme-dark .skj-actor-hotbar.skj-theme-aov {
 .skj-theme-aov .skj-quick-slot.empty.quick-auto-preview,
 .skj-theme-aov .skj-quick-slot.empty.quick-auto-preview:hover {
   background-color: var(--skj-background);
-  background-image: linear-gradient(var(--skj-surface-overlay-soft), var(--skj-surface-overlay-soft)), var(--skj-surface-texture);
+  background-image:
+    linear-gradient(var(--skj-surface-overlay-soft), var(--skj-surface-overlay-soft)),
+    var(--skj-surface-texture);
   border: 2px dashed var(--skj-frame-light);
   box-shadow: 0 0 9px var(--skj-frame-glow);
   opacity: 0.58;
@@ -2567,11 +2589,13 @@ button.skj-info-row {
 @media (max-width: 760px) {
   .skj-stat-groups,
   .skj-history-family-groups {
-    max-width: min(var(--skj-hotbar-action-width, 420px), 100vw - 24px);
-    min-width: min(var(--skj-hotbar-action-width, 420px), 100vw - 24px);
-    width: min(var(--skj-hotbar-action-width, 420px), 100vw - 24px);
+    max-width: min(var(--skj-hotbar-action-width, 420px), calc(100vw - 24px));
+    min-width: min(var(--skj-hotbar-action-width, 420px), calc(100vw - 24px));
+    width: min(var(--skj-hotbar-action-width, 420px), calc(100vw - 24px));
   }
 }
+
+
 /* v0.2.12 portrait drop catcher and sheet-faithful history/devotion rows. */
 .skj-avatar-drop-zone.quick-drop-target {
   background: rgba(163, 16, 8, 0.08);
@@ -2635,7 +2659,9 @@ body.theme-dark .skj-avatar-drop-zone.quick-drop-target {
 
 .skj-theme-aov .skj-history-action-row {
   background-color: var(--skj-background);
-  background-image: linear-gradient(var(--skj-surface-overlay), var(--skj-surface-overlay)), var(--skj-surface-texture);
+  background-image:
+    linear-gradient(var(--skj-surface-overlay), var(--skj-surface-overlay)),
+    var(--skj-surface-texture);
   background-position: center;
   background-size: auto, 256px 256px;
 }
@@ -2741,6 +2767,7 @@ body.theme-dark .skj-avatar-drop-zone.quick-drop-target {
 /* ------------------------------------------------------------------------- */
 /* v0.2.13 accessibility sizing, selectable skin, and compact hotbar mode     */
 /* ------------------------------------------------------------------------- */
+
 .skj-actor-core {
   position: relative;
 }
@@ -2760,7 +2787,7 @@ body.theme-dark .skj-avatar-drop-zone.quick-drop-target {
   height: 42px;
   justify-content: center;
   justify-self: center;
-  margin: calc(38px + (var(--skj-quick-stage-size, 192px) - 42px) / 2) 0 0;
+  margin: calc(38px + ((var(--skj-quick-stage-size, 192px) - 42px) / 2)) 0 0;
   padding: 0;
   position: relative;
   width: var(--skj-hotbar-collapse-width, 10px);
@@ -2813,64 +2840,24 @@ body.theme-dark .skj-avatar-drop-zone.quick-drop-target {
 }
 
 /* Increase legibility without changing the fixed dimensions of controls. */
-.skj-actor-hotbar .skj-resource-current {
-  font-size: 15px;
-  line-height: 1;
-}
-
-.skj-actor-hotbar .skj-resource-secondary {
-  font-size: 10px;
-  line-height: 1;
-}
-
-.skj-actor-hotbar .skj-workflow-pill {
-  font-size: 10px;
-  line-height: 1;
-}
-
-.skj-actor-hotbar .skj-intent-name {
-  font-size: 9px;
-  line-height: 1;
-}
-
+.skj-actor-hotbar .skj-resource-current { font-size: 15px; line-height: 1; }
+.skj-actor-hotbar .skj-resource-secondary { font-size: 10px; line-height: 1; }
+.skj-actor-hotbar .skj-workflow-pill { font-size: 10px; line-height: 1; }
+.skj-actor-hotbar .skj-intent-name { font-size: 9px; line-height: 1; }
 .skj-actor-hotbar .skj-named-action-group h3,
 .skj-actor-hotbar .skj-equipment-group h3,
 .skj-actor-hotbar .skj-stat-group h3,
-.skj-actor-hotbar .skj-history-family-group h3 {
-  font-size: 10px;
-  line-height: 1;
-}
-
-.skj-actor-hotbar .skj-named-action {
-  font-size: 11px;
-  line-height: 1;
-}
-
-.skj-actor-hotbar .skj-named-action-score {
-  font-size: 10px;
-  line-height: 1;
-}
-
+.skj-actor-hotbar .skj-history-family-group h3 { font-size: 10px; line-height: 1; }
+.skj-actor-hotbar .skj-named-action { font-size: 11px; line-height: 1; }
+.skj-actor-hotbar .skj-named-action-score { font-size: 10px; line-height: 1; }
 .skj-actor-hotbar .skj-equipment-header,
 .skj-actor-hotbar .skj-stat-header,
 .skj-actor-hotbar .skj-family-header,
 .skj-actor-hotbar .skj-thrall-header,
-.skj-actor-hotbar .skj-farm-header {
-  font-size: 8px;
-  line-height: 1;
-}
-
-.skj-actor-hotbar .skj-equipment-name {
-  font-size: 11px;
-  line-height: 1;
-}
-
+.skj-actor-hotbar .skj-farm-header { font-size: 8px; line-height: 1; }
+.skj-actor-hotbar .skj-equipment-name { font-size: 11px; line-height: 1; }
 .skj-actor-hotbar .skj-equipment-value,
-.skj-actor-hotbar .skj-equipment-quantity {
-  font-size: 10px;
-  line-height: 1;
-}
-
+.skj-actor-hotbar .skj-equipment-quantity { font-size: 10px; line-height: 1; }
 .skj-actor-hotbar .skj-stat-row,
 .skj-actor-hotbar .skj-info-row,
 .skj-actor-hotbar .skj-history-year,
@@ -2881,25 +2868,10 @@ body.theme-dark .skj-avatar-drop-zone.quick-drop-target {
 .skj-actor-hotbar .skj-history-name,
 .skj-actor-hotbar .skj-family-row button,
 .skj-actor-hotbar .skj-thrall-row button,
-.skj-actor-hotbar .skj-farm-row button {
-  font-size: 10px;
-  line-height: 1;
-}
-
-.skj-actor-hotbar .skj-family-summary {
-  font-size: 9px;
-  line-height: 1;
-}
-
-.skj-actor-hotbar .skj-history-action-header {
-  font-size: 10px;
-  line-height: 1;
-}
-
-.skj-actor-hotbar .skj-history-action-row {
-  font-size: 10px;
-  line-height: 1;
-}
+.skj-actor-hotbar .skj-farm-row button { font-size: 10px; line-height: 1; }
+.skj-actor-hotbar .skj-family-summary { font-size: 9px; line-height: 1; }
+.skj-actor-hotbar .skj-history-action-header { font-size: 10px; line-height: 1; }
+.skj-actor-hotbar .skj-history-action-row { font-size: 10px; line-height: 1; }
 
 .skj-actor-hotbar .skj-stat-row > span,
 .skj-actor-hotbar .skj-stat-header > span,
@@ -2920,14 +2892,18 @@ body.theme-dark .skj-avatar-drop-zone.quick-drop-target {
   .skj-hotbar-collapsed .skj-hotbar-layout {
     grid-template-columns: var(--skj-quick-stage-size, 192px) var(--skj-hotbar-collapse-width, 10px);
   }
+
   .skj-hotbar-side-left .skj-hotbar-collapsed .skj-hotbar-layout {
     grid-template-columns: var(--skj-hotbar-collapse-width, 10px) var(--skj-quick-stage-size, 192px);
   }
+
   .skj-hotbar-collapsed .skj-actor-core,
   .skj-hotbar-collapsed .skj-hotbar-collapse-toggle {
     display: flex;
   }
 }
+
+
 /* Preserve the pre-0.2.12 Crucible-style presentation when Classic is chosen. */
 .skj-theme-classic .skj-stat-row,
 .skj-theme-classic .skj-info-row,
@@ -3117,6 +3093,7 @@ body.theme-dark .skj-avatar-drop-zone.quick-drop-target {
   gap: 10px;
 }
 
+
 .skj-weapon-select-wrap select:disabled {
   cursor: not-allowed;
 }
@@ -3124,6 +3101,7 @@ body.theme-dark .skj-avatar-drop-zone.quick-drop-target {
 /* ------------------------------------------------------------------------- */
 /* v0.2.26 restored tracker intent and workflow indicators                    */
 /* ------------------------------------------------------------------------- */
+
 .skj-combatant-status {
   align-items: center;
   display: inline-flex;
@@ -3242,6 +3220,7 @@ body.theme-dark .skj-tracker-indicator {
 /* ------------------------------------------------------------------------- */
 /* v0.2.27 compact tracker intent labels and actor-HUD geometry correction    */
 /* ------------------------------------------------------------------------- */
+
 /*
  * Keep the persisted intent status available through icon, CSS state, and
  * tooltip while displaying only the selected action name in the tracker row.
@@ -3263,6 +3242,7 @@ body.theme-dark .skj-tracker-indicator {
 /* ------------------------------------------------------------------------- */
 /* v0.2.28 intent-grid spacing and compact tracker workflow row               */
 /* ------------------------------------------------------------------------- */
+
 /*
  * The shared hotbar slot rule sets intent buttons to 48px. Match the grid
  * tracks to that resolved height so the controls remain inside their rows,
@@ -3303,9 +3283,11 @@ body.theme-dark .skj-tracker-indicator {
   white-space: nowrap;
 }
 
+
 /* ------------------------------------------------------------------------- */
 /* v0.2.29 tracker sizing, collapse alignment, and canvas intent markers      */
 /* ------------------------------------------------------------------------- */
+
 /*
  * Viewport-level markers reuse the exact Font Awesome classes from the Combat
  * Action HUD while remaining visually attached to canvas tokens.
@@ -3345,9 +3327,11 @@ body.theme-dark .skj-tracker-indicator {
   box-shadow: 0 2px 7px rgba(0, 0, 0, 0.78), 0 0 8px rgba(164, 123, 184, 0.58);
 }
 
+
 /* ------------------------------------------------------------------------- */
 /* v0.2.30 disposition turn highlight and reliable canvas intent markers     */
 /* ------------------------------------------------------------------------- */
+
 /* Keep the tracker intent immediately after the native left-side controls. */
 .combatant-controls > .skj-combatant-status {
   margin-inline: 3px 2px;
@@ -3364,9 +3348,11 @@ body.theme-dark .skj-tracker-indicator {
   user-select: none;
 }
 
+
 /* ------------------------------------------------------------------------- */
 /* Stable table labels and semantic tracker accents                           */
 /* ------------------------------------------------------------------------- */
+
 /*
  * Compact table and segment labels use the same theme text colour as their
  * parent section heading. Token disposition remains authoritative for the
@@ -3398,77 +3384,30 @@ body.theme-dark .skj-tracker-indicator {
   color: var(--skj-indicator-accent);
 }
 
-.skj-tracker-indicator.status-action.intent-attack {
-  --skj-indicator-accent: #e57a6b;
-}
-
-.skj-tracker-indicator.status-action.intent-missile {
-  --skj-indicator-accent: #d9a84f;
-}
-
-.skj-tracker-indicator.status-action.intent-magic {
-  --skj-indicator-accent: #b78be3;
-}
-
-.skj-tracker-indicator.status-action.intent-defend {
-  --skj-indicator-accent: #78aee8;
-}
-
+.skj-tracker-indicator.status-action.intent-attack { --skj-indicator-accent: #e57a6b; }
+.skj-tracker-indicator.status-action.intent-missile { --skj-indicator-accent: #d9a84f; }
+.skj-tracker-indicator.status-action.intent-magic { --skj-indicator-accent: #b78be3; }
+.skj-tracker-indicator.status-action.intent-defend { --skj-indicator-accent: #78aee8; }
 .skj-tracker-indicator.status-action.intent-retreat,
-.skj-tracker-indicator.status-action.intent-flee {
-  --skj-indicator-accent: #d8905d;
-}
-
-.skj-tracker-indicator.status-action.intent-knockback {
-  --skj-indicator-accent: #e18478;
-}
-
-.skj-tracker-indicator.status-action.intent-wait {
-  --skj-indicator-accent: #75b99b;
-}
-
-.skj-tracker-indicator.status-action.intent-delay {
-  --skj-indicator-accent: #9790d7;
-}
-
-.skj-tracker-indicator.status-action.intent-other {
-  --skj-indicator-accent: #a7aab2;
-}
-
-.skj-tracker-indicator.status-action.intent-uncommitted {
-  --skj-indicator-accent: #8e98a7;
-}
+.skj-tracker-indicator.status-action.intent-flee { --skj-indicator-accent: #d8905d; }
+.skj-tracker-indicator.status-action.intent-knockback { --skj-indicator-accent: #e18478; }
+.skj-tracker-indicator.status-action.intent-wait { --skj-indicator-accent: #75b99b; }
+.skj-tracker-indicator.status-action.intent-delay { --skj-indicator-accent: #9790d7; }
+.skj-tracker-indicator.status-action.intent-other { --skj-indicator-accent: #a7aab2; }
+.skj-tracker-indicator.status-action.intent-uncommitted { --skj-indicator-accent: #8e98a7; }
 
 /* Reactions use the native Age of Vikings green so they remain distinct from Defend. */
 .skj-tracker-indicator.reactions {
   --skj-indicator-accent: var(--aov-title-font-colour, #66b596);
 }
-
-.skj-tracker-indicator.movement {
-  --skj-indicator-accent: #68c1b2;
-}
-
-.skj-tracker-indicator.movement.stopped {
-  --skj-indicator-accent: #d96b63;
-}
-
-.skj-tracker-indicator.readied-weapon {
-  --skj-indicator-accent: #d8aa55;
-}
-
-.skj-tracker-indicator.engaged {
-  --skj-indicator-accent: #db625b;
-}
-
+.skj-tracker-indicator.movement { --skj-indicator-accent: #68c1b2; }
+.skj-tracker-indicator.movement.stopped { --skj-indicator-accent: #d96b63; }
+.skj-tracker-indicator.readied-weapon { --skj-indicator-accent: #d8aa55; }
+.skj-tracker-indicator.engaged { --skj-indicator-accent: #db625b; }
 .skj-tracker-indicator.delay,
 .skj-tracker-indicator.wait,
-.skj-tracker-indicator.simultaneous-group {
-  --skj-indicator-accent: #a38bd4;
-}
-
-.skj-tracker-indicator.remaining-actions {
-  --skj-indicator-accent: #67b985;
-}
+.skj-tracker-indicator.simultaneous-group { --skj-indicator-accent: #a38bd4; }
+.skj-tracker-indicator.remaining-actions { --skj-indicator-accent: #67b985; }
 
 /* Phase structure settings */
 .skj-phase-structure-grid {
@@ -3504,6 +3443,7 @@ body.theme-dark .skj-tracker-indicator {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
 /* 0.2.35 unified combat-tracking settings submenu. */
 .skj-combat-tracking-settings-content {
   overflow-y: auto;
@@ -3548,10 +3488,11 @@ body.theme-dark .skj-tracker-indicator {
 /* ------------------------------------------------------------------------- */
 /* General-information reference, equipment totals, and weapon interactions  */
 /* ------------------------------------------------------------------------- */
+
 /* Present the personal actor-header fields as a normal History & Family
  * reference category, using the same cards as Identity and Social Information. */
 .skj-history-general-grid .skj-info-row.is-wide {
-  grid-column: 1/-1;
+  grid-column: 1 / -1;
 }
 
 .skj-history-general-grid .skj-info-row strong {
@@ -3684,9 +3625,11 @@ body.theme-dark .skj-tracker-indicator {
     grid-template-columns: 72px 88px minmax(180px, 1fr);
   }
 }
+
 /* ------------------------------------------------------------------------- */
 /* v0.3.0-alpha.3 responsive four-way actor-hotbar docking                   */
 /* ------------------------------------------------------------------------- */
+
 .skj-actor-hotbar {
   --skj-hotbar-effective-action-width: var(--skj-hotbar-action-width, 420px);
 }
@@ -3748,7 +3691,7 @@ body.theme-dark .skj-tracker-indicator {
   align-self: flex-start;
   flex-basis: var(--skj-hotbar-collapse-width, 10px);
   height: 42px;
-  margin: calc(38px + (var(--skj-quick-stage-size, 192px) - 42px) / 2) 0 0;
+  margin: calc(38px + ((var(--skj-quick-stage-size, 192px) - 42px) / 2)) 0 0;
   max-height: 42px;
   max-width: var(--skj-hotbar-collapse-width, 10px);
   min-height: 42px;
@@ -3845,14 +3788,17 @@ body.theme-dark .skj-tracker-indicator {
   .skj-actor-hotbar .skj-hotbar-collapse-toggle {
     display: flex;
   }
+
   .skj-actor-hotbar .skj-actor-actions {
     max-width: var(--skj-hotbar-effective-action-width, calc(100vw - 24px));
     width: var(--skj-hotbar-effective-action-width, calc(100vw - 24px));
   }
+
   .skj-actor-hotbar .skj-hotbar-layout {
     column-gap: var(--skj-hotbar-panel-gap, 2px);
     grid-template-columns: none;
   }
+
   .skj-actor-hotbar .skj-actions-bar,
   .skj-actor-hotbar .skj-named-action-groups,
   .skj-actor-hotbar .skj-equipment-groups,
@@ -3863,9 +3809,12 @@ body.theme-dark .skj-tracker-indicator {
     width: 100%;
   }
 }
+
+
 /* ------------------------------------------------------------------------- */
 /* v0.3.0-alpha.4 Token-bar resources and bounded AoV hit-location body map  */
 /* ------------------------------------------------------------------------- */
+
 .skj-hotbar-resources.is-single {
   justify-content: center;
 }
@@ -3874,10 +3823,12 @@ body.theme-dark .skj-tracker-indicator {
   place-self: center;
 }
 
+
 /* ------------------------------------------------------------------------- */
 /* v0.3.0-alpha.5 Compact hit-location typography                            */
 /* Keep all body-map labels readable inside the bounded 3 × 4 card layout.   */
 /* ------------------------------------------------------------------------- */
+
 .skj-hit-location-card {
   grid-template-rows: minmax(0, 1fr) 15px;
 }
@@ -3920,6 +3871,7 @@ body.theme-dark .skj-tracker-indicator {
 /* v0.3.0-alpha.6 Final compact hit-location typography                      */
 /* Reduce each text tier by one further pixel and tighten vertical rhythm.    */
 /* ------------------------------------------------------------------------- */
+
 .skj-hit-location-card {
   grid-template-rows: minmax(0, 1fr) 14px;
 }
@@ -3959,6 +3911,7 @@ body.theme-dark .skj-tracker-indicator {
 /* v0.3.0-alpha.7 Neutral hit-location AP/HP values                          */
 /* AP and HP values belong to the body-map card, not the Token disposition.  */
 /* ------------------------------------------------------------------------- */
+
 .skj-hit-location-values strong {
   color: var(--skj-text);
   font-weight: 700;
@@ -3967,6 +3920,7 @@ body.theme-dark .skj-tracker-indicator {
 /* ------------------------------------------------------------------------- */
 /* v0.3.0-alpha.8 Transparent empty wounds and authoritative AoV HP display  */
 /* ------------------------------------------------------------------------- */
+
 .skj-active-wounds-section.is-empty {
   background: transparent;
 }
@@ -3980,12 +3934,17 @@ body.theme-dark .skj-tracker-indicator {
   min-height: 0;
 }
 
+
 /* ------------------------------------------------------------------------- */
 /* v0.3.0-alpha.9 persistent pre-combat intent declarations                  */
 /* ------------------------------------------------------------------------- */
+
 .skj-intent-slot.is-selected {
   border-color: var(--skj-hover);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--skj-hover) 55%, transparent), 0 0 8px color-mix(in srgb, var(--skj-hover) 45%, transparent), inset 0 0 10px rgba(255, 255, 255, 0.05);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--skj-hover) 55%, transparent),
+    0 0 8px color-mix(in srgb, var(--skj-hover) 45%, transparent),
+    inset 0 0 10px rgba(255, 255, 255, 0.05);
 }
 
 .skj-intent-slot.is-selected > i,
@@ -4017,6 +3976,7 @@ body.theme-dark .skj-tracker-indicator {
 /* ------------------------------------------------------------------------- */
 /* v0.3.0-alpha.10 disposition-consistent actor-HUD interaction accents      */
 /* ------------------------------------------------------------------------- */
+
 /* The selected Token's disposition is the single interaction-accent source
    for the actor HUD. Resource fills, wound severity, and workflow status keep
    their semantic colours; active, selected, hover, focus, prepared, and drop
@@ -4033,14 +3993,19 @@ body.theme-dark .skj-tracker-indicator {
 /* Override the older AoV-theme rule which hard-coded the active tab blue. */
 .skj-actor-hotbar.skj-theme-aov .skj-hotbar-layout .skj-hotbar-tabs a.active {
   background-color: var(--skj-background);
-  background-image: linear-gradient(var(--skj-active-soft), var(--skj-active-soft)), var(--skj-surface-texture);
+  background-image:
+    linear-gradient(var(--skj-active-soft), var(--skj-active-soft)),
+    var(--skj-surface-texture);
   border-color: var(--skj-active);
   box-shadow: 0 0 9px var(--skj-active-glow), inset 0 1px 0 rgba(255, 255, 255, 0.14);
 }
 
 .skj-actor-hotbar .skj-hotbar-layout .skj-intent-slot.is-selected {
   border-color: var(--skj-active);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--skj-active) 55%, transparent), 0 0 8px var(--skj-active-glow), inset 0 0 10px rgba(255, 255, 255, 0.05);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--skj-active) 55%, transparent),
+    0 0 8px var(--skj-active-glow),
+    inset 0 0 10px rgba(255, 255, 255, 0.05);
 }
 
 .skj-actor-hotbar .skj-hotbar-layout .skj-hotbar-slot.prepared,
@@ -4062,9 +4027,11 @@ body.theme-dark .skj-tracker-indicator {
   box-shadow: 0 0 16px var(--skj-drop-glow), inset 0 0 10px var(--skj-hover-glow);
 }
 
+
 /* ------------------------------------------------------------------------- */
 /* v0.3.0-alpha.23 readied label below selector                            */
 /* ------------------------------------------------------------------------- */
+
 /* Keep the readied label in normal flow directly below the weapon controls.
  * The same fixed 35px stack is retained, while the workflow pills are nudged
  * down by one pixel so the label remains clear without enlarging the HUD. */
@@ -4125,512 +4092,4 @@ body.theme-dark .skj-tracker-indicator {
 
 .skj-combat-stage .skj-workflow-pips-combat {
   margin-top: 7px;
-}
-
-/* Age of Vikings - Skjaldborg: target-aware Attack Roll dialog source.
- * Kept as a separate SCSS partial while compiling into styles/skjaldborg.css. */
-/* ------------------------------------------------------------------------- */
-/* Attack workflow dialog scaffold                                           */
-/* ------------------------------------------------------------------------- */
-.application.dialog.skj-attack-roll-window {
-  --skj-roll-text: #f2eadb;
-  --skj-roll-muted: rgba(242, 234, 219, 0.68);
-  --skj-roll-surface: rgba(10, 12, 12, 0.9);
-  --skj-roll-surface-soft: rgba(14, 17, 16, 0.68);
-  --skj-roll-frame: rgba(84, 183, 126, 0.62);
-  --skj-roll-frame-soft: rgba(84, 183, 126, 0.24);
-  --skj-roll-active: rgba(56, 121, 163, 0.82);
-  --skj-roll-hover: rgba(126, 45, 30, 0.84);
-  --skj-roll-accent: #f0d9ac;
-  --skj-roll-warning: #e5b95d;
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: 0.82rem;
-}
-
-.application.dialog.skj-attack-roll-window.skj-theme-classic {
-  --skj-roll-frame: rgba(196, 137, 78, 0.62);
-  --skj-roll-frame-soft: rgba(196, 137, 78, 0.24);
-  --skj-roll-active: rgba(109, 67, 38, 0.9);
-}
-
-.application.dialog.skj-attack-roll-window .window-header {
-  background: rgba(4, 7, 7, 0.96);
-  border-bottom: 1px solid var(--skj-roll-frame-soft);
-  color: var(--skj-roll-text);
-  font-size: 0.82rem;
-  min-height: 1.9rem;
-  padding-inline: 0.42rem;
-}
-
-.application.dialog.skj-attack-roll-window .window-header .window-title {
-  font-size: 0.88rem;
-}
-
-.application.dialog.skj-attack-roll-window .window-header button {
-  font-size: 0.86rem;
-  height: 1.55rem;
-  min-height: 1.55rem;
-  min-width: 1.55rem;
-  width: 1.55rem;
-}
-
-.application.dialog.skj-attack-roll-window .window-content,
-.application.dialog.skj-attack-roll-window .window-content.skj-attack-roll-content {
-  background: linear-gradient(rgba(7, 10, 10, 0.91), rgba(7, 9, 9, 0.96)), url("/systems/aov/art-assets/darkstone.jpg") repeat;
-  border: 1px solid var(--skj-roll-frame-soft);
-  color: var(--skj-roll-text);
-  overflow: hidden;
-  padding: 0;
-}
-
-.application.dialog.skj-attack-roll-window.skj-theme-classic .window-content,
-.application.dialog.skj-attack-roll-window.skj-theme-classic .window-content.skj-attack-roll-content {
-  background: linear-gradient(rgba(23, 13, 8, 0.93), rgba(13, 9, 7, 0.97)), radial-gradient(circle at top, rgba(112, 63, 31, 0.2), transparent 58%);
-}
-
-.application.dialog.skj-attack-roll-window .dialog-buttons {
-  display: none;
-}
-
-.skj-attack-roll-dialog {
-  display: flex;
-  flex-direction: column;
-  max-height: 72vh;
-  min-width: 326px;
-  width: min(390px, 92vw);
-}
-
-.skj-attack-roll-dialog select,
-.skj-attack-roll-dialog input {
-  background: rgba(3, 6, 6, 0.82);
-  border: 1px solid var(--skj-roll-frame-soft);
-  border-radius: 4px;
-  color: var(--skj-roll-text);
-  font-family: inherit;
-  font-size: 0.78rem;
-  min-height: 1.75rem;
-  padding: 0.2rem 0.45rem;
-}
-
-.skj-attack-roll-dialog select:focus,
-.skj-attack-roll-dialog input:focus {
-  border-color: var(--skj-roll-frame);
-  box-shadow: 0 0 0 1px var(--skj-roll-frame-soft);
-  outline: none;
-}
-
-.skj-attack-roll-dialog__header {
-  align-items: stretch;
-  background: linear-gradient(110deg, rgba(10, 43, 31, 0.9), rgba(5, 13, 12, 0.95)), url("/systems/aov/art-assets/darkstone.jpg") repeat;
-  border-bottom: 1px solid var(--skj-roll-frame);
-  display: grid;
-  gap: 0.6rem;
-  grid-template-columns: minmax(0, 1fr) 96px;
-  padding: 0.72rem;
-}
-
-.skj-theme-classic .skj-attack-roll-dialog__header {
-  background: linear-gradient(110deg, rgba(82, 39, 20, 0.92), rgba(20, 11, 8, 0.96));
-}
-
-.skj-attack-roll-dialog__identity {
-  display: grid;
-  gap: 0.28rem;
-  min-width: 0;
-}
-
-.skj-attack-roll-dialog__target-summary {
-  align-items: center;
-  display: grid;
-  gap: 0.5rem;
-  grid-template-columns: 44px minmax(0, 1fr);
-  min-width: 0;
-}
-
-.skj-attack-roll-dialog__target-portrait {
-  align-items: center;
-  background: rgba(2, 5, 5, 0.72);
-  border: 1px solid var(--skj-roll-frame);
-  border-radius: 50%;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.035);
-  display: flex;
-  height: 44px;
-  justify-content: center;
-  overflow: hidden;
-  width: 44px;
-}
-
-.skj-attack-roll-dialog__target-portrait img,
-.skj-attack-roll-dialog__target-portrait video {
-  display: block;
-  height: 100%;
-  object-fit: cover;
-  width: 100%;
-}
-
-.skj-attack-roll-dialog__target-portrait > i {
-  color: var(--skj-roll-muted);
-  font-size: 0.96rem;
-}
-
-.skj-attack-roll-dialog__target-copy {
-  display: grid;
-  gap: 0.1rem;
-  min-width: 0;
-}
-
-.skj-attack-roll-dialog__actor {
-  color: var(--skj-roll-muted);
-  font-size: 0.76rem;
-  line-height: 1.1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.skj-attack-roll-dialog__versus {
-  align-items: center;
-  color: var(--skj-roll-muted);
-  display: flex;
-  font-size: 0.86rem;
-  gap: 0.3rem;
-  line-height: 1.12;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.skj-attack-roll-dialog__versus strong {
-  color: var(--skj-roll-text);
-  font-size: 0.94rem;
-  font-weight: 700;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.skj-attack-roll-dialog__weapon {
-  align-items: center;
-  display: grid;
-  gap: 0.38rem;
-  grid-template-columns: 50px minmax(0, 190px);
-  margin: 0.02rem 0 0;
-  max-width: 248px;
-  width: 100%;
-}
-
-.skj-attack-roll-dialog__weapon > span {
-  color: var(--skj-roll-muted);
-  font-size: 0.66rem;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-  line-height: 1;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-
-.skj-attack-roll-dialog__weapon-select {
-  box-sizing: border-box;
-  font-size: 0.82rem;
-  max-width: 100%;
-  min-width: 0;
-  width: 190px;
-}
-
-.skj-attack-roll-dialog__target-card {
-  align-items: center;
-  background: rgba(2, 5, 5, 0.66);
-  border: 1px solid var(--skj-roll-frame);
-  border-radius: 14px;
-  display: grid;
-  justify-items: center;
-  min-width: 0;
-  padding: 0.38rem;
-}
-
-.skj-attack-roll-dialog__target-card strong {
-  color: var(--skj-roll-accent);
-  font-size: 1.55rem;
-  font-weight: 700;
-  line-height: 1;
-}
-
-.skj-attack-roll-dialog__target-card span {
-  color: var(--skj-roll-muted);
-  font-size: 0.61rem;
-  line-height: 1.1;
-  text-align: center;
-}
-
-.skj-attack-roll-dialog__target-label {
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-}
-
-.skj-attack-roll-dialog__body {
-  display: grid;
-  gap: 0.58rem;
-  overflow-y: auto;
-  padding: 0.72rem;
-}
-
-.skj-attack-roll-dialog__row,
-.skj-attack-roll-dialog__detail {
-  align-items: center;
-  display: grid;
-  gap: 0.44rem;
-  grid-template-columns: 80px minmax(0, 1fr);
-}
-
-.skj-attack-roll-dialog__row > label,
-.skj-attack-roll-dialog__detail > label {
-  color: var(--skj-roll-muted);
-  font-size: 0.76rem;
-  font-weight: 700;
-  margin: 0;
-}
-
-.skj-attack-roll-dialog__row--modifier {
-  grid-template-columns: 68px minmax(102px, 124px) minmax(0, 1fr);
-}
-
-.skj-attack-roll-dialog__row--modifier > select {
-  min-width: 0;
-  width: 100%;
-}
-
-.skj-attack-roll-dialog__damage {
-  align-items: center;
-  background: var(--skj-roll-surface-soft);
-  border: 1px solid var(--skj-roll-frame-soft);
-  border-radius: 11px;
-  color: var(--skj-roll-accent);
-  display: inline-flex;
-  font-family: inherit;
-  gap: 0.28rem;
-  justify-content: center;
-  justify-self: stretch;
-  min-height: 1.75rem;
-  min-width: 0;
-  padding: 0.16rem 0.38rem;
-  width: 100%;
-  white-space: nowrap;
-}
-
-.skj-attack-roll-dialog__damage.is-fixed {
-  cursor: default;
-}
-
-.skj-attack-roll-dialog__damage.is-switchable {
-  cursor: pointer;
-}
-
-.skj-attack-roll-dialog__damage.is-switchable:hover,
-.skj-attack-roll-dialog__damage.is-switchable:focus {
-  background: var(--skj-roll-hover);
-  border-color: var(--skj-roll-frame);
-  box-shadow: 0 0 0 1px var(--skj-roll-frame-soft);
-  outline: none;
-}
-
-.skj-attack-roll-dialog__damage-label {
-  color: var(--skj-roll-muted);
-  display: inline-block;
-  font-size: 0.68rem;
-  font-weight: 700;
-  line-height: 1;
-  white-space: nowrap;
-}
-
-.skj-attack-roll-dialog__damage-type {
-  color: var(--skj-roll-accent);
-  display: inline-flex;
-  font-size: 0.72rem;
-  font-style: normal;
-  font-weight: 800;
-  justify-content: center;
-  letter-spacing: 0.02em;
-  min-width: 1.5rem;
-  text-decoration: none;
-}
-
-.skj-attack-roll-dialog__damage-formula {
-  color: var(--skj-roll-text);
-  display: inline-block;
-  font-size: 0.74rem;
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-.skj-attack-roll-dialog__fieldset {
-  border: 1px solid var(--skj-roll-frame-soft);
-  border-radius: 6px;
-  margin: 0;
-  padding: 0.5rem;
-}
-
-.skj-attack-roll-dialog__fieldset legend {
-  color: var(--skj-roll-muted);
-  font-size: 0.68rem;
-  font-weight: 700;
-  padding: 0 0.22rem;
-}
-
-.skj-attack-roll-dialog__segments {
-  display: grid;
-  gap: 0.32rem;
-  grid-template-columns: repeat(2, minmax(0, 140px));
-  justify-content: center;
-  margin-inline: auto;
-  max-width: 288px;
-  width: 100%;
-}
-
-.skj-attack-roll-dialog__segment {
-  margin: 0;
-  min-width: 0;
-}
-
-.skj-attack-roll-dialog__segment input {
-  height: 1px;
-  min-height: 0;
-  opacity: 0;
-  padding: 0;
-  position: absolute;
-  width: 1px;
-}
-
-.skj-attack-roll-dialog__segment span {
-  align-items: center;
-  background: var(--skj-roll-surface-soft);
-  border: 1px solid var(--skj-roll-frame-soft);
-  border-radius: 13px;
-  color: var(--skj-roll-muted);
-  cursor: pointer;
-  display: flex;
-  font-size: 0.75rem;
-  justify-content: center;
-  min-height: 1.7rem;
-  overflow: hidden;
-  padding: 0.2rem 0.34rem;
-  text-align: center;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.skj-attack-roll-dialog__segment input:checked + span {
-  background: var(--skj-roll-active);
-  border-color: var(--skj-roll-frame);
-  color: var(--skj-roll-text);
-  box-shadow: inset 0 0 8px rgba(0, 0, 0, 0.28);
-}
-
-.skj-attack-roll-dialog__segment:not(.is-disabled) span:hover {
-  background: var(--skj-roll-hover);
-  border-color: var(--skj-roll-frame);
-  color: var(--skj-roll-text);
-}
-
-.skj-attack-roll-dialog__segment.is-disabled {
-  opacity: 0.38;
-}
-
-.skj-attack-roll-dialog__segment.is-disabled span {
-  cursor: not-allowed;
-}
-
-.skj-attack-roll-dialog__details {
-  display: grid;
-  gap: 0.42rem;
-  min-height: 0;
-}
-
-.skj-attack-roll-dialog__detail[hidden] {
-  display: none;
-}
-
-.skj-attack-roll-dialog__detail--custom {
-  grid-template-columns: 80px minmax(0, 1fr) 60px;
-}
-
-.skj-attack-roll-dialog__actions {
-  align-items: center;
-  display: grid;
-  gap: 0.35rem;
-  grid-template-columns: minmax(0, 1fr) 96px;
-}
-
-.skj-attack-roll-dialog__summary {
-  align-items: center;
-  background: var(--skj-roll-surface-soft);
-  border: 1px solid var(--skj-roll-frame-soft);
-  border-radius: 11px;
-  color: var(--skj-roll-warning);
-  display: inline-flex;
-  font-size: 0.6875rem;
-  gap: 0.26rem;
-  justify-content: center;
-  justify-self: center;
-  max-width: 100%;
-  min-height: 1.7rem;
-  overflow: hidden;
-  padding: 0.22rem 0.3rem;
-  text-align: center;
-  width: fit-content;
-}
-
-.skj-attack-roll-dialog__summary span {
-  overflow: hidden;
-  text-align: center;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.skj-attack-roll-dialog__roll-button {
-  align-items: center;
-  background: linear-gradient(180deg, rgba(45, 105, 73, 0.94), rgba(20, 66, 43, 0.96));
-  border: 1px solid var(--skj-roll-frame);
-  border-radius: 14px;
-  color: var(--skj-roll-text);
-  cursor: pointer;
-  display: inline-flex;
-  font-family: inherit;
-  font-size: 0.8rem;
-  font-weight: 700;
-  gap: 0.3rem;
-  justify-content: center;
-  min-height: 2rem;
-  padding: 0.28rem 0.5rem;
-  width: 100%;
-}
-
-.skj-theme-classic .skj-attack-roll-dialog__roll-button {
-  background: linear-gradient(180deg, rgba(115, 67, 36, 0.96), rgba(69, 35, 20, 0.96));
-}
-
-.skj-attack-roll-dialog__roll-button:hover,
-.skj-attack-roll-dialog__roll-button:focus {
-  background: var(--skj-roll-hover);
-  box-shadow: 0 0 0 1px var(--skj-roll-frame-soft);
-  outline: none;
-}
-
-@media (max-width: 460px) {
-  .skj-attack-roll-dialog {
-    min-width: 0;
-    width: 90vw;
-  }
-  .skj-attack-roll-dialog__header,
-  .skj-attack-roll-dialog__row,
-  .skj-attack-roll-dialog__row--modifier,
-  .skj-attack-roll-dialog__detail,
-  .skj-attack-roll-dialog__detail--custom,
-  .skj-attack-roll-dialog__actions {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .skj-attack-roll-dialog__segments {
-    grid-template-columns: minmax(0, 1fr);
-    max-width: none;
-  }
 }

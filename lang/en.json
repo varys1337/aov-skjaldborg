@@ -42,6 +42,10 @@
         "Name": "Debug logging",
         "Hint": "Enable all Skjaldborg diagnostic output with one switch, including general logs and every movement-debug category at trace detail."
       },
+      "PerformanceDiagnostics": {
+        "Name": "Performance diagnostics",
+        "Hint": "Collect client-side Skjaldborg render, cache, socket, and movement timing counters. Disabled by default."
+      },
       "MovementDebugMenu": {
         "Name": "Advanced movement diagnostics",
         "Label": "Configure movement diagnostics",
@@ -376,6 +380,7 @@
       "Engaged": "Engaged",
       "Blocked": "Blocked",
       "PlanCaptured": "Movement plan captured.",
+      "PlansCaptured": "Movement plans captured for {count} combatants.",
       "EngagedCannotMove": "This combatant is engaged and cannot declare ordinary movement.",
       "MoveFailed": "Movement could not be completed."
     },
@@ -412,7 +417,11 @@
       "WellbeingUpdateFailed": "The actor wellbeing data could not be updated. See the browser console for details.",
       "SelectWeapon": "Select a carried weapon to roll.",
       "MagicPreparationFailed": "The magic preparation state could not be updated. See the browser console for details.",
-      "NoItemDescription": "{item} has no description to share."
+      "NoItemDescription": "{item} has no description to share.",
+      "AttackTargetRequired": "Target exactly one Token before opening an attack roll.",
+      "SingleAttackTargetRequired": "The attack workflow currently requires exactly one targeted Token.",
+      "AttackTargetUnavailable": "The targeted Token does not represent an available actor.",
+      "NoAttackWeapons": "{actor} has no attack-ready weapon. Ready a weapon, or add a Hand-to-hand or natural weapon, before opening an attack roll."
     },
     "ActionRing": {
       "IntentHint": "Click to commit. Shift-click or right-click for details.",
@@ -498,7 +507,8 @@
         "Status": "State"
       },
       "AddNpcWound": "Add NPC wound damage",
-      "DockMove": "Click to collapse or expand; drag around the portrait to dock action panels left, right, above, or below."
+      "DockMove": "Click to collapse or expand; drag around the portrait to dock action panels left, right, above, or below.",
+      "ReactionControlHint": "Reactions: left-click to add one; right-click to remove one."
     },
     "Tracker": {
       "IntentCategory": "Declared action: {category}",
@@ -534,6 +544,33 @@
       "Label": "Describe the intended action",
       "Placeholder": "Enter the action or declaration that other players should see…",
       "Save": "Set Intent"
+    },
+    "AttackDialog": {
+      "Title": "Attack Roll",
+      "Target": "Target",
+      "Weapon": "Weapon",
+      "Attack": "Attack",
+      "Situation": "Situation",
+      "Damage": "Damage",
+      "Augmentation": "Augmentation",
+      "Skill": "Skill",
+      "Passion": "Passion",
+      "Devotion": "Devotion",
+      "Custom": "Custom",
+      "CustomReason": "Reason",
+      "RollAttack": "Attack",
+      "Summary": "Base {base}% · Situation {situation}% · Augment {augment}%",
+      "ScaffoldHint": "This first workflow stage prepares and publishes the attack request. Attack resolution and chat-card automation will be added later.",
+      "WorkflowQueued": "Attack workflow request prepared. Resolution automation is not enabled yet.",
+      "Modifiers": {
+        "VeryEasy": "Very Easy",
+        "Easy": "Easy",
+        "Standard": "Standard",
+        "Hard": "Hard",
+        "VeryHard": "Very Hard"
+      },
+      "DamageTypeFixedTooltip": "{label} ({abbreviation})",
+      "DamageTypeSwitchTooltip": "{label} ({abbreviation}). Click to switch to {nextLabel} ({nextAbbreviation}). Weapon type: {sourceLabel} ({sourceAbbreviation})."
     }
   }
 }

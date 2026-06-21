@@ -6,6 +6,15 @@ import { requestGm } from "../socket.mjs";
 import { clearReadiedWeapon, getReadiedWeaponId, prepareReadiedWeaponState, setReadiedWeapon } from "../combat/weapon-state.mjs";
 import { createModuleChatMessage } from "../compat/chat-message.mjs";
 import { CombatHUD } from "./combat-hud.mjs";
+import { performanceDiagnostics, measureAsync } from "../performance/performance-monitor.mjs";
+import { RenderCoordinator } from "../ui/render-coordinator.mjs";
+import { PresentationCache } from "../ui/presentation-cache.mjs";
+import {
+  actorHotbarPartsForActorChange,
+  actorHotbarPartsForCombatantChange,
+  actorHotbarPartsForCombatChange,
+  actorHotbarPartsForItemChange
+} from "../utils/changed-paths.mjs";
 import {
   ACTOR_HOTBAR_QUICK_SLOT_CAPACITY,
   commitIntentCategory,
@@ -105,7 +114,6 @@ const MAGIC_TYPE_ORDER = Object.freeze([
 ]);
 
 let hooksRegistered = false;
-let scheduledRenderHandle = null;
 
 const DISPOSITION_PALETTES = Object.freeze({
   friendly: Object.freeze({
@@ -205,6 +213,19 @@ function localizeMagicType(itemType) {
   const key = `TYPES.Item.${itemType}`;
   const localized = game.i18n.localize(key);
   return localized === key ? itemType : localized;
+}
+
+/**
+ * Lazy-load the Attack Roll dialog only when the Attack intent is invoked.
+ *
+ * @param {object} context Dialog context.
+ * @returns {Promise<unknown>}
+ */
+async function openAttackRollDialog(context) {
+  return measureAsync("attackDialog.open", async () => {
+    const { AttackRollDialog } = await import("./attack-roll-dialog.mjs");
+    return AttackRollDialog.show(context);
+  });
 }
 
 /**
@@ -324,6 +345,7 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
     },
     actions: {
       activate: ActorHotbar.onActivate,
+      incrementReaction: ActorHotbar.onIncrementReaction,
       openActor: ActorHotbar.onOpenActor,
       openCombatHud: ActorHotbar.onOpenCombatHud,
       createWound: ActorHotbar.onCreateWound,
@@ -387,6 +409,7 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
     this._quickAccessUpdatePending = false;
     this._xpUpdatePending = false;
     this._magicPreparationUpdatesPending = new Set();
+    this._reactionUpdateQueue = Promise.resolve();
     this._scrollPositions = new Map();
     this._renderedActorKey = null;
   }
@@ -415,19 +438,33 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
   /**
    * Debounce document-hook refreshes into one render pass.
    *
+   * @param {object} [detail={}] Optional invalidation detail.
    * @returns {void}
    */
-  static scheduleRender() {
-    if (scheduledRenderHandle !== null) return;
-    const run = () => {
-      scheduledRenderHandle = null;
-      void this.ensureRendered();
-    };
-    if (typeof globalThis.requestAnimationFrame === "function") {
-      scheduledRenderHandle = globalThis.requestAnimationFrame(run);
-    } else {
-      scheduledRenderHandle = globalThis.setTimeout(run, 16);
+  static scheduleRender(detail = {}) {
+    for (const part of detail.parts ?? []) {
+      performanceDiagnostics.count(`actorHotbar.invalidate.${part}`, 1, detail.reason ?? "actor-hotbar");
     }
+    RenderCoordinator.invalidate("actorHotbar", {
+      parts: detail.parts ?? [],
+      reason: detail.reason ?? "actor-hotbar",
+      full: detail.full === true
+    });
+  }
+
+  /**
+   * Render the hotbar after the shared render coordinator flushes.
+   *
+   * AppV2 part-aware invalidation is preserved in the detail payload for
+   * diagnostics and future part splitting. Unknown or shell-affecting changes
+   * continue to use a full safe render.
+   *
+   * @param {object} [detail={}] Merged invalidation detail.
+   * @returns {Promise<ActorHotbar|null>}
+   */
+  static async renderInvalidated(detail = {}) {
+    performanceDiagnostics.count("actorHotbar.render.request", 1, detail);
+    return performanceDiagnostics.measureAsync("actorHotbar.render.complete", () => this.ensureRendered(), () => detail);
   }
 
   /**
@@ -470,12 +507,14 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
 
   /** @inheritdoc */
   async _prepareContext(options) {
+    const measureId = performanceDiagnostics.markStart("actorHotbar.context");
+    try {
     const context = await super._prepareContext(options);
     this.actor = resolveHotbarActor();
     this.combatant = resolveActorCombatant(this.actor, game.combat);
     if (!this.actor) return { ...context, actor: null };
 
-    const prepared = prepareActorActions(this.actor);
+    const prepared = PresentationCache.get(this.actor, "actions", () => prepareActorActions(this.actor));
     const combat = game.combat ?? null;
     const workflowActive = isSkjaldborgCombatActive(combat) && !!this.combatant;
     const canControlCombatant = this.combatant
@@ -495,16 +534,16 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
       })
       : [];
     const showMacroTab = game.settings.get(MODULE_ID, "replaceCoreHotbar");
-    const equipmentGroups = prepareActorEquipment(this.actor);
-    const weaponState = prepareReadiedWeaponState(this.actor);
+    const equipmentGroups = PresentationCache.get(this.actor, "equipment", () => prepareActorEquipment(this.actor));
+    const weaponState = PresentationCache.get(this.actor, "weapons", () => prepareReadiedWeaponState(this.actor));
     const canManageWeapons = this.actor.isOwner
       && (!this.combatant || AoVAdapter.canUserControlCombatant(game.user, this.combatant));
     const showEquipTab = equipmentGroups.length > 0;
-    const historyFamily = await prepareActorHistoryFamily(this.actor);
+    const historyFamily = await PresentationCache.getAsync(this.actor, "historyFamily", () => prepareActorHistoryFamily(this.actor));
     const showHistoryFamilyTab = this.actor.type === "character" || historyFamily.hasContent;
     const wellbeing = AoVAdapter.prepareActorWellbeing(this.actor);
     const showWellbeingTab = wellbeing.supported;
-    const magicGroups = prepareNamedGroups(prepared.magic, "magic");
+    const magicGroups = PresentationCache.get(this.actor, "magic", () => prepareNamedGroups(prepared.magic, "magic"));
     const showMagicTab = magicGroups.length > 0;
     const resources = await this._prepareResources();
 
@@ -520,8 +559,8 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
       context.tabs.combat.cssClass = [context.tabs.combat.cssClass, "active"].filter(Boolean).join(" ");
     }
 
-    const statGroups = prepareActorStats(this.actor);
-    const skillGroups = prepareNamedGroups(prepared.skills, "skills");
+    const statGroups = PresentationCache.get(this.actor, "stats", () => prepareActorStats(this.actor));
+    const skillGroups = PresentationCache.get(this.actor, "skills", () => prepareNamedGroups(prepared.skills, "skills"));
     const macroSlots = showMacroTab ? this._prepareMacroSlots() : [];
     const quickAccess = this._prepareQuickAccessSlots({
       prepared,
@@ -573,6 +612,12 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
       collapsed: !!game.settings.get(MODULE_ID, "actorHotbarCollapsed"),
       dock: this._hotbarDock
     };
+    } finally {
+      performanceDiagnostics.markEnd(measureId, {
+        actorId: this.actor?.id ?? null,
+        combatantId: this.combatant?.id ?? null
+      });
+    }
   }
 
   /**
@@ -847,6 +892,7 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
     this._activateEquipmentEditing();
     this._activateWeaponControls();
     this._activateContextMenus();
+    this._activateCombatInteractions();
     this._activateActionDragging();
     this._activateXpToggleDragGuards();
     this._activateQuickAccessSlots();
@@ -1735,6 +1781,35 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
   }
 
   /**
+   * Bind the asymmetric combat-control interactions used as scaffolding for
+   * later action-resolution workflows.
+   *
+   * Combat-tab intent controls reserve primary click for future configuration
+   * and integration hooks. Their existing declaration behavior is moved to
+   * right click. The existing reaction pill remains the only visual control:
+   * primary click adds one reaction and right click removes one.
+   *
+   * @returns {void}
+   */
+  _activateCombatInteractions() {
+    for (const control of this.element.querySelectorAll("[data-intent-action-control]")) {
+      control.addEventListener("contextmenu", event => {
+        event.preventDefault();
+        event.stopPropagation();
+        void this._commitIntentAction(control.dataset.actionId);
+      });
+    }
+
+    for (const control of this.element.querySelectorAll("[data-reaction-control]")) {
+      control.addEventListener("contextmenu", event => {
+        event.preventDefault();
+        event.stopPropagation();
+        void this._queueReactionChange("decrementReaction");
+      });
+    }
+  }
+
+  /**
    * Publish one actor-owned Item's Description-tab content to chat.
    *
    * The rich text is enriched relative to the Item so document links, embeds,
@@ -2069,7 +2144,7 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
     this._quickAccessUpdatePending = true;
     try {
       await persistActorQuickAccess(this.actor, entries);
-      await this.render(false);
+      ActorHotbar.scheduleRender({ parts: ["quickAccess"], reason: "quick-access-update" });
     } catch (exception) {
       error("Failed to update actor-hotbar quick access.", exception);
       ui.notifications.error(game.i18n.localize("AOV_SKJALDBORG.Warnings.ActionFailed"));
@@ -2100,7 +2175,7 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
     order.splice(targetIndex, 0, source.id);
     await persistActionOrder(this.actor, group, order);
     this._dragData = null;
-    await this.render(false);
+    ActorHotbar.scheduleRender({ parts: ["tabBody"], reason: "action-order-update" });
   }
 
 
@@ -2133,8 +2208,8 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
       } else {
         result = await clearReadiedWeapon(this.actor);
       }
-      await this.render(false);
-      ui.combat?.render?.();
+      ActorHotbar.scheduleRender({ parts: ["workflow", "weaponControls"], reason: "weapon-action" });
+      RenderCoordinator.invalidate("combatTracker", { reason: "weapon-action" });
       return result;
     } catch (exception) {
       error(`Failed to ${action} weapon from the actor hotbar.`, exception);
@@ -2165,27 +2240,120 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
       return effect?.sheet?.render?.(true) ?? null;
     }
     if (kind === "intent") {
-      const combat = game.combat ?? null;
-      let publicText = "";
-      if (actionId === ACTION_CATEGORIES.OTHER) {
-        const activeText = isSkjaldborgCombatActive(combat) && this.combatant
-          ? getCombatantState(this.combatant).intent?.publicText
-          : getActorPreparedIntent(this.actor)?.publicText;
-        const entered = await promptOtherIntentText(activeText ?? "");
-        if (entered === null) return null;
-        publicText = entered;
+      if (target.hasAttribute("data-intent-action-control")) {
+        Hooks.callAll("aovSkjaldborgIntentAction", {
+          app: this,
+          actor: this.actor,
+          combat: game.combat ?? null,
+          combatant: this.combatant,
+          actionCategory: actionId,
+          interaction: "primary",
+          event,
+          target
+        });
+        if (actionId === ACTION_CATEGORIES.ATTACK) {
+          return openAttackRollDialog({ actor: this.actor, originEvent: event });
+        }
+        return null;
       }
-      const result = await commitIntentCategory(
-        this.actor,
-        this.combatant,
-        combat,
-        actionId,
-        { publicText }
-      );
-      await this.render(false);
-      return result;
+      return this._commitIntentAction(actionId);
     }
     return null;
+  }
+
+  /**
+   * Commit one intent category using the declaration behavior formerly bound
+   * to primary click in the Combat tab.
+   *
+   * @param {string|undefined} actionId Intent action category.
+   * @returns {Promise<unknown|null>}
+   */
+  async _commitIntentAction(actionId) {
+    const combat = game.combat ?? null;
+    let publicText = "";
+    if (actionId === ACTION_CATEGORIES.OTHER) {
+      const activeText = isSkjaldborgCombatActive(combat) && this.combatant
+        ? getCombatantState(this.combatant).intent?.publicText
+        : getActorPreparedIntent(this.actor)?.publicText;
+      const entered = await promptOtherIntentText(activeText ?? "");
+      if (entered === null) return null;
+      publicText = entered;
+    }
+    const result = await commitIntentCategory(
+      this.actor,
+      this.combatant,
+      combat,
+      actionId,
+      { publicText }
+    );
+    ActorHotbar.scheduleRender({ parts: ["workflow"], reason: "intent-commit" });
+    return result;
+  }
+
+  /**
+   * Serialize one relative reaction-counter operation through the existing
+   * GM-authoritative socket path.
+   *
+   * Relative increments deliberately do not submit an optimistic timestamp:
+   * the authoritative write queue re-reads the latest reaction count for every
+   * operation, so rapid clicks cannot overwrite one another with stale values.
+   *
+   * @param {"incrementReaction"|"decrementReaction"} action Socket action.
+   * @returns {Promise<unknown|null>}
+   */
+  _queueReactionChange(action) {
+    const actor = this.actor;
+    const combat = game.combat ?? null;
+    const combatant = resolveActorCombatant(actor, combat) ?? this.combatant;
+    const execute = async () => {
+      if (!isSkjaldborgCombatActive(combat) || !combatant) return null;
+
+      const control = this.element?.querySelector?.("[data-reaction-control]");
+      const previousHtml = control?.innerHTML ?? "";
+      if (control instanceof HTMLElement) {
+        const current = Number(getCombatantState(combatant).reactionCount ?? 0);
+        const next = Math.max(0, current + (action === "incrementReaction" ? 1 : -1));
+        control.classList.add("pending");
+        control.setAttribute("aria-busy", "true");
+        control.innerHTML = `<i class="fa-solid fa-shield" inert></i> ${next}`;
+      }
+
+      try {
+        const result = await requestGm(action, {
+          combatId: combat.id,
+          combatantId: combatant.id
+        });
+        ActorHotbar.scheduleRender({ parts: ["workflow"], reason: action });
+        RenderCoordinator.invalidate("combatTracker", { reason: action });
+        return result;
+      } catch (exception) {
+        error(`Failed to ${action === "incrementReaction" ? "increment" : "decrement"} reactions from the actor hotbar.`, exception);
+        ui.notifications.error(game.i18n.localize("AOV_SKJALDBORG.Warnings.ActionFailed"));
+        if (control instanceof HTMLElement) control.innerHTML = previousHtml;
+        return null;
+      } finally {
+        if (control instanceof HTMLElement) {
+          control.classList.remove("pending");
+          control.removeAttribute("aria-busy");
+        }
+      }
+    };
+
+    const pending = this._reactionUpdateQueue.then(execute, execute);
+    this._reactionUpdateQueue = pending.catch(() => null);
+    return pending;
+  }
+
+  /**
+   * Add one reaction from the existing workflow pill.
+   *
+   * @param {PointerEvent} event Interaction event.
+   * @returns {Promise<unknown|null>}
+   */
+  static onIncrementReaction(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    return this._queueReactionChange("incrementReaction");
   }
 
 
@@ -2282,8 +2450,8 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
     this._weaponActionPending = true;
     try {
       const result = await clearReadiedWeapon(this.actor);
-      await this.render(false);
-      ui.combat?.render?.();
+      ActorHotbar.scheduleRender({ parts: ["workflow", "weaponControls"], reason: "drop-readied-weapon" });
+      RenderCoordinator.invalidate("combatTracker", { reason: "drop-readied-weapon" });
       return result;
     } catch (exception) {
       error("Failed to drop readied weapon from the actor hotbar.", exception);
@@ -2311,7 +2479,7 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
     target.setAttribute("aria-busy", "true");
     try {
       const result = await toggleActorItemXpCheck(this.actor, target.dataset.itemId);
-      await this.render(false);
+      ActorHotbar.scheduleRender({ parts: ["tabBody"], reason: "xp-toggle" });
       return result;
     } finally {
       this._xpUpdatePending = false;
@@ -2337,7 +2505,7 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
     target.setAttribute("aria-busy", "true");
     try {
       const result = await AoVAdapter.toggleActorMagicPrepared(this.actor, itemId);
-      await this.render(false);
+      ActorHotbar.scheduleRender({ parts: ["resources", "tabBody"], reason: "magic-prepared-toggle" });
       return result;
     } catch (exception) {
       error(`Failed to toggle magic preparation for Item ${itemId}.`, exception);
@@ -2497,7 +2665,7 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
   static async onToggleEquipment(event, target) {
     event.preventDefault();
     const result = await cycleActorEquipmentStatus(this.actor, target.dataset.equipmentId);
-    await this.render(false);
+    ActorHotbar.scheduleRender({ parts: ["tabBody", "weaponControls"], reason: "equipment-toggle" });
     return result;
   }
 
@@ -2600,6 +2768,56 @@ function combatantAffectsCurrentHotbar(combatant) {
 }
 
 /**
+ * Invalidate cached presentation data affected by hotbar render parts.
+ *
+ * @param {Actor|null|undefined} actor Actor document.
+ * @param {Set<string>|string[]} parts Affected hotbar regions.
+ * @returns {void}
+ */
+function invalidatePresentationForHotbarParts(actor, parts) {
+  const affected = new Set(parts ?? []);
+  const categories = new Set();
+  if (affected.has("resources")) categories.add("resources");
+  if (affected.has("weaponControls")) {
+    categories.add("weapons");
+    categories.add("equipment");
+  }
+  if (affected.has("quickAccess")) {
+    categories.add("actions");
+    categories.add("stats");
+  }
+  if (affected.has("tabBody")) {
+    categories.add("actions");
+    categories.add("equipment");
+    categories.add("stats");
+    categories.add("skills");
+    categories.add("magic");
+    categories.add("historyFamily");
+  }
+  if (!categories.size || affected.has("shell")) PresentationCache.invalidate(actor);
+  else PresentationCache.invalidate(actor, categories);
+}
+
+/**
+ * Schedule a part-aware hotbar refresh.
+ *
+ * @param {Set<string>|string[]} parts Affected hotbar regions.
+ * @param {string} reason Diagnostic reason.
+ * @param {Actor|null|undefined} [actor=ActorHotbar.current?.actor] Actor whose cache should be invalidated.
+ * @returns {void}
+ */
+function invalidateActorHotbar(parts, reason, actor = ActorHotbar.current?.actor) {
+  const affected = new Set(parts ?? []);
+  if (!affected.size) return;
+  invalidatePresentationForHotbarParts(actor, affected);
+  ActorHotbar.scheduleRender({
+    parts: affected,
+    reason,
+    full: affected.has("shell")
+  });
+}
+
+/**
  * Register actor-hotbar render hooks once.
  *
  * @returns {void}
@@ -2608,15 +2826,17 @@ export function registerActorHotbarHooks() {
   if (hooksRegistered) return;
   hooksRegistered = true;
 
-  Hooks.on("controlToken", () => ActorHotbar.scheduleRender());
-  Hooks.on("canvasReady", () => ActorHotbar.scheduleRender());
-  Hooks.on("canvasTearDown", () => ActorHotbar.scheduleRender());
-  Hooks.on("renderHotbar", () => ActorHotbar.scheduleRender());
+  RenderCoordinator.register("actorHotbar", detail => ActorHotbar.renderInvalidated(detail));
+
+  Hooks.on("controlToken", () => invalidateActorHotbar(["shell"], "control-token"));
+  Hooks.on("canvasReady", () => invalidateActorHotbar(["shell"], "canvas-ready"));
+  Hooks.on("canvasTearDown", () => invalidateActorHotbar(["shell"], "canvas-teardown"));
+  Hooks.on("renderHotbar", () => invalidateActorHotbar(["shell"], "core-hotbar-render"));
   Hooks.on("createToken", token => {
-    if (tokenBelongsToCurrentHotbarActor(token)) ActorHotbar.scheduleRender();
+    if (tokenBelongsToCurrentHotbarActor(token)) invalidateActorHotbar(["shell"], "token-create");
   });
   Hooks.on("deleteToken", token => {
-    if (tokenBelongsToCurrentHotbarActor(token)) ActorHotbar.scheduleRender();
+    if (tokenBelongsToCurrentHotbarActor(token)) invalidateActorHotbar(["shell"], "token-delete");
   });
   Hooks.on("updateToken", (token, changes) => {
     const changedKeys = Object.keys(changes ?? {});
@@ -2624,42 +2844,45 @@ export function registerActorHotbarHooks() {
     const actorChanged = ["actorId", "actorLink"].some(key => Object.prototype.hasOwnProperty.call(changes ?? {}, key));
     const resourceBarsChanged = changedKeys.some(key => key === "bar1" || key === "bar2" || key.startsWith("bar1.") || key.startsWith("bar2."));
     if ((dispositionChanged || actorChanged || resourceBarsChanged) && tokenBelongsToCurrentHotbarActor(token)) {
-      ActorHotbar.scheduleRender();
+      invalidateActorHotbar(["shell", "resources"], "token-update");
     }
   });
-  Hooks.on("updateActor", actor => {
+  Hooks.on("updateActor", (actor, changed) => {
     const current = ActorHotbar.current;
     if (current?._xpUpdatePending && current.actor?.id === actor.id) return;
-    if (documentBelongsToCurrentHotbarActor(actor)) ActorHotbar.scheduleRender();
+    if (!documentBelongsToCurrentHotbarActor(actor)) return;
+    invalidateActorHotbar(actorHotbarPartsForActorChange(changed), "actor-update", actor);
   });
-  Hooks.on("updateItem", item => {
+  Hooks.on("updateItem", (item, changed) => {
     const current = ActorHotbar.current;
     const sameActor = documentBelongsToCurrentHotbarActor(item);
     if (sameActor && (current?._xpUpdatePending || current?._magicPreparationUpdatesPending?.size > 0)) return;
-    if (sameActor) ActorHotbar.scheduleRender();
+    if (sameActor) invalidateActorHotbar(actorHotbarPartsForItemChange(changed), "item-update", item.actor);
   });
   Hooks.on("createItem", item => {
-    if (documentBelongsToCurrentHotbarActor(item)) ActorHotbar.scheduleRender();
+    if (documentBelongsToCurrentHotbarActor(item)) invalidateActorHotbar(["shell"], "item-create", item.actor);
   });
   Hooks.on("deleteItem", item => {
-    if (documentBelongsToCurrentHotbarActor(item)) ActorHotbar.scheduleRender();
+    if (documentBelongsToCurrentHotbarActor(item)) invalidateActorHotbar(["shell"], "item-delete", item.actor);
   });
   Hooks.on("createActiveEffect", effect => {
-    if (documentBelongsToCurrentHotbarActor(effect)) ActorHotbar.scheduleRender();
+    if (documentBelongsToCurrentHotbarActor(effect)) invalidateActorHotbar(["shell"], "effect-create", effect.parent);
   });
-  Hooks.on("updateActiveEffect", effect => {
-    if (documentBelongsToCurrentHotbarActor(effect)) ActorHotbar.scheduleRender();
+  Hooks.on("updateActiveEffect", (effect, changed) => {
+    if (!documentBelongsToCurrentHotbarActor(effect)) return;
+    if (!Object.keys(changed ?? {}).length) return;
+    invalidateActorHotbar(["shell"], "effect-update", effect.parent);
   });
   Hooks.on("deleteActiveEffect", effect => {
-    if (documentBelongsToCurrentHotbarActor(effect)) ActorHotbar.scheduleRender();
+    if (documentBelongsToCurrentHotbarActor(effect)) invalidateActorHotbar(["shell"], "effect-delete", effect.parent);
   });
-  Hooks.on("updateCombat", combat => {
-    if (combatAffectsCurrentHotbar(combat)) ActorHotbar.scheduleRender();
+  Hooks.on("updateCombat", (combat, changed) => {
+    if (combatAffectsCurrentHotbar(combat)) invalidateActorHotbar(actorHotbarPartsForCombatChange(changed), "combat-update");
   });
-  Hooks.on("updateCombatant", combatant => {
-    if (combatantAffectsCurrentHotbar(combatant)) ActorHotbar.scheduleRender();
+  Hooks.on("updateCombatant", (combatant, changed) => {
+    if (combatantAffectsCurrentHotbar(combatant)) invalidateActorHotbar(actorHotbarPartsForCombatantChange(changed), "combatant-update", combatant.actor);
   });
 
   window.addEventListener("resize", () => ActorHotbar.current?._clampCurrentPosition());
-  ActorHotbar.scheduleRender();
+  ActorHotbar.scheduleRender({ parts: ["shell"], reason: "register-hooks", full: true });
 }

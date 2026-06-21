@@ -1,5 +1,6 @@
 import { ACTION_CATEGORIES, INTENT_STATUS, MODULE_ID } from "../constants.mjs";
 import { defaultCombatantState, getCombatState, getCombatantState, updateCombatantState } from "./state.mjs";
+import { RenderCoordinator } from "../ui/render-coordinator.mjs";
 import { refreshPlanningInitiative } from "./planning-initiative.mjs";
 import { refreshImmediateResolutionActions } from "./resolution-queue.mjs";
 import { shouldQueueResolutionImmediately } from "./phase-structure.mjs";
@@ -154,7 +155,7 @@ export async function synchronizePreparedIntents(combat) {
     if (combatant.actor) actorsToClear.add(combatant.actor);
   }
   await Promise.all(Array.from(actorsToClear, actor => clearActorPreparedIntent(actor)));
-  if (updates.length) ui.combat?.render?.();
+  if (updates.length) RenderCoordinator.invalidateCombatTracker("prepared-intent-refresh");
   return updates;
 }
 

@@ -1,19 +1,23 @@
 {
   "name": "aov-skjaldborg",
-  "version": "0.3.1",
+  "version": "0.3.0-alpha.24",
   "private": true,
-  "description": "Development, validation, packaging, and release automation for the Age of Vikings - Skjaldborg Foundry VTT module.",
+  "description": "Development, validation, SCSS compilation, packaging, and release automation for the Age of Vikings - Skjaldborg Foundry VTT module.",
   "type": "module",
   "engines": {
     "node": ">=20"
   },
   "scripts": {
-    "prepare": "node tools/install-git-hooks.mjs",
+    "styles:build": "sass --style=expanded --no-source-map src/styles/skjaldborg.scss styles/skjaldborg.css",
+    "styles:watch": "sass --watch --style=expanded --no-source-map src/styles/skjaldborg.scss:styles/skjaldborg.css",
     "check:syntax": "node tools/check-syntax.mjs",
     "validate": "node tools/validate-module.mjs",
-    "build": "node tools/build-release.mjs",
-    "ci": "npm run check:syntax && npm run validate",
-    "set-version": "node tools/set-version.mjs",
-    "release:tag": "node tools/create-release-tag.mjs --current-version"
+    "build": "npm run styles:build && node tools/build-release.mjs",
+    "build:folder": "npm run styles:build && node tools/build-dist.mjs",
+    "ci": "npm run check:syntax && npm run styles:build && npm run validate",
+    "set-version": "node tools/set-version.mjs"
+  },
+  "devDependencies": {
+    "sass": "^1.94.2"
   }
 }
