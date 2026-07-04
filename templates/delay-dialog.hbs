@@ -1,0 +1,50 @@
+<div class="skj-roll-dialog skj-roll-dialog--delay skj-simple-roll-dialog skj-delay-dialog">
+  <section class="skj-roll-dialog__body skj-simple-roll-dialog__body">
+    <input id="skj-delay-mode-dex" class="skj-delay-dialog__mode-input" type="radio" name="mode" value="dex" checked>
+    <input id="skj-delay-mode-combatant" class="skj-delay-dialog__mode-input" type="radio" name="mode" value="combatant" {{#unless hasTargets}}disabled{{/unless}}>
+
+    <fieldset class="skj-roll-dialog__augment skj-attack-roll-dialog__fieldset">
+      <legend>{{localize "AOV_SKJALDBORG.Delay.Mode"}}</legend>
+      <div class="skj-roll-dialog__segments skj-delay-dialog__mode-segments">
+        <label class="skj-roll-dialog__segment skj-attack-roll-dialog__segment" for="skj-delay-mode-dex">
+          <span>{{localize "AOV_SKJALDBORG.Delay.ToDex"}}</span>
+        </label>
+        <label class="skj-roll-dialog__segment skj-attack-roll-dialog__segment {{#unless hasTargets}}is-disabled{{/unless}}" for="skj-delay-mode-combatant">
+          <span>{{localize "AOV_SKJALDBORG.Delay.ForCombatant"}}</span>
+        </label>
+      </div>
+    </fieldset>
+
+    <div class="skj-delay-dialog__mode-panel skj-delay-dialog__mode-panel--dex">
+      <label class="skj-roll-dialog__row skj-simple-roll-dialog__row">
+        <span>{{localize "AOV_SKJALDBORG.Delay.DexRank"}}</span>
+        <input type="number" name="targetDex" min="1" step="1" value="{{currentDex}}">
+      </label>
+      <label class="skj-utility-dialog__toggle skj-simple-roll-dialog__toggle skj-delay-dialog__end-toggle">
+        <input type="checkbox" name="endOfRound">
+        <span>{{localize "AOV_SKJALDBORG.Delay.EndOfRound"}}</span>
+      </label>
+    </div>
+
+    <div class="skj-delay-dialog__mode-panel skj-delay-dialog__mode-panel--combatant">
+      <label class="skj-roll-dialog__row skj-simple-roll-dialog__row">
+        <span>{{localize "AOV_SKJALDBORG.Delay.TargetCombatant"}}</span>
+        <select name="targetCombatantId" {{#unless hasTargets}}disabled{{/unless}}>
+          {{#each combatants}}
+            <option value="{{id}}">{{name}} ({{initiative}})</option>
+          {{else}}
+            <option value="">{{localize "AOV_SKJALDBORG.Delay.NoTargets"}}</option>
+          {{/each}}
+        </select>
+      </label>
+
+      <label class="skj-roll-dialog__row skj-simple-roll-dialog__row">
+        <span>{{localize "AOV_SKJALDBORG.Delay.Position"}}</span>
+        <select name="position" {{#unless hasTargets}}disabled{{/unless}}>
+          <option value="before">{{localize "AOV_SKJALDBORG.Delay.Before"}}</option>
+          <option value="after">{{localize "AOV_SKJALDBORG.Delay.After"}}</option>
+        </select>
+      </label>
+    </div>
+  </section>
+</div>

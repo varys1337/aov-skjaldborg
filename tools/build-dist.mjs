@@ -30,7 +30,7 @@ async function copyEntry(entry) {
   });
 }
 
-await assertFile(compiledCss, "Missing styles/skjaldborg.css. Run npm run styles:build before npm run dist.");
+await assertFile(compiledCss, "Missing styles/skjaldborg.css. Run npm run styles:release before building dist.");
 
 await rm(packageRoot, { recursive: true, force: true });
 await mkdir(path.join(packageRoot, "styles"), { recursive: true });

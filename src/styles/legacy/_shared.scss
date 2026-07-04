@@ -1,0 +1,341 @@
+.skj-phasebar {
+  border-top: 1px solid var(--color-border-light-tertiary, #c9c1b5);
+  margin-top: 4px;
+  padding-top: 4px;
+}
+
+.skj-phase-buttons {
+  display: grid;
+  gap: 4px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  min-width: 0;
+}
+
+.skj-movement-run {
+  font-size: 11px;
+  line-height: 1.3;
+  margin-top: 4px;
+  opacity: 0.85;
+}
+
+
+.skj-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.skj-button,
+.skj-icon-button,
+.skj-actions button,
+.skj-queue button {
+  align-items: center;
+  display: inline-flex;
+  gap: 4px;
+  min-height: 28px;
+  white-space: nowrap;
+}
+
+.skj-phasebar .skj-button {
+  justify-content: center;
+  margin: 0;
+  min-height: 30px;
+  min-width: 0;
+  padding: 3px;
+  width: 100%;
+}
+
+.skj-phasebar .skj-button i {
+  font-size: 15px;
+  line-height: 1;
+  margin: 0;
+}
+
+.skj-button.active,
+.skj-icon-button.active {
+  box-shadow: inset 0 0 0 2px var(--color-border-highlight, #ff6400);
+}
+
+.skj-combatant-notes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  font-size: 11px;
+  line-height: 1.3;
+  margin-top: 2px;
+  min-width: 0;
+}
+
+.skj-pill {
+  border: 1px solid var(--color-border-light-primary, #999);
+  border-radius: 4px;
+  box-sizing: border-box;
+  padding: 1px 5px;
+}
+
+.skj-combatant-status {
+  display: inline-block;
+  flex: 0 0 auto;
+  font-size: 10px;
+  line-height: 1.25;
+  margin-inline-start: 2px;
+  max-width: none;
+  min-width: max-content;
+  overflow: visible;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.skj-status-fallback {
+  align-items: center;
+  display: flex;
+  margin-top: 2px;
+  min-width: 0;
+}
+
+.skj-combatant-status-fallback {
+  align-items: center;
+  display: flex;
+  margin-top: 2px;
+  min-width: 0;
+}
+
+.skj-pill.committed {
+  background: rgba(29, 120, 74, 0.18);
+}
+
+.skj-pill.held {
+  background: rgba(120, 90, 29, 0.18);
+}
+
+.skj-private {
+  color: var(--color-text-light-6, #666);
+  font-style: italic;
+}
+
+.skj-active-action {
+  color: var(--color-text-hyperlink, #7a3a00);
+  font-weight: 700;
+}
+
+.skj-muted {
+  color: var(--color-text-light-6, #666);
+  font-size: 12px;
+}
+
+.skj-panel {
+  border: 1px solid var(--color-border-light-tertiary, #c9c1b5);
+  border-radius: 6px;
+  display: grid;
+  gap: 8px;
+  padding: 8px;
+}
+
+.skj-panel h3 {
+  font-size: 14px;
+  margin: 0;
+}
+
+.skj-panel label {
+  display: grid;
+  gap: 3px;
+}
+
+.skj-panel textarea {
+  resize: vertical;
+}
+
+.skj-check-grid,
+.skj-field-grid {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.skj-inline-check {
+  align-items: center;
+  display: flex !important;
+  gap: 6px;
+}
+
+.skj-ledger {
+  display: grid;
+  gap: 4px 10px;
+  grid-template-columns: auto 1fr;
+  margin: 0;
+}
+
+.skj-ledger dt {
+  font-weight: 700;
+}
+
+.skj-ledger dd {
+  margin: 0;
+}
+
+.skj-queue {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 20px;
+}
+
+.skj-queue li {
+  border-bottom: 1px solid var(--color-border-light-tertiary, #c9c1b5);
+  display: grid;
+  gap: 4px;
+  padding-bottom: 6px;
+}
+
+.skj-queue li.resolved,
+.skj-queue li.skipped {
+  opacity: 0.58;
+}
+
+
+/* Player-scoped phase reports are separate private ChatMessages so they can
+ * contain a reduced combatant scope. They must never render in a GM chat log. */
+.chat-message.aov-skjaldborg-hidden-report,
+.aov-skjaldborg-hidden-report {
+  display: none !important;
+}
+
+/* Match the Age of Vikings chat palette in both Foundry themes.
+ * AoV defines --aov-primary-font-colour on the themed chat sidebar and
+ * applies it to core chat messages. Foundry heading and table rules may
+ * otherwise override the inherited message colour.
+ */
+.chat-message .aov-skjaldborg-chat {
+  color: var(--aov-primary-font-colour);
+  font-family: var(--aov-primary-font);
+}
+
+.chat-message .aov-skjaldborg-chat h3,
+.chat-message .aov-skjaldborg-chat h4,
+.chat-message .aov-skjaldborg-chat p,
+.chat-message .aov-skjaldborg-chat table,
+.chat-message .aov-skjaldborg-chat th,
+.chat-message .aov-skjaldborg-chat td,
+.chat-message .aov-skjaldborg-chat strong,
+.chat-message .aov-skjaldborg-chat li {
+  color: inherit;
+}
+
+.chat-message .aov-skjaldborg-chat h3 {
+  margin: 0 0 4px;
+}
+
+.chat-message .aov-skjaldborg-chat .skj-muted {
+  color: inherit;
+  opacity: 0.72;
+}
+
+@media (max-width: 480px) {
+  .skj-check-grid,
+  .skj-field-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+
+.skj-token-hud-button i {
+  margin: 0;
+  pointer-events: none;
+}
+
+
+.skj-report-settings-content {
+  max-height: calc(100vh - 80px);
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.skj-report-settings-form {
+  display: grid;
+  gap: 14px;
+}
+
+.skj-report-settings-form fieldset {
+  border: 1px solid var(--color-border-light-tertiary, #c9c1b5);
+  border-radius: 6px;
+  margin: 0;
+  padding: 10px;
+}
+
+.skj-report-phase-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.skj-report-phase-option {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.skj-chat-dex-table {
+  border-collapse: collapse;
+  font-size: 0.82em;
+  table-layout: fixed;
+  width: 100%;
+}
+
+.skj-chat-dex-table .skj-col-combatant {
+  width: 38%;
+}
+
+.skj-chat-dex-table .skj-col-dex-change {
+  width: 26%;
+}
+
+.skj-chat-dex-table .skj-col-compact {
+  width: 18%;
+}
+
+.skj-chat-dex-table th,
+.skj-chat-dex-table td {
+  border-bottom: 1px solid var(--color-border-light-tertiary, #c9c1b5);
+  overflow: hidden;
+  overflow-wrap: normal;
+  padding: 4px 2px;
+  text-align: center;
+  vertical-align: middle;
+  word-break: normal;
+}
+
+
+.skj-chat-dex-table th {
+  font-size: 0.88em;
+  line-height: 1.1;
+}
+
+.skj-chat-dex-table th,
+.skj-chat-number {
+  white-space: nowrap;
+}
+
+.skj-chat-dex-change {
+  font-weight: 700;
+}
+
+.skj-chat-combatant-cell {
+  min-width: 0;
+}
+
+.skj-chat-combatant-name {
+  display: block;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 520px) {
+  .skj-report-phase-grid {
+    grid-template-columns: 1fr;
+  }
+}

@@ -1,0 +1,31 @@
+/* RAW movement: a combatant that moved beyond half MOV cannot establish engagement this round. */
+.skj-tracker-indicator.movement.cannot-engage {
+  --skj-indicator-accent: #d95f59;
+  background: rgba(86, 26, 24, 0.82);
+  color: var(--color-text-light-highlight, #f6e6d2);
+}
+
+
+.skj-tracker-indicator.movement.hidden-detail {
+  --skj-indicator-accent: #9a8496;
+  background: rgba(36, 28, 38, 0.82);
+}
+
+.skj-rolltable-drop-setting {
+  border: 1px dashed rgba(245, 232, 190, 0.28);
+  border-radius: 8px;
+  padding: 0.45rem;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+
+.skj-rolltable-drop-setting.drop-target {
+  background: rgba(43, 135, 100, 0.18);
+  border-color: rgba(80, 198, 143, 0.85);
+}
+
+.skj-rolltable-drop-setting__drop {
+  align-items: center;
+  display: flex;
+  gap: 0.35rem;
+  margin-block-start: 0.25rem;
+}

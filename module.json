@@ -2,7 +2,7 @@
   "id": "aov-skjaldborg",
   "type": "module",
   "title": "Age of Vikings - Skjaldborg",
-  "description": "Full combat round workflow automation plus token action ring and selected-actor hotbar for Age of Vikings on Foundry VTT v14. Includes disposition-consistent actor-HUD interaction highlights, a targeted AoV v14 message-mode compatibility fix for initiative rolling, configurable tactical or streamlined combat phases, optional simultaneous live initiative during Planning with a turnless first-round start, phase-staged DEX projection based on actual travelled distance, manual GM current-turn selection, free GM phase navigation, automatic Movement-to-Resolution continuation, acknowledged player movement planning, ordered GM-authoritative plan persistence, phase chat cards ranked by Final DEX and INT, unified debug logging, configurable combat tracking and melee reach, pre-combat actor intent declarations, active-combat-only canvas intent markers with custom Other tooltips, Grapple intent support, asymmetric intent controls, clickable reaction counting, and a compact target-aware Attack Roll dialog scaffold which restricts immediate strike choices to the module-readied weapon plus intrinsic Hand-to-hand and natural attacks, displays the selected full RAW damage name, abbreviation, and formula with a single Foundry tooltip, uses a content-sized centered modifier summary with improved legibility and non-truncated footer allocation, preserves cut-and-thrust Impaling/Slashing selection, and publishes core-aligned normal, special, and critical damage metadata through integration hooks. Source styles are maintained as SCSS and compiled into the single manifest-loaded stylesheet, while the Combat/Intent readied-weapon label renders below its controls without increasing the tab footprint.",
+  "description": "Full combat round workflow automation plus token action ring and selected-actor hotbar for Age of Vikings on Foundry VTT v14. Includes disposition-consistent actor-HUD interaction highlights, a targeted AoV v14 message-mode compatibility fix for initiative rolling, configurable tactical or streamlined combat phases, optional simultaneous live initiative during Planning with a turnless first-round start, phase-staged DEX projection based on actual travelled distance, manual GM current-turn selection, free GM phase navigation, automatic Movement-to-Resolution continuation, acknowledged player movement planning, ordered GM-authoritative plan persistence, phase chat cards ranked by Final DEX and INT, unified debug logging, configurable combat tracking, weapon-length-derived melee reach, pre-combat actor intent declarations, active-combat-only canvas intent markers with custom Other tooltips, Grapple intent support, asymmetric intent controls, clickable reaction counting, and a compact target-aware Attack Roll dialog scaffold which restricts immediate strike choices to the module-readied weapon plus intrinsic Hand-to-hand and natural attacks, displays the selected full RAW damage name, abbreviation, and formula with a single Foundry tooltip, uses a content-sized centered modifier summary with improved legibility and non-truncated footer allocation, preserves cut-and-thrust Impaling/Slashing selection, and publishes core-aligned normal, special, and critical damage metadata through integration hooks. Source styles are maintained as SCSS and compiled into the single manifest-loaded stylesheet, while the Combat/Intent readied-weapon label renders below its controls without increasing the tab footprint.",
   "version": "0.3.2",
   "compatibility": {
     "minimum": "14.363",
@@ -19,8 +19,8 @@
         "id": "aov",
         "type": "system",
         "compatibility": {
-          "minimum": "14.1",
-          "verified": "14.1"
+          "minimum": "14.4",
+          "verified": "14.4"
         }
       }
     ]

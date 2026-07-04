@@ -116,7 +116,7 @@ function writeZip(sourceDirectory, destination) {
   const timestamp = dosTimestamp(new Date(Number(process.env.SOURCE_DATE_EPOCH || 1577836800) * 1000));
 
   for (const file of collectFiles(sourceDirectory)) {
-    const name = relative(sourceDirectory, file).replaceAll("\\\\", "/");
+    const name = relative(sourceDirectory, file).replaceAll("\\", "/");
     const nameBuffer = Buffer.from(name, "utf8");
     const data = readFileSync(file);
     const compressed = deflateRawSync(data, { level: 9 });

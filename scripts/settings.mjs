@@ -6,6 +6,8 @@ import {
   MODULE_ID,
   MOVEMENT_DEBUG_DEFAULT_CATEGORIES,
   MOVEMENT_DEBUG_LEVELS,
+  MOVEMENT_PLAN_VISIBILITY,
+  MOVEMENT_PLAN_VISIBILITY_DEFAULT,
   PHASE_ORDER,
   PHASE_STRUCTURE_SETTING_KEYS,
   REPORT_DELIVERY,
@@ -13,16 +15,18 @@ import {
   REPORT_RECIPIENTS,
   REPORT_SCOPE,
   ROUNDING_POLICIES,
+  REACH_VISUALIZER_DEFAULTS,
   V14_MIGRATION_VERSION
 } from "./constants.mjs";
 import { getCombatState, getCombatantState, setCombatState, setCombatantState } from "./combat/state.mjs";
 import { ActionUiSettings } from "./apps/action-ui-settings.mjs";
 import { CombatTrackingSettings } from "./apps/combat-tracking-settings.mjs";
-import { MovementDebugSettings } from "./apps/movement-debug-settings.mjs";
 import { ReportSettings } from "./apps/report-settings.mjs";
 import { PhaseStructureSettings } from "./apps/phase-structure-settings.mjs";
+import { ReachVisualizerSettings } from "./apps/reach-visualizer-settings.mjs";
 import { debug } from "./logger.mjs";
 import { RenderCoordinator } from "./ui/render-coordinator.mjs";
+import { normalizeReachVisualizerSettings } from "./canvas/reach-visualizer-config.mjs";
 
 /**
  * Register all world and client settings used by the module.
@@ -48,13 +52,13 @@ export function registerSettings() {
     restricted: true
   });
 
-  game.settings.registerMenu(MODULE_ID, "movementDebugConfiguration", {
-    name: "AOV_SKJALDBORG.Settings.MovementDebugMenu.Name",
-    label: "AOV_SKJALDBORG.Settings.MovementDebugMenu.Label",
-    hint: "AOV_SKJALDBORG.Settings.MovementDebugMenu.Hint",
-    icon: "fa-solid fa-bug",
-    type: MovementDebugSettings,
-    restricted: true
+  game.settings.registerMenu(MODULE_ID, "reachVisualizerConfiguration", {
+    name: "AOV_SKJALDBORG.Settings.ReachVisualizerMenu.Name",
+    label: "AOV_SKJALDBORG.Settings.ReachVisualizerMenu.Label",
+    hint: "AOV_SKJALDBORG.Settings.ReachVisualizerMenu.Hint",
+    icon: "fa-solid fa-bullseye",
+    type: ReachVisualizerSettings,
+    restricted: false
   });
 
   game.settings.registerMenu(MODULE_ID, "phaseStructureConfiguration", {
@@ -183,6 +187,19 @@ export function registerSettings() {
     onChange: () => game.aovSkjaldborg?.ui?.refreshActorHotbar?.()
   });
 
+  game.settings.register(MODULE_ID, "reachVisualizer", {
+    name: "AOV_SKJALDBORG.Settings.ReachVisualizerMenu.Name",
+    hint: "AOV_SKJALDBORG.Settings.ReachVisualizerMenu.Hint",
+    scope: "client",
+    config: false,
+    type: Object,
+    default: REACH_VISUALIZER_DEFAULTS,
+    onChange: value => {
+      game.aovSkjaldborg?.reachVisualizer?.applySettings?.(normalizeReachVisualizerSettings(value));
+      ui.controls?.render?.({ reset: true });
+    }
+  });
+
   game.settings.register(MODULE_ID, "actorHotbarPosition", {
     name: "Actor hotbar position",
     scope: "client",
@@ -274,34 +291,38 @@ export function registerSettings() {
     default: 250
   });
 
-  game.settings.register(MODULE_ID, "shortReachGridUnits", {
-    name: "AOV_SKJALDBORG.Settings.Reach.Short.Name",
-    hint: "AOV_SKJALDBORG.Settings.Reach.Short.Hint",
+  game.settings.register(MODULE_ID, "movementPlanVisibility", {
+    name: "AOV_SKJALDBORG.Settings.MovementPlanVisibility.Name",
+    hint: "AOV_SKJALDBORG.Settings.MovementPlanVisibility.Hint",
     scope: "world",
     config: false,
-    type: Number,
-    range: { min: 0.5, max: 5, step: 0.5 },
-    default: 1
+    type: String,
+    choices: {
+      [MOVEMENT_PLAN_VISIBILITY.EVERYONE]: "AOV_SKJALDBORG.Settings.MovementPlanVisibility.Everyone",
+      [MOVEMENT_PLAN_VISIBILITY.PERMISSION]: "AOV_SKJALDBORG.Settings.MovementPlanVisibility.Permission",
+      [MOVEMENT_PLAN_VISIBILITY.NONE]: "AOV_SKJALDBORG.Settings.MovementPlanVisibility.None"
+    },
+    default: MOVEMENT_PLAN_VISIBILITY_DEFAULT,
+    onChange: () => game.aovSkjaldborg?.ui?.refreshMovementPlanPreview?.()
   });
 
-  game.settings.register(MODULE_ID, "mediumReachGridUnits", {
-    name: "AOV_SKJALDBORG.Settings.Reach.Medium.Name",
-    hint: "AOV_SKJALDBORG.Settings.Reach.Medium.Hint",
+  game.settings.register(MODULE_ID, "evadeFightingDefensively", {
+    name: "AOV_SKJALDBORG.Settings.EvadeFightingDefensively.Name",
+    hint: "AOV_SKJALDBORG.Settings.EvadeFightingDefensively.Hint",
     scope: "world",
     config: false,
-    type: Number,
-    range: { min: 0.5, max: 5, step: 0.5 },
-    default: 2
+    type: Boolean,
+    default: false,
+    onChange: () => RenderCoordinator.invalidateCombatTracker("setting-evade-fighting-defensively")
   });
 
-  game.settings.register(MODULE_ID, "longReachGridUnits", {
-    name: "AOV_SKJALDBORG.Settings.Reach.Long.Name",
-    hint: "AOV_SKJALDBORG.Settings.Reach.Long.Hint",
+  game.settings.register(MODULE_ID, "knockbackFumbleTableReference", {
+    name: "AOV_SKJALDBORG.Settings.KnockbackFumbleTable.Name",
+    hint: "AOV_SKJALDBORG.Settings.KnockbackFumbleTable.Hint",
     scope: "world",
     config: false,
-    type: Number,
-    range: { min: 0.5, max: 5, step: 0.5 },
-    default: 3
+    type: String,
+    default: ""
   });
 
   game.settings.registerMenu(MODULE_ID, "reportConfiguration", {

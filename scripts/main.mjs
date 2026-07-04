@@ -14,7 +14,6 @@ import { registerCombatNavigationHooks } from "./hooks/combat-navigation.mjs";
 import { registerCombatContextHooks } from "./hooks/combat-context.mjs";
 import { ActionRing, registerActionRingHooks } from "./apps/action-ring.mjs";
 import { ActorHotbar, registerActorHotbarHooks } from "./apps/actor-hotbar.mjs";
-import { CombatHUD } from "./apps/combat-hud.mjs";
 import { PhaseController } from "./combat/phase-controller.mjs";
 import { getCombatState, getCombatantState } from "./combat/state.mjs";
 import { AoVAdapter } from "./adapter/aov-adapter.mjs";
@@ -26,14 +25,43 @@ import {
   installAdjustInitiativeWeaponIntegration
 } from "./compat/aov-adjust-initiative.mjs";
 import { registerChatReportHooks } from "./combat/chat-report.mjs";
+import { registerDialogTargetQueueHooks } from "./combat/dialog-target-queue.mjs";
+import { registerAimedBlowAutomationHooks } from "./combat/aimed-blow-automation.mjs";
+import { registerDisarmAutomationHooks } from "./combat/disarm-automation.mjs";
+import { registerMissileAutomationHooks } from "./combat/missile-automation.mjs";
+import { registerStunAutomationHooks } from "./combat/stun-automation.mjs";
+import { registerKnockbackAutomationHooks } from "./combat/knockback-automation.mjs";
+import { registerRunicMagicHooks } from "./combat/runic-magic.mjs";
+import { registerDamageEffectStatusEffects, registerDamageEffectTrackingHooks } from "./combat/damage-effect-tracking.mjs";
+import {
+  getActorEvadingState,
+  registerEvadingStatusEffect,
+  registerEvadingStatusHooks,
+  removeExpiredEvadingEffects
+} from "./combat/evade-status.mjs";
+import { reconcileReactionPenaltyEffectsForCombat, registerReactionPenaltyEffectHooks } from "./combat/reaction-penalty-effects.mjs";
+import { registerGrappleAutomationHooks, registerGrappleStatusEffects } from "./combat/grapple-automation.mjs";
 import { registerMovementHooks, startMovementPhase } from "./combat/movement-controller.mjs";
 import { reconcileEngagedStatusEffects, registerEngagedStatusEffect, registerEngagedStatusHooks } from "./combat/engagement-status.mjs";
+import { pruneStaleEngagements } from "./combat/engagement-reconciliation.mjs";
+import {
+  registerDisengagementHooks,
+  registerDisengagementStatusEffects,
+  resolveKnockbackDisengagement
+} from "./combat/disengagement.mjs";
 import { registerReadiedWeaponHooks } from "./combat/weapon-state.mjs";
 import { logMovementDebugExport, logMovementDebugSnapshot, movementDebugExport, movementDebugSnapshot } from "./combat/movement-debugger.mjs";
 import { registerTokenIntentIndicatorHooks, refreshTokenIntentIndicators } from "./canvas/intent-indicators.mjs";
+import { registerMovementPlanPreviewHooks, refreshMovementPlanPreview } from "./canvas/movement-plan-preview.mjs";
+import { registerReachVisualizerHooks } from "./canvas/reach-visualizer.mjs";
 import { captureExternalPlanningInitiativeChange } from "./combat/planning-initiative.mjs";
 import { registerPreparedIntentHooks } from "./combat/prepared-intent.mjs";
-import { capabilityFailureSummary, capabilityWarningSummary, detectV14Capabilities } from "./compat/capabilities.mjs";
+import {
+  capabilityFailureSummary,
+  capabilityWarningSummary,
+  detectAoVApiCapabilities,
+  detectV14Capabilities
+} from "./compat/capabilities.mjs";
 import { installAoVMessageModeCompatibility } from "./compat/aov-message-mode.mjs";
 import { RenderCoordinator } from "./ui/render-coordinator.mjs";
 import { performanceDiagnostics } from "./performance/performance-monitor.mjs";
@@ -66,12 +94,20 @@ Hooks.once("init", () => {
   registerSettings();
   registerCombatContextHooks();
   registerEngagedStatusEffect();
+  registerDisengagementStatusEffects();
+  registerGrappleStatusEffects();
+  registerEvadingStatusEffect();
+  registerDamageEffectStatusEffects();
 });
 
 // AoV and other packages may complete CONFIG mutations later in init. Reapply
 // the idempotent status registration before the v14 UI is constructed.
 Hooks.once("setup", () => {
   registerEngagedStatusEffect();
+  registerDisengagementStatusEffects();
+  registerGrappleStatusEffects();
+  registerEvadingStatusEffect();
+  registerDamageEffectStatusEffects();
   if (!AoVAdapter.isAoVWorld()) return;
   messageModeCompatibilityInstalled = installAoVMessageModeCompatibility();
   adjustInitiativeIntegrationInstalled = installAdjustInitiativeWeaponIntegration();
@@ -82,6 +118,10 @@ Hooks.once("setup", () => {
  */
 Hooks.once("ready", async () => {
   registerEngagedStatusEffect();
+  registerDisengagementStatusEffects();
+  registerGrappleStatusEffects();
+  registerEvadingStatusEffect();
+  registerDamageEffectStatusEffects();
   if (!AoVAdapter.isAoVWorld()) {
     warn("Loaded outside the Age of Vikings system; module remains idle.");
     return;
@@ -104,6 +144,7 @@ Hooks.once("ready", async () => {
     };
     return;
   }
+  await detectAoVApiCapabilities(capabilities);
   const warnings = capabilityWarningSummary(capabilities);
   if (warnings) {
     warn(`Skjaldborg is loading with degraded v14/AoV capabilities: ${warnings}`);
@@ -127,15 +168,44 @@ Hooks.once("ready", async () => {
   registerCombatNavigationHooks();
   registerMovementHooks(requestGm);
   registerEngagedStatusHooks();
+  registerDisengagementHooks();
+  registerAimedBlowAutomationHooks();
+  registerDisarmAutomationHooks();
+  registerMissileAutomationHooks();
+  registerStunAutomationHooks();
+  registerKnockbackAutomationHooks();
+  registerRunicMagicHooks();
+  registerDamageEffectTrackingHooks();
+  registerGrappleAutomationHooks();
+  registerEvadingStatusHooks();
+  registerReactionPenaltyEffectHooks();
   registerActionRingHooks();
   registerActorHotbarHooks();
   registerTokenIntentIndicatorHooks();
+  registerMovementPlanPreviewHooks();
+  const reachVisualizer = registerReachVisualizerHooks();
   registerChatReportHooks();
+  registerDialogTargetQueueHooks();
   await reconcileEngagedStatusEffects(game.combat);
+  await reconcileReactionPenaltyEffectsForCombat(game.combat, { reason: "ready" });
   game.aovSkjaldborg = {
     adapter: AoVAdapter,
     capabilities,
     phase: PhaseController,
+    disengagement: {
+      resolveKnockback: resolveKnockbackDisengagement
+    },
+    engagement: {
+      pruneStale: pruneStaleEngagements
+    },
+    grapple: {
+      registerStatusEffects: registerGrappleStatusEffects
+    },
+    evade: {
+      registerStatusEffect: registerEvadingStatusEffect,
+      getActorState: getActorEvadingState,
+      removeExpiredEffects: removeExpiredEvadingEffects
+    },
     movement: {
       startMovementPhase,
       debugSnapshot: movementDebugSnapshot,
@@ -143,17 +213,18 @@ Hooks.once("ready", async () => {
       logDebugSnapshot: logMovementDebugSnapshot,
       logDebugExport: logMovementDebugExport
     },
+    reachVisualizer,
     getCombatState,
     getCombatantState,
     buildResolutionQueue,
     ui: {
-      openCombatHud: (combatant = AoVAdapter.getControlledCombatant(game.combat), combat = game.combat) => CombatHUD.showForCombatant(combatant, combat),
       closeActionRing: () => ActionRing.closeAll(),
       refreshActionRing: () => ActionRing.current?.render(false),
       refreshActorHotbar: () => ActorHotbar.scheduleRender(),
       resetActorHotbarPosition: () => ActorHotbar.resetPosition(),
       closeActorHotbar: () => ActorHotbar.closeCurrent(),
-      refreshTokenIntentIndicators
+      refreshTokenIntentIndicators,
+      refreshMovementPlanPreview
     },
     diagnostics: {
       run: runDiagnostics,

@@ -1,7 +1,6 @@
 import { AoVAdapter } from "../adapter/aov-adapter.mjs";
 import {
   ACTION_CATEGORIES,
-  ENGAGEMENT_STATUS,
   MODULE_ID,
   MOVEMENT_DEBUG_CATEGORIES,
   MOVEMENT_DEBUG_LEVELS,
@@ -24,6 +23,12 @@ import { applyMovementDexResults } from "./resolution-queue.mjs";
 import { isMovementPlanningPhase, shouldExecuteMovementImmediately } from "./phase-structure.mjs";
 import { RenderCoordinator } from "../ui/render-coordinator.mjs";
 import { performanceDiagnostics } from "../performance/performance-monitor.mjs";
+import {
+  canEstablishEngagementAfterMovement,
+  engagementMovementLimitGridUnits,
+  sceneDistanceToGridUnits
+} from "./movement-eligibility.mjs";
+import { addEngagementPartner } from "./engagement-links.mjs";
 
 export { cleanMovementPoint, normalizeMovementRoute } from "./movement-route.mjs";
 
@@ -39,16 +44,11 @@ const MOVEMENT_CAPTURE_NOTIFICATION_WINDOW_MS = 350;
 const MAX_BLOCKED_TICKS = 8;
 const FRIENDLY_DISPOSITION = 1;
 const HOSTILE_DISPOSITION = -1;
-const RAW_WEAPON_LENGTHS_METERS = Object.freeze({
-  atgeir: 2.2,
-  battleaxe: 0.7,
-  broadsword: 1,
-  knife: 0.3,
-  longaxe: 1.4,
-  longspear: 3,
-  quarterstaff: 2,
-  sax: 0.6
-});
+const DEFAULT_ENGAGEMENT_REACH_UNITS = 1;
+const MEDIUM_REACH_LENGTH_METERS = 1.4;
+const MEDIUM_ENGAGEMENT_REACH_UNITS = 2;
+const LONG_REACH_LENGTH_METERS = 2.4;
+const LONG_ENGAGEMENT_REACH_UNITS = 3;
 
 /**
  * Resolve the grid size used to convert pixel distance to grid units.
@@ -881,6 +881,8 @@ function installMovementRulerCapture(requestGm) {
 
   prototype.refresh = function skjaldborgRefreshMovementRuler(rulerData) {
     const result = originalRefresh.call(this, rulerData);
+    const moduleData = rulerData?.[MODULE_ID];
+    if (moduleData?.movementPlanPreview === true) return result;
     try {
       bankRulerMovementDraft(this.token?.document ?? this.token, rulerData, requestGm);
     }
@@ -1030,36 +1032,6 @@ export function parseWeaponLengthMeters(value) {
 }
 
 /**
- * Normalize weapon names for RAW length fallback matching.
- *
- * @param {unknown} name Weapon name.
- * @returns {string}
- */
-function normalizeWeaponName(name) {
-  return String(name ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
-}
-
-/**
- * Resolve a RAW weapon length fallback for standard AoV melee weapons.
- *
- * @param {Item|object|null} item AoV weapon item.
- * @returns {number|null}
- */
-export function rawWeaponLengthFallbackMeters(item) {
-  const normalized = normalizeWeaponName(item?.name);
-  if (!normalized) return null;
-  if (normalized.includes("battleaxe")) return RAW_WEAPON_LENGTHS_METERS.battleaxe;
-  if (normalized.includes("longaxe")) return RAW_WEAPON_LENGTHS_METERS.longaxe;
-  if (normalized.includes("longspear")) return RAW_WEAPON_LENGTHS_METERS.longspear;
-  if (normalized.includes("quarterstaff")) return RAW_WEAPON_LENGTHS_METERS.quarterstaff;
-  if (normalized.includes("broadsword")) return RAW_WEAPON_LENGTHS_METERS.broadsword;
-  if (normalized.includes("atgeir")) return RAW_WEAPON_LENGTHS_METERS.atgeir;
-  if (normalized.includes("knife")) return RAW_WEAPON_LENGTHS_METERS.knife;
-  if (normalized.includes("sax")) return RAW_WEAPON_LENGTHS_METERS.sax;
-  return null;
-}
-
-/**
  * Determine whether a weapon item can establish melee engagement reach.
  *
  * @param {Item|object|null} item AoV weapon item.
@@ -1070,7 +1042,6 @@ function weaponCanEstablishReach(item) {
   if (Number(item?.system?.equipStatus) !== 1) return false;
   const weaponType = String(item?.system?.weaponType ?? "");
   if (weaponType === "missile") return false;
-  if (weaponType === "thrown") return rawWeaponLengthFallbackMeters(item) !== null;
   return true;
 }
 
@@ -1082,32 +1053,32 @@ function weaponCanEstablishReach(item) {
  */
 export function weaponReachLengthMeters(item) {
   if (!weaponCanEstablishReach(item)) return null;
-  return parseWeaponLengthMeters(item?.system?.length) ?? rawWeaponLengthFallbackMeters(item);
+  return parseWeaponLengthMeters(item?.system?.length);
 }
 
 /**
- * Read and normalize a numeric module setting.
- *
- * @param {string} key Setting key.
- * @param {number} fallback Fallback value.
- * @returns {number}
- */
-function numericSetting(key, fallback) {
-  const value = Number(game.settings.get(MODULE_ID, key));
-  return Number.isFinite(value) && value > 0 ? value : fallback;
-}
-
-/**
- * Convert a weapon length in meters to configured grid-unit reach.
+ * Convert a weapon length in meters to fixed grid-unit engagement reach.
  *
  * @param {number|null} meters Weapon length in meters.
  * @returns {number}
  */
 export function reachUnitsFromLength(meters) {
-  if (!Number.isFinite(meters)) return numericSetting("shortReachGridUnits", 1);
-  if (meters > 2) return numericSetting("longReachGridUnits", 3);
-  if (meters > 1) return numericSetting("mediumReachGridUnits", 2);
-  return numericSetting("shortReachGridUnits", 1);
+  if (!Number.isFinite(meters)) return DEFAULT_ENGAGEMENT_REACH_UNITS;
+  if (meters >= LONG_REACH_LENGTH_METERS) return LONG_ENGAGEMENT_REACH_UNITS;
+  if (meters >= MEDIUM_REACH_LENGTH_METERS) return MEDIUM_ENGAGEMENT_REACH_UNITS;
+  return DEFAULT_ENGAGEMENT_REACH_UNITS;
+}
+
+/**
+ * Determine melee reach from the actor's module-managed readied weapon.
+ *
+ * @param {Actor|object|null} actor Actor document.
+ * @returns {number}
+ */
+export function reachUnitsForActor(actor) {
+  const weapon = getReadiedWeapon(actor);
+  if (!weapon || !weaponCanEstablishReach(weapon)) return DEFAULT_ENGAGEMENT_REACH_UNITS;
+  return reachUnitsFromLength(weaponReachLengthMeters(weapon));
 }
 
 /**
@@ -1117,10 +1088,7 @@ export function reachUnitsFromLength(meters) {
  * @returns {number}
  */
 export function reachUnitsForCombatant(combatant) {
-  const baseReach = numericSetting("shortReachGridUnits", 1);
-  const weapon = getReadiedWeapon(combatant?.actor);
-  if (!weapon || !weaponCanEstablishReach(weapon)) return baseReach;
-  return Math.max(baseReach, reachUnitsFromLength(weaponReachLengthMeters(weapon)));
+  return reachUnitsForActor(combatant?.actor);
 }
 
 /**
@@ -1179,6 +1147,146 @@ function combatantForTokenDocument(combat, document) {
   }) ?? null;
 }
 
+const ENGAGEMENT_EGRESS_ACTIVE = "active";
+
+function activeEgressPartnerIds(state) {
+  const egress = state?.engagement?.egress ?? {};
+  if (egress.status !== ENGAGEMENT_EGRESS_ACTIVE) return [];
+  return Array.from(new Set((egress.ignoredPartnerIds ?? []).filter(Boolean)));
+}
+
+function egressIgnoresPartner(state, partnerId) {
+  if (!partnerId) return false;
+  return activeEgressPartnerIds(state).includes(partnerId);
+}
+
+async function clearEgressPartner(combatant, partnerId, reason = "egress-cleared") {
+  if (!combatant?.id || !partnerId) return false;
+  const state = getCombatantState(combatant);
+  const egress = state.engagement?.egress ?? {};
+  if (egress.status !== ENGAGEMENT_EGRESS_ACTIVE) return false;
+  const current = activeEgressPartnerIds(state);
+  if (!current.includes(partnerId)) return false;
+  const remaining = current.filter(id => id !== partnerId);
+  await updateCombatantState(combatant, {
+    engagement: {
+      ...state.engagement,
+      egress: {
+        ...egress,
+        status: remaining.length ? ENGAGEMENT_EGRESS_ACTIVE : "none",
+        ignoredPartnerIds: remaining,
+        reason
+      }
+    }
+  });
+  movementDebug(MOVEMENT_DEBUG_CATEGORIES.ENGAGEMENT, "engagement-egress-cleared", () => ({
+    combatantId: combatant.id,
+    partnerId,
+    remaining,
+    reason
+  }), { combatId: combatant.combat?.id ?? game.combat?.id ?? null, combatantId: combatant.id, level: MOVEMENT_DEBUG_LEVELS.VERBOSE });
+  return true;
+}
+
+async function clearSeparatedEgressPair(combatant, partner, reason = "egress-separated") {
+  const first = await clearEgressPartner(combatant, partner?.id, reason);
+  const second = await clearEgressPartner(partner, combatant?.id, reason);
+  return first || second;
+}
+
+function pairHasActiveEgress(mover, moverState, other, otherState) {
+  return egressIgnoresPartner(moverState, other?.id) || egressIgnoresPartner(otherState, mover?.id);
+}
+
+async function shouldSkipEngagementForEgress(combat, mover, moverState, other, otherState, separation, threshold, run) {
+  if (!pairHasActiveEgress(mover, moverState, other, otherState)) return false;
+  if (Number.isFinite(separation) && Number.isFinite(threshold) && separation > threshold) {
+    await clearSeparatedEgressPair(mover, other, "egress-separated");
+    return false;
+  }
+  movementDebug(MOVEMENT_DEBUG_CATEGORIES.ENGAGEMENT, "engagement-egress-skip", () => ({
+    moverId: mover?.id ?? null,
+    otherId: other?.id ?? null,
+    separation,
+    threshold,
+    moverEgress: moverState.engagement?.egress ?? null,
+    otherEgress: otherState.engagement?.egress ?? null
+  }), { runId: run?.runId, tick: run?.tick, combatId: combat?.id ?? null, combatantId: mover?.id ?? null, level: MOVEMENT_DEBUG_LEVELS.VERBOSE });
+  return true;
+}
+
+async function finalizeMovementEgresses(combat) {
+  if (!combat) return 0;
+  const run = activeRuns.get(combat?.id);
+  const combatants = combatantValues(combat).filter(AoVAdapter.isCombatantCapable.bind(AoVAdapter));
+  const byId = new Map(combatants.map(combatant => [combatant.id, combatant]));
+  const processed = new Set();
+  let resolved = 0;
+
+  for (const combatant of combatants) {
+    const state = getCombatantState(combatant);
+    const egressPartnerIds = activeEgressPartnerIds(state);
+    if (!egressPartnerIds.length) continue;
+    const document = tokenDocumentForCombatant(combatant);
+    const rect = tokenSourceGridRect(document);
+
+    for (const partnerId of egressPartnerIds) {
+      const partner = byId.get(partnerId);
+      if (!partner) {
+        if (await clearEgressPartner(combatant, partnerId, "egress-partner-missing")) resolved += 1;
+        continue;
+      }
+      const key = engagementPairKey(combatant, partner);
+      if (processed.has(key)) continue;
+      processed.add(key);
+
+      const partnerDocument = tokenDocumentForCombatant(partner);
+      const partnerRect = tokenSourceGridRect(partnerDocument);
+      if (!rect || !partnerRect || !areOpposingDispositions(document?.disposition, partnerDocument?.disposition)) {
+        if (await clearSeparatedEgressPair(combatant, partner, "egress-invalid-final-state")) resolved += 1;
+        continue;
+      }
+
+      const threshold = Math.max(reachUnitsForCombatant(combatant), reachUnitsForCombatant(partner));
+      const separation = measureOccupiedGridSeparation(rect, partnerRect);
+      if (!Number.isFinite(separation) || !Number.isFinite(threshold) || separation > threshold) {
+        if (await clearSeparatedEgressPair(combatant, partner, "egress-final-separated")) resolved += 1;
+        continue;
+      }
+
+      const latestState = getCombatantState(combatant);
+      const latestPartnerState = getCombatantState(partner);
+      const pairEligibility = pairCanEstablishEngagement(combat, combatant, latestState, partner, latestPartnerState);
+      if (!pairEligibility.canEngage) {
+        movementDebug(MOVEMENT_DEBUG_CATEGORIES.ENGAGEMENT, "egress-final-still-in-reach-but-cannot-engage", () => ({
+          combatantId: combatant.id,
+          partnerId: partner.id,
+          separation,
+          threshold,
+          combatantEligibility: pairEligibility.firstEligibility,
+          partnerEligibility: pairEligibility.secondEligibility
+        }), { runId: run?.runId, combatId: combat?.id, combatantId: combatant.id, level: MOVEMENT_DEBUG_LEVELS.VERBOSE });
+        if (await clearSeparatedEgressPair(combatant, partner, "egress-final-half-move-ineligible")) resolved += 1;
+        continue;
+      }
+
+      movementDebug(MOVEMENT_DEBUG_CATEGORIES.ENGAGEMENT, "egress-ended-still-in-reach", () => ({
+        combatantId: combatant.id,
+        partnerId: partner.id,
+        separation,
+        threshold,
+        combatantEligibility: pairEligibility.firstEligibility,
+        partnerEligibility: pairEligibility.secondEligibility
+      }), { runId: run?.runId, combatId: combat?.id, combatantId: combatant.id, level: MOVEMENT_DEBUG_LEVELS.VERBOSE });
+      await engagePair(combat, combatant, partner);
+      if (await clearSeparatedEgressPair(combatant, partner, "egress-final-reengaged")) resolved += 1;
+    }
+  }
+
+  if (resolved) RenderCoordinator.invalidateCombatTracker("movement-egress-finalized");
+  return resolved;
+}
+
 /**
  * Check whether a document update belongs to module-owned movement execution.
  *
@@ -1186,7 +1294,10 @@ function combatantForTokenDocument(combat, document) {
  * @returns {boolean}
  */
 export function isInternalMovementOperation(operation = {}) {
-  return operation?.[MODULE_ID]?.movementExecution === true;
+  const moduleOperation = operation?.[MODULE_ID];
+  if (moduleOperation?.movementExecution === true) return true;
+  const reason = String(moduleOperation?.reason ?? "");
+  return ["grapple-throw", "knockback"].includes(reason);
 }
 
 /**
@@ -1254,7 +1365,7 @@ function debugCaptureDecision(document, movement, operation, decision) {
     level: MOVEMENT_DEBUG_LEVELS.VERBOSE
   };
   movementDebug(category, "capture-decision", payload, meta);
-  if (decision.reason === "not-started" || (decision.capture && !isMovementPlanningPhase(getCombatState(decision.combat).phase))) {
+  if (decision.capture && !isMovementPlanningPhase(getCombatState(decision.combat).phase)) {
     movementDebugWarn(category, "unexpected-capture-gate", payload, meta);
   }
 }
@@ -1352,6 +1463,67 @@ function activeMovementContext(combat, combatant) {
 }
 
 /**
+ * Resolve how far a combatant has actually moved in the current Movement
+ * phase, expressed in RAW grid units instead of scene measuring units.
+ *
+ * @param {Combat|null} combat Active combat.
+ * @param {Combatant|object|null} combatant Combatant document.
+ * @param {import("../types.mjs").SkjaldborgCombatantState} state Combatant state.
+ * @returns {number}
+ */
+function currentMovementGridUnits(combat, combatant, state) {
+  const context = activeMovementContext(combat, combatant);
+  const contextDistance = contextMovementDistance(context);
+  const movement = state?.movement ?? {};
+  const fallbackDistance = [
+    MOVEMENT_PLAN_STATUS.COMPLETED,
+    MOVEMENT_PLAN_STATUS.STOPPED,
+    MOVEMENT_PLAN_STATUS.FAILED
+  ].includes(movement.planStatus)
+    ? Number(movement.distance ?? 0)
+    : 0;
+  return sceneDistanceToGridUnits(contextDistance ?? fallbackDistance);
+}
+
+/**
+ * Determine whether a combatant can participate in a newly established
+ * engagement now.
+ *
+ * RAW movement eligibility is per combatant, not per pair. A combatant that
+ * has exceeded the engagement movement limit cannot be pulled into a new
+ * reciprocal engagement by an otherwise eligible opponent. Existing
+ * engagements and explicit disengagement/egress flows are handled elsewhere.
+ *
+ * @param {Combat|null} combat Active combat.
+ * @param {Combatant|object|null} combatant Combatant document.
+ * @param {import("../types.mjs").SkjaldborgCombatantState} state Combatant state.
+ * @returns {{canEngage: boolean, movedGridUnits: number, limitGridUnits: number}}
+ */
+function combatantEngagementEligibility(combat, combatant, state) {
+  const movedGridUnits = currentMovementGridUnits(combat, combatant, state);
+  const limitGridUnits = engagementMovementLimitGridUnits(combatant);
+  return {
+    canEngage: canEstablishEngagementAfterMovement(combatant, movedGridUnits),
+    movedGridUnits,
+    limitGridUnits
+  };
+}
+
+function pairCanEstablishEngagement(combat, first, firstState, second, secondState) {
+  const firstEligibility = combatantEngagementEligibility(combat, first, firstState);
+  const secondEligibility = combatantEngagementEligibility(combat, second, secondState);
+  const blockingCombatantIds = [];
+  if (!firstEligibility.canEngage && first?.id) blockingCombatantIds.push(first.id);
+  if (!secondEligibility.canEngage && second?.id) blockingCombatantIds.push(second.id);
+  return {
+    canEngage: firstEligibility.canEngage && secondEligibility.canEngage,
+    firstEligibility,
+    secondEligibility,
+    blockingCombatantIds
+  };
+}
+
+/**
  * Read the checkpoint pacing delay.
  *
  * @returns {number}
@@ -1382,6 +1554,10 @@ async function waitMovementTickDelay() {
  */
 function engagementPairKey(first, second) {
   return [String(first?.id ?? ""), String(second?.id ?? "")].sort().join(":");
+}
+
+function combatantOrderIndex(combatants, combatant) {
+  return Math.max(0, combatants.findIndex(candidate => candidate?.id === combatant?.id));
 }
 
 /**
@@ -1620,6 +1796,19 @@ async function selectMovementTickOperations(combat, contexts) {
  */
 async function engagePair(combat, first, second) {
   const run = activeRuns.get(combat?.id);
+  const firstStateBefore = getCombatantState(first);
+  const secondStateBefore = getCombatantState(second);
+  if (
+    firstStateBefore.engagement?.partnerIds?.includes(second?.id)
+    && secondStateBefore.engagement?.partnerIds?.includes(first?.id)
+  ) {
+    movementDebug(MOVEMENT_DEBUG_CATEGORIES.ENGAGEMENT, "engage-pair-already-latched", () => ({
+      first: first?.id,
+      second: second?.id
+    }), { runId: run?.runId, tick: run?.tick, combatId: combat?.id, level: MOVEMENT_DEBUG_LEVELS.VERBOSE });
+    return;
+  }
+
   const pairs = [
     [first, second],
     [second, first]
@@ -1670,9 +1859,7 @@ async function engagePair(combat, first, second) {
       ? (contextDistance ?? actualMovementDistance(document, state.movement))
       : state.movement?.distance;
     const engagement = {
-      status: ENGAGEMENT_STATUS.ENGAGED,
-      engaged: true,
-      partnerIds: Array.from(new Set([...(state.engagement?.partnerIds ?? []), partner.id])),
+      ...addEngagementPartner(state.engagement, partner.id),
       reachUnits: reachUnitsForCombatant(combatant),
       reason: "opposing-reach"
     };
@@ -1700,35 +1887,71 @@ async function engagePair(combat, first, second) {
   }));
 
   RenderCoordinator.invalidateCombatTracker("movement-engagement");
-  debug("engaged movement pair", { combatId: combat.id, first: first.id, second: second.id });
+  movementDebug(MOVEMENT_DEBUG_CATEGORIES.ENGAGEMENT, "engaged-movement-pair", () => ({
+    first: first?.id,
+    second: second?.id
+  }), { runId: run?.runId, tick: run?.tick, combatId: combat?.id });
 }
 
 /**
- * Find and resolve any current engagement contacts in an active movement run.
+ * Find and resolve any current engagement contacts.
+ *
+ * During an active Movement run this normally scans only combatants whose
+ * movement context is executing. At Movement phase boundaries, callers can
+ * include stationary combatants so hostile tokens which began the phase already
+ * inside weapon reach are engaged even if neither token submitted a route.
  *
  * @param {Combat} combat Active combat.
+ * @param {object} [options={}] Scan options.
+ * @param {boolean} [options.includeStationary=false] Whether to scan non-moving combatants too.
+ * @param {string} [options.reason="movement-contact"] Debug reason for the scan.
  * @returns {Promise<number>} Number of engagement pairs resolved.
  */
-export async function checkMovementEngagements(combat) {
+export async function checkMovementEngagements(combat, { includeStationary = false, reason = "movement-contact" } = {}) {
   if (!combat) return 0;
   const run = activeRuns.get(combat?.id);
   const combatants = combatantValues(combat).filter(AoVAdapter.isCombatantCapable.bind(AoVAdapter));
-  const moving = combatants.filter(combatant => getCombatantState(combatant).movement?.planStatus === MOVEMENT_PLAN_STATUS.EXECUTING);
   const reachByCombatantId = new Map(combatants.map(combatant => [combatant.id, reachUnitsForCombatant(combatant)]));
+  const candidates = [];
+  const stats = {
+    candidates: 0,
+    resolved: 0,
+    skippedExisting: 0,
+    skippedPending: 0,
+    skippedEgress: 0,
+    skippedHalfMove: 0,
+    skippedInvalid: 0,
+    skippedDuplicate: 0,
+    stationaryScans: 0
+  };
+  const consideredPairs = new Set();
   let resolved = 0;
 
-  for (const mover of moving) {
+  for (const mover of combatants) {
+    const moverStateAtScan = getCombatantState(mover);
+    const moverExecuting = moverStateAtScan.movement?.planStatus === MOVEMENT_PLAN_STATUS.EXECUTING;
+    if (!moverExecuting && !includeStationary) continue;
+    if (!moverExecuting) stats.stationaryScans += 1;
     const moverDocument = tokenDocumentForCombatant(mover);
     const moverRect = tokenSourceGridRect(moverDocument);
     if (!moverRect) continue;
     for (const other of combatants) {
       if (mover.id === other.id) continue;
-      const moverState = getCombatantState(mover);
-      if (moverState.engagement?.partnerIds?.includes(other.id)) continue;
       const pairKey = engagementPairKey(mover, other);
+      if (consideredPairs.has(pairKey)) {
+        stats.skippedDuplicate += 1;
+        continue;
+      }
+      consideredPairs.add(pairKey);
+      const moverState = getCombatantState(mover);
+      if (moverState.engagement?.partnerIds?.includes(other.id)) {
+        stats.skippedExisting += 1;
+        continue;
+      }
+      const otherState = getCombatantState(other);
       const pendingEngagement = activeEngagementPairs.get(pairKey);
       if (pendingEngagement) {
-        await pendingEngagement;
+        stats.skippedPending += 1;
         continue;
       }
       const otherDocument = tokenDocumentForCombatant(other);
@@ -1751,6 +1974,7 @@ export async function checkMovementEngagements(combat) {
         inReach: separation <= threshold
       }), { runId: run?.runId, tick: run?.tick, combatId: combat?.id, combatantId: mover.id, level: MOVEMENT_DEBUG_LEVELS.TRACE });
       if (!Number.isFinite(separation) || !Number.isFinite(threshold)) {
+        stats.skippedInvalid += 1;
         movementDebugWarn(MOVEMENT_DEBUG_CATEGORIES.ENGAGEMENT, "invalid-reach-check", () => ({
           moverId: mover.id,
           otherId: other.id,
@@ -1759,28 +1983,108 @@ export async function checkMovementEngagements(combat) {
           threshold,
           separation
         }), { runId: run?.runId, tick: run?.tick, combatId: combat?.id, combatantId: mover.id });
+        continue;
+      }
+      if (await shouldSkipEngagementForEgress(combat, mover, moverState, other, otherState, separation, threshold, run)) {
+        stats.skippedEgress += 1;
+        continue;
       }
       if (separation > threshold) continue;
-
-      let engagementOperation;
-      engagementOperation = engagePair(combat, mover, other).finally(() => {
-        if (activeEngagementPairs.get(pairKey) === engagementOperation) activeEngagementPairs.delete(pairKey);
-      });
-      activeEngagementPairs.set(pairKey, engagementOperation);
-      await engagementOperation;
-      resolved += 1;
-      debug("engaged movement contact", {
-        combatId: combat.id,
-        first: mover.id,
-        second: other.id,
-        firstRect: moverRect,
-        secondRect: otherRect,
+      const pairEligibility = pairCanEstablishEngagement(combat, mover, moverState, other, otherState);
+      if (!pairEligibility.canEngage) {
+        stats.skippedHalfMove += 1;
+        movementDebug(MOVEMENT_DEBUG_CATEGORIES.ENGAGEMENT, "engagement-skipped-half-move", () => ({
+          moverId: mover.id,
+          otherId: other.id,
+          moverEligibility: pairEligibility.firstEligibility,
+          otherEligibility: pairEligibility.secondEligibility,
+          separation,
+          threshold
+        }), { runId: run?.runId, tick: run?.tick, combatId: combat?.id, combatantId: mover.id, level: MOVEMENT_DEBUG_LEVELS.VERBOSE });
+        continue;
+      }
+      candidates.push({
+        mover,
+        other,
+        pairKey,
+        moverOrder: combatantOrderIndex(combatants, mover),
+        otherOrder: combatantOrderIndex(combatants, other),
         separation,
         threshold
       });
     }
   }
 
+  candidates.sort((left, right) => {
+    const leftContext = activeMovementContext(combat, left.mover);
+    const rightContext = activeMovementContext(combat, right.mover);
+    return (Number(leftContext?.index) || 0) - (Number(rightContext?.index) || 0)
+      || left.separation - right.separation
+      || left.moverOrder - right.moverOrder
+      || left.otherOrder - right.otherOrder;
+  });
+  stats.candidates = candidates.length;
+
+  for (const candidate of candidates) {
+    const { mover, other, pairKey, separation, threshold } = candidate;
+    const pendingBeforeResolve = activeEngagementPairs.get(pairKey);
+    if (pendingBeforeResolve) {
+      stats.skippedPending += 1;
+      await pendingBeforeResolve;
+      continue;
+    }
+
+    const currentMoverState = getCombatantState(mover);
+    const currentOtherState = getCombatantState(other);
+    if (
+      currentMoverState.engagement?.partnerIds?.includes(other.id)
+      || currentOtherState.engagement?.partnerIds?.includes(mover.id)
+    ) {
+      stats.skippedExisting += 1;
+      movementDebug(MOVEMENT_DEBUG_CATEGORIES.ENGAGEMENT, "engage-pair-skipped-existing", () => ({
+        moverId: mover.id,
+        otherId: other.id,
+        moverEngagement: currentMoverState.engagement,
+        otherEngagement: currentOtherState.engagement
+      }), { runId: run?.runId, tick: run?.tick, combatId: combat?.id, combatantId: mover.id, level: MOVEMENT_DEBUG_LEVELS.VERBOSE });
+      continue;
+    }
+    if (await shouldSkipEngagementForEgress(combat, mover, currentMoverState, other, currentOtherState, separation, threshold, run)) {
+      stats.skippedEgress += 1;
+      continue;
+    }
+    const currentEligibility = pairCanEstablishEngagement(combat, mover, currentMoverState, other, currentOtherState);
+    if (!currentEligibility.canEngage) {
+      stats.skippedHalfMove += 1;
+      continue;
+    }
+
+    let engagementOperation;
+    engagementOperation = engagePair(combat, mover, other).finally(() => {
+      if (activeEngagementPairs.get(pairKey) === engagementOperation) activeEngagementPairs.delete(pairKey);
+    });
+    activeEngagementPairs.set(pairKey, engagementOperation);
+    await engagementOperation;
+    resolved += 1;
+    stats.resolved = resolved;
+    movementDebug(MOVEMENT_DEBUG_CATEGORIES.ENGAGEMENT, "engaged-movement-contact", () => ({
+      first: mover.id,
+      second: other.id,
+      separation,
+      threshold
+    }), { runId: run?.runId, tick: run?.tick, combatId: combat?.id, combatantId: mover.id });
+  }
+
+  movementDebug(MOVEMENT_DEBUG_CATEGORIES.ENGAGEMENT, "engagement-pass-summary", () => ({
+    ...stats,
+    includeStationary,
+    reason
+  }), {
+    runId: run?.runId,
+    tick: run?.tick,
+    combatId: combat?.id,
+    level: resolved ? MOVEMENT_DEBUG_LEVELS.SUMMARY : MOVEMENT_DEBUG_LEVELS.VERBOSE
+  });
   return resolved;
 }
 
@@ -1810,6 +2114,7 @@ async function waitForTokenAnimation(document) {
  * @returns {Promise<object>}
  */
 async function prepareCombatantMovement(combat, combatant) {
+  const measureId = performanceDiagnostics.markStart("movement.prepareCombatant");
   const document = tokenDocumentForCombatant(combatant);
   const state = getCombatantState(combatant);
   const run = activeRuns.get(combat?.id);
@@ -1827,6 +2132,14 @@ async function prepareCombatantMovement(combat, combatant) {
       distance: 0,
       completedAt: Date.now(),
       stoppedReason: "unavailable"
+    });
+    performanceDiagnostics.markEnd(measureId, {
+      combatId: combat?.id ?? null,
+      combatantId: combatant?.id ?? null,
+      tokenId: document?.id ?? document?._id ?? null,
+      status: MOVEMENT_PLAN_STATUS.FAILED,
+      plannedCount: plannedWaypoints.length,
+      executionCount: executionWaypoints.length
     });
     return {
       combatant,
@@ -1873,6 +2186,14 @@ async function prepareCombatantMovement(combat, combatant) {
     plannedRouteTail,
     destinationMatchesRouteTail: !storedDestination || sameMovementPoint(storedDestination, plannedRouteTail)
   }), { runId: run?.runId, combatId: combat?.id, combatantId: combatant?.id, tokenId: document?.id ?? document?._id ?? null, level: MOVEMENT_DEBUG_LEVELS.VERBOSE });
+  performanceDiagnostics.markEnd(measureId, {
+    combatId: combat?.id ?? null,
+    combatantId: combatant?.id ?? null,
+    tokenId: document?.id ?? document?._id ?? null,
+    status: context.status,
+    plannedCount: plannedWaypoints.length,
+    executionCount: executionWaypoints.length
+  });
   return context;
 }
 
@@ -2136,6 +2457,7 @@ async function submitSceneMovementBatch(combat, operations) {
  * @returns {Promise<void>}
  */
 async function executeMovementTick(combat, contexts) {
+  const measureId = performanceDiagnostics.markStart("movement.tick");
   const run = activeRuns.get(combat?.id);
   if (run) run.tick = Number(run.tick ?? 0) + 1;
   movementDebug(MOVEMENT_DEBUG_CATEGORIES.SCHEDULER, "tick-start", () => ({
@@ -2154,6 +2476,13 @@ async function executeMovementTick(combat, contexts) {
     movementDebug(MOVEMENT_DEBUG_CATEGORIES.SCHEDULER, "tick-no-operations", () => ({
       blockedCount: blocked.length
     }), { runId: run?.runId, tick: run?.tick, combatId: combat?.id });
+    performanceDiagnostics.markEnd(measureId, {
+      combatId: combat?.id ?? null,
+      tick: run?.tick ?? null,
+      operationCount: 0,
+      blockedCount: blocked.length,
+      activeCount: contexts.filter(context => context.status === MOVEMENT_PLAN_STATUS.EXECUTING).length
+    });
     return;
   }
 
@@ -2232,6 +2561,13 @@ async function executeMovementTick(combat, contexts) {
   }), { runId: run?.runId, tick: run?.tick, combatId: combat?.id, level: MOVEMENT_DEBUG_LEVELS.VERBOSE });
 
   await waitMovementTickDelay();
+  performanceDiagnostics.markEnd(measureId, {
+    combatId: combat?.id ?? null,
+    tick: run?.tick ?? null,
+    operationCount: operations.length,
+    blockedCount: blocked.length,
+    activeCount: contexts.filter(context => context.status === MOVEMENT_PLAN_STATUS.EXECUTING).length
+  });
 }
 
 /**
@@ -2302,6 +2638,7 @@ export async function startMovementPhase(combat = game.combat, options = {}) {
  */
 async function startMovementPhaseUnlocked(combat) {
   if (isMovementRunActive(combat)) return getCombatState(combat).movementRun;
+  const measureId = performanceDiagnostics.markStart("movement.phase");
   await settleMovementWrites(combat.id, { quietMs: 100, timeoutMs: 1000 });
   const runId = newMovementDebugRunId(combat);
 
@@ -2327,10 +2664,23 @@ async function startMovementPhaseUnlocked(combat) {
         pendingCombatantIds: []
       }
     });
+    // A real Movement phase boundary also engages hostile combatants which
+    // started the phase already inside weapon reach, even when no token moved.
+    await checkMovementEngagements(combat, { includeStationary: true, reason: "movement-phase-empty" });
+    // A disengaged combatant who does not leave weapon reach by the end of
+    // Movement is re-engaged even when no tokens planned movement this phase.
+    await finalizeMovementEgresses(combat);
     // Even an empty Movement phase is a real DEX-stage boundary. Re-project
     // Planning-only adjustments before Resolution without charging any planned
     // route distance.
     await applyMovementDexResults(combat);
+    performanceDiagnostics.markEnd(measureId, {
+      combatId: combat.id,
+      runId,
+      plannedCount: 0,
+      contextCount: 0,
+      status: MOVEMENT_PLAN_STATUS.COMPLETED
+    });
     return getCombatState(combat).movementRun;
   }
 
@@ -2365,19 +2715,20 @@ async function startMovementPhaseUnlocked(combat) {
       contexts.push(context);
       activeRuns.get(combat.id)?.contextsByCombatantId?.set(combatant.id, context);
     }
-    await checkMovementEngagements(combat);
+    await checkMovementEngagements(combat, { includeStationary: true, reason: "movement-phase-start" });
 
     // v14 scheduler: submit one checkpoint wave through Scene#moveTokens when
     // available, then resolve engagement before any later checkpoint is sent.
     while (contexts.some(context => context.status === MOVEMENT_PLAN_STATUS.EXECUTING)) {
       await executeMovementTick(combat, contexts);
     }
+    await finalizeMovementEgresses(combat);
   }
   finally {
     activeRuns.delete(combat.id);
   }
 
-  await checkMovementEngagements(combat);
+  await checkMovementEngagements(combat, { includeStationary: true, reason: "movement-phase-end" });
   await updateCombatState(combat, {
     movementRun: {
       status: MOVEMENT_PLAN_STATUS.COMPLETED,
@@ -2406,6 +2757,13 @@ async function startMovementPhaseUnlocked(combat) {
       traveledWaypoints: context.traveledWaypoints
     }))
   }), { runId, combatId: combat.id, phase: getCombatState(combat).phase });
+  performanceDiagnostics.markEnd(measureId, {
+    combatId: combat.id,
+    runId,
+    plannedCount: planned.length,
+    contextCount: contexts.length,
+    status: MOVEMENT_PLAN_STATUS.COMPLETED
+  });
   return getCombatState(combat).movementRun;
 }
 

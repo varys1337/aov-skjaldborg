@@ -1,0 +1,151 @@
+/* ------------------------------------------------------------------------- */
+/* Token action ring                                                         */
+/* ------------------------------------------------------------------------- */
+
+.skj-action-ring-app.application,
+.skj-actor-hotbar.application {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.skj-action-ring-app {
+  --skj-text: #f4eee8;
+  --skj-text-muted: #d7cbc1;
+  --skj-frame: #403b3b;
+  --skj-frame-light: #7c716c;
+  --skj-hover: #db5c28;
+  --skj-active: #55a4e6;
+  --skj-active-soft: rgba(54, 126, 194, 0.55);
+  --skj-shadow: rgba(0, 0, 0, 0.62);
+  --skj-background: rgba(26, 23, 22, 0.94);
+  --skj-background-hover: rgba(77, 45, 31, 0.94);
+  --skj-score-background: rgba(14, 12, 12, 0.92);
+  --skj-hover-glow: rgba(219, 92, 40, 0.55);
+  --skj-active-glow: rgba(85, 164, 230, 0.58);
+  --skj-frame-glow: rgba(124, 113, 108, 0.45);
+  --skj-drop-glow: rgba(219, 92, 40, 0.68);
+  position: fixed !important;
+  margin: 0 !important;
+  z-index: calc(var(--z-index-ui, 100) + 20);
+}
+
+.skj-action-ring-app .window-content,
+.skj-actor-hotbar .window-content {
+  background: transparent;
+  overflow: visible;
+  padding: 0;
+}
+
+.skj-action-ring {
+  contain: layout style paint;
+  font-family: var(--aov-primary-font, var(--font-primary));
+  pointer-events: auto;
+  position: relative;
+}
+
+.skj-ring-action,
+.skj-ring-close {
+  align-items: center;
+  background: linear-gradient(145deg, rgba(25, 22, 22, 0.96), rgba(52, 45, 42, 0.94));
+  border: 3px solid #383535;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.62), inset 0 1px 1px rgba(255, 255, 255, 0.14);
+  color: #f4eee8;
+  cursor: pointer;
+  display: flex;
+  justify-content: center;
+  margin: 0;
+  padding: 0;
+  position: absolute;
+  transition: opacity 160ms ease, transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.skj-ring-action {
+  border-radius: 50%;
+  height: 56px;
+  width: 56px;
+}
+
+.skj-ring-action.collapsed {
+  opacity: 0;
+  transform: translate(calc(var(--skj-ring-center) - 50%), calc(var(--skj-ring-center) - 50%)) scale(0.15);
+}
+
+.skj-ring-action:hover,
+.skj-ring-action:focus-visible,
+.skj-ring-close:hover,
+.skj-ring-close:focus-visible {
+  border-color: #e88924;
+  box-shadow: 0 0 16px rgba(232, 137, 36, 0.75), 0 5px 13px rgba(0, 0, 0, 0.72);
+  outline: 0;
+  transform: translateY(-2px) scale(1.06);
+}
+
+.skj-ring-action img {
+  border: 0;
+  border-radius: 50%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+  width: 100%;
+}
+
+.skj-ring-action i {
+  font-size: 25px;
+  pointer-events: none;
+  text-shadow: 0 2px 3px #000;
+}
+
+.skj-ring-close {
+  border-radius: 50%;
+  color: #f0d6a8;
+  height: 60px;
+  width: 60px;
+}
+
+.skj-ring-close i {
+  font-size: 25px;
+}
+
+.skj-ring-score,
+.skj-slot-score {
+  align-items: center;
+  background: rgba(14, 12, 12, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.38);
+  border-radius: 10px;
+  bottom: -3px;
+  color: #fff;
+  display: flex;
+  font-family: var(--font-primary);
+  font-size: 10px;
+  font-weight: 700;
+  height: 19px;
+  justify-content: center;
+  line-height: 1;
+  min-width: 19px;
+  padding: 0 4px;
+  pointer-events: none;
+  position: absolute;
+  right: -3px;
+  text-shadow: 0 1px 2px #000;
+}
+
+.skj-action-ring-hint {
+  background: rgba(16, 13, 14, 0.94);
+  border: 1px solid #4b4241;
+  border-radius: 7px;
+  bottom: 1px;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.55);
+  color: #f1e8df;
+  font-size: 12px;
+  left: 50%;
+  max-width: min(300px, 80vw);
+  overflow: hidden;
+  padding: 7px 11px;
+  position: absolute;
+  text-overflow: ellipsis;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}

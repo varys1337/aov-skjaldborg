@@ -46,6 +46,12 @@ requireCondition(manifest?.bugs === `${repositoryUrl}/issues`, "module.json bugs
 requireCondition(manifest?.changelog === `${repositoryUrl}/releases`, "module.json changelog URL is incorrect");
 requireCondition(Array.isArray(manifest?.esmodules) && manifest.esmodules.length > 0, "At least one esmodule is required");
 requireCondition(Array.isArray(manifest?.styles) && manifest.styles.length > 0, "module.json styles must contain the compiled stylesheet");
+requireCondition(
+  Array.isArray(manifest?.styles)
+    && manifest.styles.length === 1
+    && manifest.styles[0] === "styles/skjaldborg.css",
+  "module.json styles must contain exactly styles/skjaldborg.css"
+);
 requireCondition(Array.isArray(manifest?.languages), "module.json languages must be an array");
 requireCondition(manifest?.socket === true, "Module socket support must remain enabled");
 requireCondition(
@@ -64,6 +70,19 @@ for (const language of manifest?.languages ?? []) {
 for (const path of ["README.md", "lang", "scripts", "src/styles", "styles", "templates"]) {
   requireRuntimeFile(path, "source/runtime path");
 }
+
+requireCondition(
+  packageJson?.scripts?.build?.includes("styles:release"),
+  "package.json build script must rebuild compressed release CSS"
+);
+requireCondition(
+  packageJson?.scripts?.["build:folder"]?.includes("styles:release"),
+  "package.json build:folder script must rebuild compressed release CSS"
+);
+requireCondition(
+  packageJson?.scripts?.["styles:audit"] === "node tools/css-size-audit.mjs",
+  "package.json styles:audit script must run tools/css-size-audit.mjs"
+);
 
 if (errors.length > 0) {
   console.error("Module validation failed:");

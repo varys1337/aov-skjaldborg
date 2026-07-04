@@ -1,0 +1,7 @@
+        <div class="skj-effect-row" data-hotbar-region="headerEffects" aria-label="{{localize 'AOV_SKJALDBORG.ActorHotbar.ActiveEffects'}}">
+          {{#each effects}}
+            <button type="button" class="skj-effect-icon" data-action="activate" data-action-kind="effect" data-action-id="{{id}}" data-tooltip="{{name}}">
+              <img src="{{img}}" alt="">
+            </button>
+          {{/each}}
+        </div>

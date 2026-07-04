@@ -2,8 +2,10 @@ import { AoVAdapter } from "../adapter/aov-adapter.mjs";
 import { MODULE_ID, MOVEMENT_PLAN_STATUS, PHASE_ORDER, PHASES, RESOLUTION_STATUS } from "../constants.mjs";
 import { warn } from "../logger.mjs";
 import { createPhaseReport } from "./chat-report.mjs";
+import { resolvePendingFlees, resolvePendingRetreatDisengagements } from "./disengagement.mjs";
 import { isMovementRunActive, startMovementPhase } from "./movement-controller.mjs";
 import { settleMovementWrites } from "./authoritative-write-queue.mjs";
+import { pruneStaleEngagements } from "./engagement-reconciliation.mjs";
 import {
   initializePlanningInitiativeTracking,
   isDynamicPlanningInitiativeActive,
@@ -16,6 +18,7 @@ import {
   setActionStatus,
   settleImmediateResolutionWrites
 } from "./resolution-queue.mjs";
+import { clearReactionPenaltyEffectsForCombat } from "./reaction-penalty-effects.mjs";
 import {
   canonicalTransitionPath,
   firstEnabledPhase,
@@ -341,6 +344,8 @@ export class PhaseController {
 
     await settlePlanningInitiativeWrites(combat);
 
+    await pruneStaleEngagements(combat, { reason: `phase-end-${currentPhase}` });
+
     // Streamlined declarations can update the Combat-level queue while the GM
     // is using tracker controls. Snapshot only after those authoritative writes
     // have settled so a round transition cannot archive an older queue value.
@@ -365,6 +370,7 @@ export class PhaseController {
     // Resolution queue must be prepared only after that reset.
     for (const crossedPhase of transitionPath) {
       if (crossedPhase === PHASES.MOVEMENT) {
+        await resolvePendingFlees(combat);
         if (crossedPhase !== targetPhase) {
           await startMovementPhase(combat, { positionAtLast: false });
           movementRun = foundry.utils.deepClone(getCombatState(combat).movementRun ?? movementRun);
@@ -408,8 +414,10 @@ export class PhaseController {
             completedAt: Date.now()
           }
         ].slice(-10);
+        await resolvePendingRetreatDisengagements(combat);
         logicalRound = await this.advanceSystemToNextIntentRound(combat, logicalRound);
         await resetCombatantRoundState(combat);
+        await clearReactionPenaltyEffectsForCombat(combat, { reason: "round-reset" });
         await this.applyCarryoverToNextRound(combat, carryover);
         queue = [];
         simultaneousGroups = [];
@@ -451,6 +459,7 @@ export class PhaseController {
     // Round click cannot enter Resolution before the run has actually started.
     if (targetPhase === PHASES.MOVEMENT) {
       try {
+        await resolvePendingFlees(combat);
         await startMovementPhase(combat, { positionAtLast: false });
         if (shouldQueueResolutionImmediately()) {
           await refreshAllImmediateResolutionActions(combat, { preserveStatus: true });

@@ -78,13 +78,21 @@ export async function runDiagnostics() {
   results.push(check("action-ring-setting", typeof game.settings.get(MODULE_ID, "enableActionRing") === "boolean"));
   results.push(check("actor-hotbar-setting", typeof game.settings.get(MODULE_ID, "enableActorHotbar") === "boolean"));
   results.push(check("appv2", capabilities.applications.applicationV2));
+  results.push(check("document-sheet-v2", capabilities.applications.documentSheetV2));
   results.push(check("dialogv2", capabilities.applications.dialogV2));
   results.push(check("scene-move-tokens", true, capabilities.movement.sceneMoveTokens ? "native" : "per-token fallback"));
   results.push(check("token-move", capabilities.movement.tokenMove));
   results.push(check("token-complete-movement-path", true, capabilities.movement.completeMovementPath ? "native" : "fallback expansion"));
-  results.push(check("status-effects-v14", true, capabilities.effects.statusEffectsObject ? "object catalog present" : "catalog unavailable; module fallback active when ActiveEffect is available"));
+  results.push(check("status-effects-v14", true, capabilities.effects.statusEffectsMap
+    ? "Map-like catalog present"
+    : capabilities.effects.statusEffectsArray
+      ? "array catalog present"
+      : capabilities.effects.statusEffectsObject
+        ? "object catalog present"
+        : "catalog unavailable; module fallback active when ActiveEffect is available"));
   results.push(check("status-effect-mode", true, `${engagementStatusMode}; ${statusEffectCapabilityDetail({ ...capabilities, statusEffectMode: engagementStatusMode })}`));
   results.push(check("active-effect-class", true, String(capabilities.effects.activeEffectClass)));
+  results.push(check("active-effect-from-status", true, String(capabilities.effects.activeEffectFromStatusEffect)));
   results.push(check("aov-combat-class", capabilities.combat.combatClass, `${capabilities.combat.className}; name recognized=${capabilities.combat.aovCombatClass}`));
   results.push(check("message-mode-compatibility", isAoVMessageModeCompatible(), "Combat#rollInitiative does not access core.rollMode"));
   results.push(check(
@@ -113,7 +121,6 @@ export async function runDiagnostics() {
     const state = getCombatState(combat);
     results.push(check("combat-state-readable", !!state && typeof state.phase === "string", state.phase));
   }
-  results.push(check("hud-template", await canRenderTemplate("modules/aov-skjaldborg/templates/combat-hud.hbs")));
   results.push(check("phase-report-template", await canRenderTemplate("modules/aov-skjaldborg/templates/phase-report.hbs")));
   results.push(check("action-ring-template", await canRenderTemplate("modules/aov-skjaldborg/templates/action-ring.hbs")));
   results.push(check("actor-hotbar-template", await canRenderTemplate("modules/aov-skjaldborg/templates/actor-hotbar.hbs")));

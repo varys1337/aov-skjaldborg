@@ -1,0 +1,44 @@
+        <div class="skj-combat-stage" data-hotbar-region="combatWorkflow">
+          <div class="skj-intent-grid">
+            {{#each combatActions}}
+              <button
+                type="button"
+                class="skj-hotbar-slot skj-intent-slot {{#if selected}}is-selected{{/if}}"
+                data-action="activate"
+                data-action-kind="{{kind}}"
+                data-action-id="{{id}}"
+                data-intent-action-control
+                data-quick-source
+                data-quick-kind="{{kind}}"
+                data-quick-id="{{id}}"
+                draggable="true"
+                data-tooltip="{{localize 'AOV_SKJALDBORG.ActorHotbar.IntentControlHint'}}"
+                aria-label="{{name}} - {{localize 'AOV_SKJALDBORG.ActorHotbar.IntentControlHint'}}"
+                aria-pressed="{{#if selected}}true{{else}}false{{/if}}"
+              >
+                <i class="{{icon}}" inert></i>
+                <span class="skj-intent-name">{{name}}</span>
+              </button>
+            {{else}}
+              <span class="skj-empty-actions">{{localize 'AOV_SKJALDBORG.ActorHotbar.NoCombatActions'}}</span>
+            {{/each}}
+          </div>
+
+          {{> "modules/aov-skjaldborg/templates/actor-hotbar/equipment-controls.hbs" }}
+          {{#if workflow.active}}
+            <div class="skj-workflow-pips skj-workflow-pips-combat">
+              <span class="skj-workflow-pill phase" data-tooltip="{{localize 'AOV_SKJALDBORG.ActorHotbar.Phase'}}">{{workflow.phase}}</span>
+              <span class="skj-workflow-pill workflow-status {{workflow.status}}" data-tooltip="{{workflow.statusTooltip}}">{{workflow.statusLabel}}</span>
+              <span class="skj-workflow-pill workflow-dex" data-tooltip="{{localize 'AOV_SKJALDBORG.Labels.FinalDex'}}"><i class="fa-solid fa-gauge-high" inert></i> {{workflow.dex}}</span>
+              <span
+                class="skj-workflow-pill workflow-reactions"
+                data-action="incrementReaction"
+                data-reaction-control
+                data-tooltip="{{workflow.reactionTooltip}}"
+                aria-label="{{workflow.reactionTooltip}}"
+                role="button"
+                tabindex="0"
+              ><i class="fa-solid fa-shield" inert></i> {{workflow.reactions}}</span>
+            </div>
+          {{/if}}
+        </div>

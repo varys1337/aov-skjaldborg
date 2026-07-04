@@ -10,7 +10,7 @@ export const SOCKET_NAME = `module.${MODULE_ID}`;
 export const MODULE_VERSION = "0.3.2";
 export const MINIMUM_FOUNDRY_VERSION = "14.363";
 export const VERIFIED_FOUNDRY_VERSION = "14.364";
-export const MINIMUM_AOV_VERSION = "14.1";
+export const MINIMUM_AOV_VERSION = "14.4";
 export const V14_MIGRATION_VERSION = 1;
 
 
@@ -20,6 +20,42 @@ export const ACTION_UI_THEMES = Object.freeze({
 });
 
 export const ACTION_UI_MIGRATION_VERSION = 1;
+
+export const MOVEMENT_PLAN_VISIBILITY = Object.freeze({
+  EVERYONE: "everyone",
+  PERMISSION: "permission",
+  NONE: "none"
+});
+
+export const MOVEMENT_PLAN_VISIBILITY_DEFAULT = MOVEMENT_PLAN_VISIBILITY.PERMISSION;
+
+export const REACH_VISUALIZER_VISIBILITY = Object.freeze({
+  DYNAMIC: "dynamic",
+  HOVER: "hover",
+  ALWAYS: "always"
+});
+
+export const REACH_VISUALIZER_SHAPE = Object.freeze({
+  GRID: "grid",
+  CIRCLE: "circle"
+});
+
+export const REACH_VISUALIZER_DEFAULTS = Object.freeze({
+  enabled: false,
+  visibility: REACH_VISUALIZER_VISIBILITY.DYNAMIC,
+  shape: REACH_VISUALIZER_SHAPE.GRID,
+  opacity: 0.35,
+  passiveOpacity: 0.2,
+  activeOpacity: 0.8,
+  lineWidth: 2
+});
+
+export const REACH_VISUALIZER_LIMITS = Object.freeze({
+  opacity: Object.freeze({ min: 0.05, max: 1, step: 0.05 }),
+  passiveOpacity: Object.freeze({ min: 0.05, max: 1, step: 0.05 }),
+  activeOpacity: Object.freeze({ min: 0.05, max: 1, step: 0.05 }),
+  lineWidth: Object.freeze({ min: 1, max: 12, step: 1 })
+});
 
 export const ACTION_UI_DEFAULTS = Object.freeze({
   enableActionRing: true,
@@ -98,6 +134,8 @@ export const ACTION_CATEGORIES = Object.freeze({
   OTHER: "other"
 });
 
+export const UTILITY_ACTION_ID = "utility";
+
 export const INTENT_STATUS = Object.freeze({
   UNCOMMITTED: "uncommitted",
   COMMITTED: "committed",
@@ -157,6 +195,29 @@ export const ENGAGEMENT_STATUS = Object.freeze({
 });
 
 export const ENGAGED_STATUS_ID = `${MODULE_ID}-engaged`;
+export const MOUNTED_STATUS_ID = `${MODULE_ID}-mounted`;
+export const DISENGAGING_STATUS_ID = `${MODULE_ID}-disengaging`;
+export const GRAPPLED_STATUS_ID = `${MODULE_ID}-grappled`;
+export const IMMOBILIZED_STATUS_ID = `${MODULE_ID}-immobilized`;
+export const EVADING_STATUS_ID = `${MODULE_ID}-evading`;
+export const IMPALED_STATUS_ID = `${MODULE_ID}-impaled`;
+export const INJURY_STATUS_ID = `${MODULE_ID}-injury`;
+export const DAMAGE_EFFECT_SOURCE_FLAG = "damageEffectSource";
+export const DAMAGE_EFFECT_TRACKING_FLAG = "damageEffectTracking";
+
+export const DISENGAGEMENT_METHODS = Object.freeze({
+  NONE: "none",
+  RETREAT: "retreat",
+  FLEE: "flee",
+  KNOCKBACK: "knockback"
+});
+
+export const DISENGAGEMENT_STATUS = Object.freeze({
+  NONE: "none",
+  DECLARED: "declared",
+  COMPLETE: "complete",
+  INTERRUPTED: "interrupted"
+});
 
 export const DEX_MODIFIERS = Object.freeze({
   DRAW_WEAPON: -5,

@@ -1,0 +1,169 @@
+<div class="skj-roll-dialog skj-roll-dialog--utility skj-utility-dialog">
+  <header class="skj-roll-dialog__header skj-utility-dialog__header">
+    <div class="skj-roll-dialog__identity skj-utility-dialog__identity">
+      <div class="skj-roll-dialog__target-summary skj-utility-dialog__summary-block">
+        <span class="skj-roll-dialog__target-portrait skj-utility-dialog__portrait" aria-hidden="true">
+          {{#if actorImg}}
+            {{#if actorImgIsVideo}}
+            <video src="{{actorImg}}" autoplay muted loop playsinline></video>
+            {{else}}
+            <img src="{{actorImg}}" alt="" />
+            {{/if}}
+          {{else}}
+          <span class="skj-utility-dialog__portrait-fallback">{{actorInitial}}</span>
+          {{/if}}
+        </span>
+        <span class="skj-roll-dialog__target-copy skj-utility-dialog__copy">
+          <span class="skj-roll-dialog__actor skj-utility-dialog__actor">{{actorName}}</span>
+          <span class="skj-roll-dialog__target skj-utility-dialog__title">
+            <strong>{{localize "AOV_SKJALDBORG.Utility.Title"}}</strong>
+          </span>
+        </span>
+      </div>
+    </div>
+
+    <div class="skj-roll-dialog__rating-card skj-utility-dialog__status-card">
+      <span class="skj-roll-dialog__label">{{localize "AOV_SKJALDBORG.Utility.Status"}}</span>
+      <strong>{{statusValue}}</strong>
+      {{#if activeOptionCount}}<span>{{activeOptionCaption}}</span>{{/if}}
+    </div>
+  </header>
+
+  <section class="skj-roll-dialog__body skj-utility-dialog__body">
+    <div class="skj-utility-dialog__tabs" role="tablist" aria-label="{{localize "AOV_SKJALDBORG.Utility.Title"}}">
+      <input type="radio" id="skj-utility-tab-equipped" name="utilityTab" value="equipped" checked>
+      <label class="skj-utility-dialog__tab" for="skj-utility-tab-equipped" role="tab">
+        <span>{{localize "AOV_SKJALDBORG.Utility.Tabs.Weapons"}}</span>
+      </label>
+
+      <input type="radio" id="skj-utility-tab-two-weapon" name="utilityTab" value="twoWeapon">
+      <label class="skj-utility-dialog__tab" for="skj-utility-tab-two-weapon" role="tab">
+        <span>{{localize "AOV_SKJALDBORG.Utility.Tabs.TwoWeapon"}}</span>
+      </label>
+
+      <input type="radio" id="skj-utility-tab-shield" name="utilityTab" value="shield">
+      <label class="skj-utility-dialog__tab" for="skj-utility-tab-shield" role="tab">
+        <span>{{localize "AOV_SKJALDBORG.Utility.Tabs.Shield"}}</span>
+      </label>
+
+      <input type="radio" id="skj-utility-tab-shieldwall" name="utilityTab" value="shieldwall">
+      <label class="skj-utility-dialog__tab" for="skj-utility-tab-shieldwall" role="tab">
+        <span>{{localize "AOV_SKJALDBORG.Utility.Tabs.Shieldwall"}}</span>
+      </label>
+
+      <fieldset class="skj-roll-dialog__augment skj-utility-dialog__panel skj-utility-dialog__panel--equipped">
+        <legend>{{localize "AOV_SKJALDBORG.Utility.Sections.Weapons"}}</legend>
+        <label class="skj-utility-dialog__row">
+          <span>{{localize "AOV_SKJALDBORG.Utility.RightHandShort"}}</span>
+          <select name="rightWeaponId" class="skj-roll-dialog__select">
+            <option value="">{{localize "AOV_SKJALDBORG.Weapons.None"}}</option>
+            {{#each weapons}}
+            <option value="{{id}}" {{#if right}}selected{{/if}}>{{name}}</option>
+            {{/each}}
+          </select>
+        </label>
+        <label class="skj-utility-dialog__row">
+          <span>{{localize "AOV_SKJALDBORG.Utility.LeftHandShort"}}</span>
+          <select name="leftWeaponId" class="skj-roll-dialog__select">
+            <option value="">{{localize "AOV_SKJALDBORG.Weapons.None"}}</option>
+            {{#each weapons}}
+            <option value="{{id}}" {{#if left}}selected{{/if}}>{{name}}</option>
+            {{/each}}
+          </select>
+        </label>
+        {{#if isNpc}}
+        <label class="skj-utility-dialog__toggle">
+          <input type="checkbox" name="unlimitedWeapons" {{#if weaponState.unlimited}}checked{{/if}} />
+          <span>{{localize "AOV_SKJALDBORG.Utility.UnlimitedWeapons"}}</span>
+        </label>
+        {{/if}}
+      </fieldset>
+
+      <fieldset class="skj-roll-dialog__augment skj-utility-dialog__panel skj-utility-dialog__panel--two-weapon {{#if twoWeapon.enabled}}is-enabled{{/if}}" data-two-weapon-panel>
+        <legend>{{localize "AOV_SKJALDBORG.Utility.Sections.TwoWeapon"}}</legend>
+        <p class="skj-utility-dialog__note {{#unless twoWeapon.available}}is-disabled{{/unless}}">{{twoWeapon.hint}}</p>
+        <div class="skj-utility-dialog__skill-pair">
+          {{#if twoWeapon.primary}}
+          <span>{{localize "AOV_SKJALDBORG.Utility.PrimaryWeapon"}} <strong>{{twoWeapon.primary.label}}</strong></span>
+          {{/if}}
+          {{#if twoWeapon.secondary}}
+          <span>{{localize "AOV_SKJALDBORG.Utility.SecondaryWeapon"}} <strong>{{twoWeapon.secondary.label}}</strong></span>
+          {{/if}}
+        </div>
+        <label class="skj-utility-dialog__toggle {{#unless twoWeapon.available}}is-disabled{{/unless}}" data-tooltip="{{twoWeapon.hint}}">
+          <input type="checkbox" name="twoWeaponEnabled" {{#if twoWeapon.enabled}}checked{{/if}} {{#unless twoWeapon.available}}disabled{{/unless}} />
+          <span>{{localize "AOV_SKJALDBORG.Utility.TwoWeaponEnabled"}}</span>
+        </label>
+        {{#if twoWeapon.available}}
+        <div class="skj-utility-dialog__allocation" data-two-weapon-allocation>
+          <label class="skj-utility-dialog__row">
+            <span>{{localize "AOV_SKJALDBORG.Utility.PrimaryChance"}}</span>
+            <input type="number" name="twoWeaponPrimaryChance" value="{{twoWeapon.primary.chance}}" min="0" max="{{twoWeapon.primary.total}}" step="1" data-two-weapon-chance>
+          </label>
+          <label class="skj-utility-dialog__row">
+            <span>{{localize "AOV_SKJALDBORG.Utility.SecondaryChance"}}</span>
+            <input type="number" name="twoWeaponSecondaryChance" value="{{twoWeapon.secondary.chance}}" min="0" max="{{twoWeapon.secondary.total}}" step="1" data-two-weapon-chance>
+          </label>
+        </div>
+        {{/if}}
+      </fieldset>
+
+      <fieldset class="skj-roll-dialog__augment skj-utility-dialog__panel skj-utility-dialog__panel--shield">
+        <legend>{{localize "AOV_SKJALDBORG.Utility.Sections.Shield"}}</legend>
+        <label class="skj-utility-dialog__row">
+          <span>{{localize "AOV_SKJALDBORG.Utility.Shield"}}</span>
+          <select name="shieldId">
+            <option value="">{{localize "AOV_SKJALDBORG.Weapons.None"}}</option>
+            {{#each shields}}
+            <option value="{{id}}" {{#if selected}}selected{{/if}}>{{name}}</option>
+            {{/each}}
+          </select>
+        </label>
+        <div class="skj-utility-dialog__location-summary">
+          <span>{{localize "AOV_SKJALDBORG.Utility.CoveredLocations"}}</span>
+          <strong data-location-count>{{localize "AOV_SKJALDBORG.Utility.CoveredCount" count=selectedLocationCount}}</strong>
+        </div>
+        <div class="skj-utility-dialog__chips" data-location-chips>
+          {{#each locations}}
+            {{#if selected}}
+            <button type="button" class="skj-utility-dialog__chip" data-remove-location="{{id}}">{{label}}</button>
+            {{/if}}
+          {{/each}}
+          {{#unless selectedLocationCount}}
+          <span class="skj-utility-dialog__chip-empty">{{localize "AOV_SKJALDBORG.Utility.NoCoveredLocations"}}</span>
+          {{/unless}}
+        </div>
+        <div class="skj-utility-dialog__location-list" role="listbox" aria-label="{{localize "AOV_SKJALDBORG.Utility.CoveredLocations"}}">
+          {{#each locations}}
+          <button type="button" class="skj-utility-dialog__location {{#if selected}}is-selected{{/if}}" data-location-id="{{id}}">
+            <span>{{label}}</span>
+          </button>
+          {{/each}}
+        </div>
+        <span data-location-hidden-inputs>
+          {{#each locations}}
+            {{#if selected}}<input type="hidden" name="shieldLocationIds" value="{{id}}">{{/if}}
+          {{/each}}
+        </span>
+      </fieldset>
+
+      <fieldset class="skj-roll-dialog__augment skj-utility-dialog__panel skj-utility-dialog__panel--shieldwall">
+        <legend>{{localize "AOV_SKJALDBORG.Utility.Sections.Shieldwall"}}</legend>
+        <p class="skj-utility-dialog__note">{{localize "AOV_SKJALDBORG.Utility.ShieldwallStateHint"}}</p>
+        <label class="skj-utility-dialog__toggle">
+          <input type="checkbox" name="shieldwallEnabled" {{#if combatOptions.shieldwall.enabled}}checked{{/if}} />
+          <span>{{localize "AOV_SKJALDBORG.Utility.ShieldwallEnabled"}}</span>
+        </label>
+      </fieldset>
+    </div>
+
+    <div class="skj-roll-dialog__footer skj-utility-dialog__footer">
+      <div class="skj-roll-dialog__summary skj-utility-dialog__footer-summary" data-tooltip="{{utilitySummary}}">
+        <span>{{utilitySummary}}</span>
+      </div>
+      <button type="button" class="skj-roll-dialog__action skj-utility-dialog__apply" data-action="applyUtility">
+        <span>{{localize "AOV_SKJALDBORG.Utility.ApplyShort"}}</span>
+      </button>
+    </div>
+  </section>
+</div>

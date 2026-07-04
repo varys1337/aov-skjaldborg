@@ -1,4 +1,12 @@
 import { ENGAGED_STATUS_ID, ENGAGEMENT_STATUS, MODULE_ID, MOVEMENT_DEBUG_CATEGORIES, MOVEMENT_DEBUG_LEVELS } from "../constants.mjs";
+import {
+  effectHasStatus,
+  effectIsActive,
+  moduleFlag,
+  registerStatusEffect,
+  statusEffectConfig,
+  upsertActorStatusEffect
+} from "../compat/active-effects.mjs";
 import { warn } from "../logger.mjs";
 import { getCombatantState, updateCombatantState } from "./state.mjs";
 import { movementDebug, movementDebugWarn } from "./movement-debugger.mjs";
@@ -8,6 +16,40 @@ const ENGAGED_EFFECT_NAME = "AOV_SKJALDBORG.StatusEffects.Engaged";
 const ENGAGED_EFFECT_ICON = "icons/svg/combat.svg";
 let engagementEffectSyncDepth = 0;
 let statusEffectMode = "unknown";
+const actorEngagementEffectSyncLocks = new Map();
+
+/**
+ * Build a stable key for serializing visual Engaged effect writes per Actor.
+ *
+ * @param {Actor|object|null} actor Actor document.
+ * @returns {string}
+ */
+function actorEffectLockKey(actor) {
+  return String(actor?.uuid ?? actor?.id ?? actor?._id ?? actor?.name ?? "unknown-actor");
+}
+
+/**
+ * Serialize async operations per Actor so concurrent movement hooks cannot
+ * create duplicate Engaged ActiveEffects before the first create has resolved.
+ *
+ * @template T
+ * @param {Actor|object|null} actor Actor document.
+ * @param {() => Promise<T>} operation Operation to run.
+ * @returns {Promise<T>} Operation result.
+ */
+function withActorEngagedEffectLock(actor, operation) {
+  const key = actorEffectLockKey(actor);
+  const previous = actorEngagementEffectSyncLocks.get(key) ?? Promise.resolve();
+  let current;
+  current = previous
+    .catch(() => undefined)
+    .then(operation)
+    .finally(() => {
+      if (actorEngagementEffectSyncLocks.get(key) === current) actorEngagementEffectSyncLocks.delete(key);
+    });
+  actorEngagementEffectSyncLocks.set(key, current);
+  return current;
+}
 
 /**
  * Return the configured Engaged status-effect definition.
@@ -15,11 +57,7 @@ let statusEffectMode = "unknown";
  * @returns {object}
  */
 export function engagedStatusEffectConfig() {
-  return {
-    id: ENGAGED_STATUS_ID,
-    name: ENGAGED_EFFECT_NAME,
-    img: ENGAGED_EFFECT_ICON
-  };
+  return statusEffectConfig(ENGAGED_STATUS_ID, ENGAGED_EFFECT_NAME, ENGAGED_EFFECT_ICON);
 }
 
 /**
@@ -32,62 +70,11 @@ export function engagedStatusEffectConfig() {
  * @returns {void}
  */
 export function registerEngagedStatusEffect() {
-  const config = engagedStatusEffectConfig();
-  let effects = CONFIG?.statusEffects;
-
-  if (!effects) {
-    try {
-      CONFIG.statusEffects = {};
-      effects = CONFIG.statusEffects;
-      statusEffectMode = "module-fallback";
-    }
-    catch (err) {
-      statusEffectMode = "disabled";
-      warn("Unable to initialize CONFIG.statusEffects for the Engaged status fallback", err);
-      return null;
-    }
-  }
-
-  // Defensive compatibility with object and collection-like shapes. The v14
-  // catalog is expected to be an id-keyed object; using set() when present
-  // prevents a silent non-enumerable property on a Map-like value.
-  if (effects && typeof effects.set === "function") {
-    effects.set(ENGAGED_STATUS_ID, config);
-    statusEffectMode = "native";
-    return config;
-  }
-
-  if (Array.isArray(effects)) {
-    const index = effects.findIndex(effect => effect?.id === ENGAGED_STATUS_ID);
-    if (index >= 0) effects.splice(index, 1, config);
-    else effects.push(config);
-    statusEffectMode = "module-fallback";
-    return config;
-  }
-
-  if (effects && typeof effects === "object") {
-    try {
-      effects[ENGAGED_STATUS_ID] = config;
-      if (effects[ENGAGED_STATUS_ID]?.id === ENGAGED_STATUS_ID) {
-        if (statusEffectMode === "unknown") statusEffectMode = "native";
-        return config;
-      }
-    }
-    catch (_err) {
-      // Fall through to replacing a non-extensible catalog.
-    }
-  }
-
-  try {
-    CONFIG.statusEffects = { ...(effects ?? {}), [ENGAGED_STATUS_ID]: config };
-    statusEffectMode = "module-fallback";
-  }
-  catch (err) {
-    statusEffectMode = "disabled";
-    warn("Unable to register the Engaged status effect in CONFIG.statusEffects", err);
-    return null;
-  }
-  return config;
+  const result = registerStatusEffect(engagedStatusEffectConfig(), {
+    warning: "Unable to register the Engaged status effect in CONFIG.statusEffects"
+  });
+  statusEffectMode = result.mode;
+  return result.config;
 }
 
 /**
@@ -124,10 +111,8 @@ function canMirrorEngagementEffect(actor) {
  */
 function isEngagedEffect(effect) {
   if (!effect) return false;
-  if (effect.statuses?.has?.(ENGAGED_STATUS_ID)) return true;
-  if (Array.from(effect.statuses ?? []).includes(ENGAGED_STATUS_ID)) return true;
-  return effect.getFlag?.(MODULE_ID, "managedEngagement") === true
-    || effect.flags?.[MODULE_ID]?.managedEngagement === true;
+  return effectHasStatus(effect, ENGAGED_STATUS_ID)
+    || moduleFlag(effect, "managedEngagement") === true;
 }
 
 /**
@@ -137,9 +122,79 @@ function isEngagedEffect(effect) {
  * @returns {boolean}
  */
 function hasActiveEngagedStatus(effect) {
-  if (!effect || effect.disabled === true) return false;
-  if (effect.statuses?.has?.(ENGAGED_STATUS_ID)) return true;
-  return Array.from(effect.statuses ?? []).includes(ENGAGED_STATUS_ID);
+  return effectIsActive(effect) && effectHasStatus(effect, ENGAGED_STATUS_ID);
+}
+
+/**
+ * Return all ActiveEffects on an Actor which represent the module-owned
+ * Engaged state. Older builds could race during concurrent movement hooks and
+ * create more than one visible status icon; all sync paths now collapse those
+ * duplicates into one authoritative mirror effect.
+ *
+ * @param {Actor|object|null} actor Actor document.
+ * @returns {(ActiveEffect|object)[]} Engaged effects.
+ */
+function engagedEffectsForActor(actor) {
+  return Array.from(actor?.effects ?? []).filter(isEngagedEffect);
+}
+
+/**
+ * Choose the single Engaged effect that should be kept as the visual mirror.
+ * Prefer an active managed effect, then any active status effect, then the
+ * first matching effect.
+ *
+ * @param {(ActiveEffect|object)[]} effects Matching Engaged effects.
+ * @returns {ActiveEffect|object|null} Primary effect.
+ */
+function primaryEngagedEffect(effects) {
+  if (!Array.isArray(effects) || !effects.length) return null;
+  return effects.find(effect => moduleFlag(effect, "managedEngagement") === true && hasActiveEngagedStatus(effect))
+    ?? effects.find(hasActiveEngagedStatus)
+    ?? effects[0];
+}
+
+/**
+ * Merge combatant-keyed engagement records from every duplicate effect.
+ *
+ * @param {(ActiveEffect|object)[]} effects Matching Engaged effects.
+ * @returns {Record<string, object>} Merged records.
+ */
+function mergedEngagementRecords(effects) {
+  return effects.reduce((records, effect) => {
+    return foundry.utils.mergeObject(records, engagementRecords(effect), { inplace: false });
+  }, {});
+}
+
+/**
+ * Remove duplicate Engaged effects while a sync operation is already marked as
+ * internal, preventing the manual-deletion cleanup hook from clearing combat
+ * flags during duplicate compaction.
+ *
+ * @param {Actor|object|null} actor Actor document.
+ * @param {ActiveEffect|object|null} primary Effect to keep.
+ * @param {(ActiveEffect|object)[]} effects Matching Engaged effects.
+ * @param {Combat|null} combat Active combat.
+ * @param {string} reason Debug reason.
+ * @returns {Promise<void>}
+ */
+async function deleteDuplicateEngagedEffects(actor, primary, effects, combat, reason = "duplicate-compaction") {
+  const duplicates = (effects ?? []).filter(effect => effect && effect !== primary);
+  if (!duplicates.length) return;
+  movementDebug(MOVEMENT_DEBUG_CATEGORIES.STATUS, "compact-duplicate-engaged-effects", () => ({
+    actorId: actor?.id ?? null,
+    keptEffectId: primary?.id ?? primary?._id ?? null,
+    duplicateEffectIds: duplicates.map(effect => effect?.id ?? effect?._id ?? null),
+    reason
+  }), { combatId: combat?.id ?? null, level: MOVEMENT_DEBUG_LEVELS.VERBOSE });
+  for (const duplicate of duplicates) {
+    if (typeof duplicate?.delete !== "function") continue;
+    try {
+      await duplicate.delete();
+    }
+    catch (err) {
+      warn(err);
+    }
+  }
 }
 
 /**
@@ -215,10 +270,25 @@ function effectActorForCombatant(combatant) {
  * @returns {Promise<ActiveEffect|object|null>}
  */
 export async function syncEngagedStatusEffect(combatant, engagement, combat = game.combat) {
+  const actor = effectActorForCombatant(combatant);
+  if (!actor) return null;
+  return withActorEngagedEffectLock(actor, () => syncEngagedStatusEffectUnlocked(combatant, engagement, combat, actor));
+}
+
+/**
+ * Synchronize a Combatant engagement record into the Actor's Engaged effect.
+ * This unlocked implementation must only be called from
+ * syncEngagedStatusEffect so Actor-level ActiveEffect writes remain serialized.
+ *
+ * @param {Combatant|object} combatant Combatant document.
+ * @param {object} engagement Authoritative engagement state.
+ * @param {Combat|null} combat Active combat.
+ * @param {Actor|object} actor Actor which owns the visual effect.
+ * @returns {Promise<ActiveEffect|object|null>}
+ */
+async function syncEngagedStatusEffectUnlocked(combatant, engagement, combat, actor) {
   engagementEffectSyncDepth += 1;
   try {
-    const actor = effectActorForCombatant(combatant);
-    if (!actor) return null;
     if (!canMirrorEngagementEffect(actor)) {
       movementDebug(MOVEMENT_DEBUG_CATEGORIES.STATUS, "sync-engaged-effect-skipped", () => ({
         combatantId: combatant?.id ?? null,
@@ -231,9 +301,9 @@ export async function syncEngagedStatusEffect(combatant, engagement, combat = ga
       return null;
     }
 
-    const effects = Array.from(actor.effects ?? []);
-    const effect = effects.find(isEngagedEffect) ?? null;
-    const records = engagementRecords(effect);
+    let effects = engagedEffectsForActor(actor);
+    let effect = primaryEngagedEffect(effects);
+    const records = mergedEngagementRecords(effects);
     const combatantId = String(combatant?.id ?? "");
     if (!combatantId) return effect;
 
@@ -248,13 +318,16 @@ export async function syncEngagedStatusEffect(combatant, engagement, combat = ga
     movementDebug(MOVEMENT_DEBUG_CATEGORIES.STATUS, "sync-engaged-effect", () => ({
       combatantId,
       actorId: actor?.id ?? null,
+      existingEffectIds: effects.map(candidate => candidate?.id ?? candidate?._id ?? null),
       hasExistingEffect: !!effect,
+      hasDuplicateEffects: effects.length > 1,
       hasRecords,
       engagement,
       records
     }), { combatId: combat?.id ?? null, combatantId, level: MOVEMENT_DEBUG_LEVELS.VERBOSE });
+
     if (!hasRecords) {
-      if (effect?.delete) await effect.delete();
+      await deleteDuplicateEngagedEffects(actor, null, effects, combat, "empty-records");
       return null;
     }
 
@@ -271,39 +344,24 @@ export async function syncEngagedStatusEffect(combatant, engagement, combat = ga
         img: ENGAGED_EFFECT_ICON,
         disabled: false,
         statuses: [ENGAGED_STATUS_ID],
+        [`flags.core.statusId`]: ENGAGED_STATUS_ID,
         [`flags.${MODULE_ID}.managedEngagement`]: true,
         [`flags.${MODULE_ID}.engagements`]: records
       });
+      await deleteDuplicateEngagedEffects(actor, effect, effects, combat, "post-update");
       return effect;
     }
 
-    // Use the public status API when available. This creates the same
-    // configured effect used by the default Assign Status Effects palette.
-    if (typeof actor.toggleStatusEffect === "function") {
-      await actor.toggleStatusEffect(ENGAGED_STATUS_ID, { active: true });
-      const configured = Array.from(actor.effects ?? []).find(isEngagedEffect) ?? null;
-      if (configured?.update) {
-        await configured.update({
-          name: game.i18n.localize(ENGAGED_EFFECT_NAME),
-          img: ENGAGED_EFFECT_ICON,
-          disabled: false,
-          statuses: [ENGAGED_STATUS_ID],
-          [`flags.${MODULE_ID}.managedEngagement`]: true,
-          [`flags.${MODULE_ID}.engagements`]: records
-        });
-      }
-      return configured;
-    }
-
-    if (typeof actor.createEmbeddedDocuments !== "function") return null;
-    const [created = null] = await actor.createEmbeddedDocuments("ActiveEffect", [{
+    effect = await upsertActorStatusEffect(actor, {
+      statusId: ENGAGED_STATUS_ID,
       name: game.i18n.localize(ENGAGED_EFFECT_NAME),
       img: ENGAGED_EFFECT_ICON,
-      disabled: false,
-      statuses: [ENGAGED_STATUS_ID],
-      flags
-    }]);
-    return created;
+      moduleFlags: flags[MODULE_ID],
+      predicate: isEngagedEffect
+    });
+    effects = engagedEffectsForActor(actor);
+    await deleteDuplicateEngagedEffects(actor, effect, effects, combat, "post-upsert");
+    return effect;
   }
   finally {
     engagementEffectSyncDepth = Math.max(0, engagementEffectSyncDepth - 1);
@@ -427,6 +485,95 @@ async function clearEngagementFromEffect(effect) {
 }
 
 /**
+ * Delete all module-owned Engaged effects from an Actor without treating the
+ * deletion as a player's manual condition removal.
+ *
+ * @param {Actor|object|null} actor Actor document.
+ * @param {Combat|null} combat Active or deleted combat.
+ * @param {string} reason Debug reason.
+ * @returns {Promise<number>} Number of effects deleted.
+ */
+async function deleteEngagedEffectsFromActor(actor, combat, reason = "combat-cleanup") {
+  if (!actor) return 0;
+  return withActorEngagedEffectLock(actor, async () => {
+    const effects = engagedEffectsForActor(actor);
+    if (!effects.length) return 0;
+    movementDebug(MOVEMENT_DEBUG_CATEGORIES.STATUS, "delete-actor-engaged-effects", () => ({
+      actorId: actor?.id ?? null,
+      effectIds: effects.map(effect => effect?.id ?? effect?._id ?? null),
+      reason
+    }), { combatId: combat?.id ?? null, level: MOVEMENT_DEBUG_LEVELS.VERBOSE });
+    engagementEffectSyncDepth += 1;
+    try {
+      for (const effect of effects) {
+        if (typeof effect?.delete !== "function") continue;
+        await effect.delete();
+      }
+    }
+    finally {
+      engagementEffectSyncDepth = Math.max(0, engagementEffectSyncDepth - 1);
+    }
+    return effects.length;
+  });
+}
+
+/**
+ * Remove all visual Engaged mirrors for a Combat. Combatant flags disappear
+ * with a deleted encounter, but Actor ActiveEffects are embedded on Actors and
+ * therefore must be cleaned explicitly.
+ *
+ * @param {Combat|null|undefined} combat Combat document being ended/deleted.
+ * @param {{reason?: string}} [options={}] Cleanup options.
+ * @returns {Promise<void>}
+ */
+export async function clearEngagedStatusEffectsForCombat(combat, { reason = "combat-ended" } = {}) {
+  if (!game.user?.isGM || !combat) return;
+  const actors = new Map();
+  for (const combatant of combatantValues(combat)) {
+    const actor = effectActorForCombatant(combatant);
+    const key = actorEffectLockKey(actor);
+    if (actor && !actors.has(key)) actors.set(key, actor);
+  }
+  for (const actor of actors.values()) {
+    await deleteEngagedEffectsFromActor(actor, combat, reason);
+  }
+}
+
+/**
+ * Remove a deleted Combatant from partner engagement state and from the
+ * deleted combatant Actor's visual mirror. This prevents orphaned partnerIds
+ * after a token is removed from an active encounter.
+ *
+ * @param {Combatant|object|null} combatant Deleted combatant document.
+ * @returns {Promise<void>}
+ */
+async function clearDeletedCombatantEngagement(combatant) {
+  if (!game.user?.isGM || !combatant) return;
+  const combat = combatant?.parent ?? game.combat ?? null;
+  const deletedId = combatant?.id ?? null;
+  if (!deletedId) return;
+  const state = getCombatantState(combatant);
+  const partners = Array.from(new Set(state.engagement?.partnerIds ?? []));
+  await deleteEngagedEffectsFromActor(effectActorForCombatant(combatant), combat, "combatant-deleted");
+  for (const partnerId of partners) {
+    const partner = combatantValues(combat).find(candidate => candidate?.id === partnerId);
+    if (!partner) continue;
+    const partnerState = getCombatantState(partner);
+    const partnerIds = (partnerState.engagement?.partnerIds ?? []).filter(id => id !== deletedId);
+    const engagement = {
+      ...partnerState.engagement,
+      status: partnerIds.length ? ENGAGEMENT_STATUS.ENGAGED : ENGAGEMENT_STATUS.NONE,
+      engaged: partnerIds.length > 0,
+      partnerIds,
+      reason: partnerIds.length ? partnerState.engagement?.reason : "partner-combatant-deleted"
+    };
+    await updateCombatantState(partner, { engagement });
+    await syncEngagedStatusEffect(partner, engagement, combat);
+  }
+  RenderCoordinator.invalidateCombatTracker("engagement-combatant-deleted");
+}
+
+/**
  * Register manual Engaged ActiveEffect cleanup hooks.
  *
  * @returns {void}
@@ -441,6 +588,14 @@ export function registerEngagedStatusHooks() {
   Hooks.on("updateActiveEffect", effect => {
     if (!isEngagedEffect(effect) || hasActiveEngagedStatus(effect)) return;
     void clearEngagementFromEffect(effect);
+  });
+
+  Hooks.on("deleteCombat", combat => {
+    void clearEngagedStatusEffectsForCombat(combat, { reason: "combat-deleted" });
+  });
+
+  Hooks.on("deleteCombatant", combatant => {
+    void clearDeletedCombatantEngagement(combatant);
   });
 }
 

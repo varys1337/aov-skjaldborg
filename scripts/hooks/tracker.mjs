@@ -1,17 +1,18 @@
 import { AoVAdapter } from "../adapter/aov-adapter.mjs";
 import {
   ACTION_CATEGORIES,
-  DEFENSE_REACTION_STEP,
   INTENT_STATUS,
-  MODULE_ID,
   MOVEMENT_PLAN_STATUS,
   PHASES,
   RESOLUTION_STATUS
 } from "../constants.mjs";
 import { getCombatState, getCombatantState, phaseLabelKey } from "../combat/state.mjs";
+import { reactionPenaltyForCount } from "../combat/reaction-penalty-effects.mjs";
 import { getEnabledPhases } from "../combat/phase-structure.mjs";
-import { getReadiedWeapon } from "../combat/weapon-state.mjs";
+import { getCombatOptions, getReadiedWeaponList } from "../combat/weapon-state.mjs";
+import { movementEngagementEligibility } from "../combat/movement-eligibility.mjs";
 import { requestGm } from "../socket.mjs";
+import { canUserViewMovementDetails } from "../permissions.mjs";
 import {
   combatantFromTrackerRow,
   combatFromTrackerApp,
@@ -19,6 +20,8 @@ import {
   trackerCombatantRows,
   trackerHeaderElement
 } from "../compat/tracker-adapter.mjs";
+import { htmlEscape } from "../ui/dom-utils.mjs";
+import { performanceDiagnostics } from "../performance/performance-monitor.mjs";
 
 const INTENT_STATUS_ICONS = Object.freeze({
   [INTENT_STATUS.UNCOMMITTED]: "fa-circle-question",
@@ -36,16 +39,10 @@ function localize(key) {
   return game.i18n.localize(key);
 }
 
-/**
- * Escape text before inserting module-generated HTML into the tracker.
- *
- * @param {unknown} value Candidate text.
- * @returns {string}
- */
-function escapeHtml(value) {
-  const div = document.createElement("div");
-  div.textContent = String(value ?? "");
-  return div.innerHTML;
+function formatCompactNumber(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return "0";
+  return Number(numeric.toFixed(1)).toString();
 }
 
 /**
@@ -55,7 +52,7 @@ function escapeHtml(value) {
  * @returns {string}
  */
 function button({ action, icon, label, phase, disabled = false, active = false }) {
-  const safeLabel = escapeHtml(label);
+  const safeLabel = htmlEscape(label);
   const pressed = active ? 'aria-current="step"' : "";
   return `
     <button type="button" class="skj-button ${active ? "active" : ""}" data-skj-action="${action}" ${phase ? `data-phase="${phase}"` : ""} ${disabled ? "disabled" : ""} data-tooltip="${safeLabel}" aria-label="${safeLabel}" ${pressed}>
@@ -86,8 +83,8 @@ function renderPhaseBar(combat, state) {
     disabled: !game.user.isGM
   })).join("");
 
-  const navigationLabel = escapeHtml(localize("AOV_SKJALDBORG.Controls.PhaseNavigation"));
-  const movementStatus = escapeHtml(localize(`AOV_SKJALDBORG.MovementStatus.${state.movementRun?.status ?? "none"}`));
+  const navigationLabel = htmlEscape(localize("AOV_SKJALDBORG.Controls.PhaseNavigation"));
+  const movementStatus = htmlEscape(localize(`AOV_SKJALDBORG.MovementStatus.${state.movementRun?.status ?? "none"}`));
 
   return `
     <section class="skj-phasebar" data-combat-id="${combat?.id ?? ""}">
@@ -136,9 +133,41 @@ function renderCombatantStatus(state) {
  * @returns {string}
  */
 function renderIndicator({ className = "", icon, label, text = "" }) {
-  const safeLabel = escapeHtml(label);
-  const safeText = escapeHtml(text);
+  const safeLabel = htmlEscape(label);
+  const safeText = htmlEscape(text);
   return `<span class="skj-tracker-indicator ${className}" data-tooltip="${safeLabel}" aria-label="${safeLabel}"><i class="fa-solid ${icon}" inert></i>${safeText ? `<span>${safeText}</span>` : ""}</span>`;
+}
+
+const NATIVE_TRACKER_TOOLTIP_FALLBACKS = Object.freeze({
+  "COMBAT.ToggleVis": "Toggle visibility",
+  "COMBAT.ToggleDead": "Toggle defeated",
+  "COMBAT.ToggleDefeated": "Toggle defeated",
+  "COMBAT.PingCombatant": "Ping combatant"
+});
+const TRACKER_EVENT_BINDING = Symbol("aovSkjaldborgTrackerEventBinding");
+
+/**
+ * Replace unresolved native AoV/Foundry tracker tooltip keys with readable text.
+ *
+ * The core v14 tooltip manager localizes `data-tooltip`, but if the owning
+ * system emits a key which is not present in the active dictionary the raw key
+ * becomes visible to users. This pass keeps module-owned decorations separate
+ * while repairing those native controls after the tracker has rendered.
+ *
+ * @param {HTMLElement} element Tracker root element.
+ * @returns {void}
+ */
+function localizeNativeTrackerTooltips(element) {
+  const candidates = Array.from(element.querySelectorAll("[data-tooltip], [aria-label], [title]"));
+  for (const control of candidates) {
+    for (const [key, fallback] of Object.entries(NATIVE_TRACKER_TOOLTIP_FALLBACKS)) {
+      const localized = game.i18n.localize(key);
+      const label = localized && localized !== key ? localized : fallback;
+      if (control.getAttribute("data-tooltip") === key) control.setAttribute("data-tooltip", label);
+      if (control.getAttribute("aria-label") === key) control.setAttribute("aria-label", label);
+      if (control.getAttribute("title") === key) control.setAttribute("title", label);
+    }
+  }
 }
 
 /**
@@ -153,12 +182,12 @@ function renderIndicator({ className = "", icon, label, text = "" }) {
  * @returns {string}
  */
 function renderIntentIndicators(combatant, state, combatState) {
-  const reactionPenalty = Number(state.reactionCount ?? 0) * DEFENSE_REACTION_STEP;
+  const reactionPenalty = reactionPenaltyForCount(state.reactionCount);
   const indicators = [
     renderIndicator({
       className: "reactions",
       icon: "fa-shield-halved",
-      label: `${localize("AOV_SKJALDBORG.Labels.Reactions")}: ${reactionPenalty}%`,
+      label: game.i18n.format("AOV_SKJALDBORG.Labels.NextReactionPenalty", { penalty: reactionPenalty }),
       text: `${reactionPenalty}%`
     })
   ];
@@ -166,34 +195,63 @@ function renderIntentIndicators(combatant, state, combatState) {
   const movement = state.movement ?? {};
   const movementStatus = movement.planStatus ?? "none";
   const distance = Number(movement.distance ?? 0);
-  if ([MOVEMENT_PLAN_STATUS.COMPLETED, MOVEMENT_PLAN_STATUS.STOPPED].includes(movementStatus) && distance > 0) {
+  if ([
+    MOVEMENT_PLAN_STATUS.PLANNED,
+    MOVEMENT_PLAN_STATUS.EXECUTING,
+    MOVEMENT_PLAN_STATUS.COMPLETED,
+    MOVEMENT_PLAN_STATUS.STOPPED
+  ].includes(movementStatus) && distance > 0) {
     const waypointCount = Math.max(
       Array.isArray(movement.route) ? movement.route.length : 0,
       Array.isArray(movement.waypoints) ? movement.waypoints.length : 0
     );
     const units = String(movement.units ?? "").trim();
     const statusLabel = localize(`AOV_SKJALDBORG.MovementStatus.${movementStatus}`);
-    const shortText = `${distance}${units ? ` ${units}` : ""}`;
-    indicators.push(renderIndicator({
-      className: `movement ${movementStatus}`,
-      icon: "fa-route",
-      label: game.i18n.format("AOV_SKJALDBORG.Tracker.MovementPlan", {
+    const canSeeMovement = canUserViewMovementDetails(game.user, combatant);
+    const shortText = canSeeMovement
+      ? `${distance}${units ? ` ${units}` : ""}`
+      : localize("AOV_SKJALDBORG.Tracker.HiddenMovement");
+    const eligibility = movementEngagementEligibility(combatant, distance);
+    const cannotEngage = !eligibility.canEngage;
+    const movementLabel = canSeeMovement
+      ? game.i18n.format("AOV_SKJALDBORG.Tracker.MovementPlan", {
         status: statusLabel,
         distance,
         units,
         waypoints: waypointCount
-      }),
+      })
+      : game.i18n.format("AOV_SKJALDBORG.Tracker.HiddenMovementPlan", { status: statusLabel });
+    const label = canSeeMovement && cannotEngage
+      ? `${movementLabel}; ${game.i18n.format("AOV_SKJALDBORG.Tracker.CantEngage", {
+        gridUnits: formatCompactNumber(eligibility.gridUnits),
+        limit: eligibility.limit
+      })}`
+      : movementLabel;
+    indicators.push(renderIndicator({
+      className: `movement ${movementStatus}${cannotEngage ? " cannot-engage" : ""}${canSeeMovement ? "" : " hidden-detail"}`,
+      icon: "fa-route",
+      label,
       text: shortText
     }));
   }
 
-  const readiedWeapon = getReadiedWeapon(combatant?.actor ?? combatant?.token?.actor ?? null);
-  if (readiedWeapon) {
+  const actor = combatant?.actor ?? combatant?.token?.actor ?? null;
+  const readiedWeapons = getReadiedWeaponList(actor);
+  if (readiedWeapons.length) {
+    const weaponNames = readiedWeapons.map(weapon => weapon.name).join(", ");
     indicators.push(renderIndicator({
       className: "readied-weapon",
       icon: "fa-sword",
-      label: game.i18n.format("AOV_SKJALDBORG.Tracker.ReadiedWeapon", { weapon: readiedWeapon.name }),
-      text: readiedWeapon.name
+      label: game.i18n.format("AOV_SKJALDBORG.Tracker.ReadiedWeapon", { weapon: weaponNames }),
+      text: weaponNames
+    }));
+  }
+  if (getCombatOptions(actor).shieldwall.enabled) {
+    indicators.push(renderIndicator({
+      className: "shieldwall",
+      icon: "fa-shield",
+      label: game.i18n.localize("AOV_SKJALDBORG.Utility.ShieldwallEnabled"),
+      text: game.i18n.localize("AOV_SKJALDBORG.Utility.ShieldwallShort")
     }));
   }
 
@@ -223,13 +281,13 @@ function findCombatantControlRow(row) {
 function renderCombatantDetails(combatant, state, combatState) {
   const activeAction = (combatState.resolutionQueue ?? []).find(a => a.combatantId === combatant.id && a.status === RESOLUTION_STATUS.ACTIVE);
   const publicText = state.intent?.publicText
-    ? `<span class="skj-public-intent">${escapeHtml(state.intent.publicText)}</span>`
+    ? `<span class="skj-public-intent">${htmlEscape(state.intent.publicText)}</span>`
     : "";
   const privateText = game.user.isGM && state.intent?.privateText
-    ? `<span class="skj-private">${escapeHtml(state.intent.privateText)}</span>`
+    ? `<span class="skj-private">${htmlEscape(state.intent.privateText)}</span>`
     : "";
   const notes = [
-    activeAction ? `<span class="skj-active-action">${escapeHtml(activeAction.label)}</span>` : "",
+    activeAction ? `<span class="skj-active-action">${htmlEscape(activeAction.label)}</span>` : "",
     publicText,
     privateText
   ].filter(Boolean).join("");
@@ -250,6 +308,10 @@ function renderCombatantDetails(combatant, state, combatState) {
  * @returns {void}
  */
 function decorateCombatantRow(row, combatant, state, combatState) {
+  performanceDiagnostics.count("tracker.decorate.row", 1, {
+    combatantId: combatant?.id ?? null,
+    phase: combatState?.phase ?? null
+  });
   const nameBlock = row.querySelector(".token-name") ?? row;
   const controls = findCombatantControlRow(row);
   if (controls) {
@@ -271,16 +333,19 @@ function decorateCombatantRow(row, combatant, state, combatState) {
  * @returns {void}
  */
 function attachTrackerEvents(element, combat) {
-  element.querySelectorAll("[data-skj-action]").forEach(control => {
-    control.addEventListener("click", event => {
-      event.preventDefault();
-      event.stopPropagation();
-      const action = control.dataset.skjAction;
-      const phase = control.dataset.phase;
-      if (action === "advance-phase") return requestGm("advancePhase", { combatId: combat.id, phase });
-      return null;
-    }, { once: true });
-  });
+  element[TRACKER_EVENT_BINDING]?.abort?.();
+  const controller = new AbortController();
+  element[TRACKER_EVENT_BINDING] = controller;
+  element.addEventListener("click", event => {
+    const control = event.target?.closest?.("[data-skj-action]");
+    if (!control || !element.contains(control) || control.disabled) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const action = control.dataset.skjAction;
+    const phase = control.dataset.phase;
+    if (action === "advance-phase") void requestGm("advancePhase", { combatId: combat.id, phase });
+  }, { signal: controller.signal });
+  performanceDiagnostics.count("tracker.controls.bound", 1, { combatId: combat?.id ?? null, delegated: true });
 }
 
 /**
@@ -293,6 +358,11 @@ function attachTrackerEvents(element, combat) {
  */
 export function registerTrackerHooks() {
   const hook = (app, html) => {
+    const measureId = performanceDiagnostics.markStart("tracker.decorate");
+    let rowCount = 0;
+    let combatId = null;
+    let skipped = false;
+    try {
     if (!AoVAdapter.isAoVWorld()) return;
     const element = elementFromTrackerHook(app, html);
     if (!element) return;
@@ -302,6 +372,7 @@ export function registerTrackerHooks() {
 
     const combat = combatFromTrackerApp(app);
     if (!combat) return;
+    combatId = combat.id ?? null;
     const state = getCombatState(combat);
     const header = trackerHeaderElement(element);
     header.insertAdjacentHTML("beforeend", renderPhaseBar(combat, state));
@@ -314,9 +385,17 @@ export function registerTrackerHooks() {
     for (const row of trackerCombatantRows(element)) {
       const combatant = combatantFromTrackerRow(combat, row);
       if (!combatant) continue;
+      rowCount += 1;
       decorateCombatantRow(row, combatant, getCombatantState(combatant), state);
     }
+    localizeNativeTrackerTooltips(element);
     attachTrackerEvents(element, combat);
+    } catch (exception) {
+      skipped = true;
+      throw exception;
+    } finally {
+      performanceDiagnostics.markEnd(measureId, { combatId, rowCount, skipped });
+    }
   };
 
   Hooks.on("renderCombatTracker", hook);

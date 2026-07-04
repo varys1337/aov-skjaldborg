@@ -45,10 +45,26 @@ export function actorHotbarPartsForActorChange(changed) {
     parts.add("portrait");
     parts.add("shell");
   }
-  if (hasAnyChangedPath(paths, ["system.hp", "system.mp", "system.wounds", "system.hitLocations"])) parts.add("resources");
-  if (hasAnyChangedPath(paths, ["system.abilities", "system.stats", "system.skills", "system.passions"])) parts.add("tabBody");
+  if (hasAnyChangedPath(paths, ["system.hp", "system.mp", "system.wounds", "system.hitLocations"])) {
+    parts.add("resources");
+    parts.add("wellbeing");
+  }
+  if (hasAnyChangedPath(paths, ["system.abilities", "system.stats"])) {
+    parts.add("tabBody");
+    parts.add("stats");
+  }
+  if (hasAnyChangedPath(paths, ["system.skills", "system.passions"])) {
+    parts.add("tabBody");
+    parts.add("skills");
+    parts.add("historyFamily");
+  }
   if (hasAnyChangedPath(paths, ["flags.aov-skjaldborg.quickAccess", "flags.aov-skjaldborg.actionOrder"])) parts.add("quickAccess");
-  if (hasAnyChangedPath(paths, ["flags.aov-skjaldborg.preparedIntent", "flags.aov-skjaldborg.readiedWeapon"])) {
+  if (hasAnyChangedPath(paths, ["flags.aov-skjaldborg.preparedIntent"])) {
+    parts.add("workflow");
+    parts.add("weaponControls");
+    parts.add("tabBody");
+  }
+  if (hasAnyChangedPath(paths, ["flags.aov-skjaldborg.readiedWeapon", "flags.aov-skjaldborg.readiedWeapons", "flags.aov-skjaldborg.combatOptions"])) {
     parts.add("workflow");
     parts.add("weaponControls");
   }
@@ -67,20 +83,28 @@ export function actorHotbarPartsForItemChange(changed) {
   if (!paths.length) return parts;
   if (hasAnyChangedPath(paths, ["name", "img", "type", "system.equipStatus", "system.quantity", "system.encumbrance"])) {
     parts.add("tabBody");
+    parts.add("equipment");
     parts.add("quickAccess");
   }
   if (hasAnyChangedPath(paths, ["system.damage", "system.damType", "system.weaponCat", "system.weaponType", "system.combat", "system.hitPoints", "system.hp"])) {
     parts.add("weaponControls");
     parts.add("tabBody");
+    parts.add("equipment");
   }
-  if (hasAnyChangedPath(paths, ["system.xpCheck"])) parts.add("tabBody");
+  if (hasAnyChangedPath(paths, ["system.xpCheck"])) {
+    parts.add("tabBody");
+    parts.add("skills");
+    parts.add("historyFamily");
+  }
   if (hasAnyChangedPath(paths, ["system.prepared", "system.rune", "system.seidur", "system.magic"])) {
     parts.add("resources");
     parts.add("tabBody");
+    parts.add("magic");
   }
   if (hasAnyChangedPath(paths, ["system.damageTaken", "system.treated", "system.location", "system.ap"])) {
     parts.add("resources");
     parts.add("tabBody");
+    parts.add("wellbeing");
   }
   return parts;
 }

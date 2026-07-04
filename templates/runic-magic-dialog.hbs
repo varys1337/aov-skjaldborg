@@ -1,0 +1,167 @@
+<div class="skj-roll-dialog skj-roll-dialog--runic-magic skj-runic-magic-dialog">
+  <input type="hidden" name="combatId" value="{{combatId}}">
+  <input type="hidden" name="combatantId" value="{{combatantId}}">
+  <input type="hidden" name="expectedCombatantUpdatedAt" value="{{expectedCombatantUpdatedAt}}">
+  <input type="hidden" name="targetRefs" value="{{targets.targetJson}}">
+  {{#unless showModeSelector}}
+  <input type="hidden" name="magicMode" value="{{selectedMagicType}}">
+  {{/unless}}
+
+  <header class="skj-roll-dialog__header skj-runic-magic-dialog__header">
+    <div class="skj-roll-dialog__identity">
+      <div class="skj-roll-dialog__target-summary">
+        <span class="skj-roll-dialog__target-portrait" aria-hidden="true">
+          {{#if actorImg}}
+            {{#if actorImgIsVideo}}
+            <video src="{{actorImg}}" autoplay muted loop playsinline></video>
+            {{else}}
+            <img src="{{actorImg}}" alt="" />
+            {{/if}}
+          {{else}}
+          <span>{{actorInitial}}</span>
+          {{/if}}
+        </span>
+        <span class="skj-roll-dialog__target-copy">
+          <span class="skj-roll-dialog__actor">{{actorName}}</span>
+          <span class="skj-roll-dialog__target"><strong>{{localize "AOV_SKJALDBORG.RunicMagic.Title"}}</strong></span>
+        </span>
+      </div>
+    </div>
+
+    <div class="skj-roll-dialog__rating-card">
+      <span class="skj-roll-dialog__label">{{localize "AOV_SKJALDBORG.RunicMagic.Round"}}</span>
+      <strong>{{logicalRound}}</strong>
+      <span>{{#if targets.hasTargets}}{{targets.targetNames}}{{else}}{{localize "AOV_SKJALDBORG.RunicMagic.NoTargets"}}{{/if}}</span>
+    </div>
+  </header>
+
+  <section class="skj-roll-dialog__body skj-runic-magic-dialog__body">
+    {{#unless hasMagic}}
+    <p class="skj-roll-dialog__note">{{localize "AOV_SKJALDBORG.RunicMagic.NoMagic"}}</p>
+    {{/unless}}
+
+    {{#if isFailed}}
+    <p class="skj-roll-dialog__note is-warning">{{localize "AOV_SKJALDBORG.RunicMagic.StateFailed"}}</p>
+    {{/if}}
+    {{#if isDisrupted}}
+    <p class="skj-roll-dialog__note is-warning">{{localize "AOV_SKJALDBORG.RunicMagic.StateDisrupted"}}</p>
+    {{/if}}
+    {{#if isCarving}}
+    <p class="skj-roll-dialog__note">{{localize "AOV_SKJALDBORG.RunicMagic.StateCarving" round=tracked.readyRound}}</p>
+    {{/if}}
+    {{#if isReady}}
+    <p class="skj-roll-dialog__note">{{localize "AOV_SKJALDBORG.RunicMagic.StateReady" script=tracked.itemName}}</p>
+    {{/if}}
+
+    {{#if showModeSelector}}
+    <div class="skj-roll-dialog__row skj-runic-magic-dialog__mode-row">
+      <label>{{localize "AOV_SKJALDBORG.RunicMagic.Mode"}}</label>
+      <div class="skj-roll-dialog__segments skj-runic-magic-dialog__mode">
+        <label class="skj-roll-dialog__segment">
+          <input type="radio" name="magicMode" value="runescript" {{#if selectedRuneMode}}checked{{/if}}>
+          <span>{{localize "AOV_SKJALDBORG.RunicMagic.RuneScripts"}}</span>
+        </label>
+        <label class="skj-roll-dialog__segment">
+          <input type="radio" name="magicMode" value="seidur" {{#if selectedSeidurMode}}checked{{/if}}>
+          <span>{{localize "AOV_SKJALDBORG.RunicMagic.Seidur"}}</span>
+        </label>
+      </div>
+    </div>
+    {{/if}}
+
+    {{#if hasRunescripts}}
+    <fieldset class="skj-roll-dialog__augment skj-runic-magic-dialog__panel" data-rune-panel {{#if selectedSeidurMode}}hidden{{/if}}>
+      <legend>{{localize "AOV_SKJALDBORG.RunicMagic.RuneScripts"}}</legend>
+      <label class="skj-roll-dialog__row skj-runic-magic-dialog__field">
+        <span>{{localize "AOV_SKJALDBORG.RunicMagic.RuneScript"}}</span>
+        <select name="runescriptId" class="skj-roll-dialog__select">
+          {{#each runescripts}}
+          <option value="{{id}}" data-rune-count="{{runeCount}}" data-prepared="{{#if prepared}}true{{else}}false{{/if}}" {{#if selected}}selected{{/if}}>
+            {{name}} - {{summary}}{{#if prepared}} ({{localize "AOV_SKJALDBORG.RunicMagic.PreparedShort"}}){{/if}}
+          </option>
+          {{/each}}
+        </select>
+      </label>
+      <label class="skj-roll-dialog__row skj-runic-magic-dialog__field skj-runic-magic-dialog__field--dex">
+        <span>{{localize "AOV_SKJALDBORG.RunicMagic.DexPenalty"}}</span>
+        <input type="number" name="dexPenalty" value="{{dexPenalty}}" min="1" step="1">
+      </label>
+    </fieldset>
+    {{/if}}
+
+    {{#if hasSeidurs}}
+    <fieldset class="skj-roll-dialog__augment skj-runic-magic-dialog__panel" data-seidur-panel {{#if selectedRuneMode}}hidden{{/if}}>
+      <legend>{{localize "AOV_SKJALDBORG.RunicMagic.Seidur"}}</legend>
+      <label class="skj-roll-dialog__row skj-runic-magic-dialog__field">
+        <span>{{localize "AOV_SKJALDBORG.RunicMagic.SeidurSpell"}}</span>
+        <select name="seidurId" class="skj-roll-dialog__select">
+          {{#each seidurs}}
+          <option value="{{id}}" {{#if selected}}selected{{/if}}>
+            {{name}} - {{summary}}{{#if prepared}} ({{localize "AOV_SKJALDBORG.RunicMagic.PreparedShort"}}){{/if}}
+          </option>
+          {{/each}}
+        </select>
+      </label>
+    </fieldset>
+    {{/if}}
+
+    <fieldset class="skj-roll-dialog__augment skj-runic-magic-dialog__panel skj-runic-magic-dialog__options-panel">
+      <legend>{{localize "AOV_SKJALDBORG.RunicMagic.Options"}}</legend>
+      <div class="skj-roll-dialog__segments skj-runic-magic-dialog__options">
+        <label class="skj-roll-dialog__segment" data-rune-only>
+          <input type="checkbox" name="prepared" {{#if preparedDefault}}checked{{/if}}>
+          <span>{{localize "AOV_SKJALDBORG.RunicMagic.Prepared"}}</span>
+        </label>
+        <label class="skj-roll-dialog__segment" data-rune-only>
+          <input type="checkbox" name="resistance">
+          <span>{{localize "AOV_SKJALDBORG.RunicMagic.Resistance"}}</span>
+        </label>
+        <label class="skj-roll-dialog__segment" data-rune-only>
+          <input type="checkbox" name="craftEnabled">
+          <span>{{localize "AOV_SKJALDBORG.RunicMagic.CraftRune"}}</span>
+        </label>
+        <label class="skj-roll-dialog__segment">
+          <input type="checkbox" name="customModifierEnabled" {{#if customModifierEnabled}}checked{{/if}}>
+          <span>{{localize "AOV_SKJALDBORG.RunicMagic.CustomModifier"}}</span>
+        </label>
+      </div>
+
+      <section class="skj-roll-dialog__details skj-runic-magic-dialog__details">
+        <p class="skj-roll-dialog__note is-warning skj-runic-magic-dialog__craft-warning" data-runic-detail="craft" data-requires-read-write-runes data-has-read-write-runes="{{#if hasReadWriteRunes}}true{{else}}false{{/if}}" hidden>
+          {{localize "AOV_SKJALDBORG.RunicMagic.ReadWriteRunesMissing"}}
+        </p>
+        <div class="skj-roll-dialog__detail skj-runic-magic-dialog__detail--craft" data-runic-detail="craft" hidden>
+          <label>{{localize "AOV_SKJALDBORG.RunicMagic.CraftSkill"}}</label>
+          <select name="craftMode" class="skj-roll-dialog__select">
+            {{#each craftChoices}}
+            <option value="{{mode}}" data-skill-id="{{skillId}}" {{#if selected}}selected{{/if}} {{#unless available}}disabled{{/unless}}>
+              {{name}}{{#if available}} ({{total}}%){{else}} - {{localize "AOV_SKJALDBORG.RunicMagic.Unavailable"}}{{/if}}
+            </option>
+            {{/each}}
+          </select>
+        </div>
+        <div class="skj-roll-dialog__detail skj-runic-magic-dialog__detail--craft" data-runic-detail="craft" data-custom-craft-target hidden>
+          <label>{{localize "AOV_SKJALDBORG.RunicMagic.CustomCraftTarget"}}</label>
+          <input type="number" name="customCraftTarget" min="1" max="100" step="1" value="{{customCraftTarget}}">
+        </div>
+        <div class="skj-roll-dialog__detail skj-roll-dialog__detail--custom skj-runic-magic-dialog__detail--custom" data-runic-detail="custom" {{#unless customModifierEnabled}}hidden{{/unless}}>
+          <label>{{localize "AOV_SKJALDBORG.RunicMagic.FlatMod"}}</label>
+          <input type="text" name="customModifierReason" value="{{customModifierReason}}" placeholder="{{localize "AOV_SKJALDBORG.AttackDialog.CustomReason"}}" />
+          <input type="number" name="flatMod" value="{{flatMod}}" step="1" />
+        </div>
+      </section>
+
+      <p class="skj-roll-dialog__note" data-rune-skill-note {{#if selectedSeidurMode}}hidden{{/if}}>{{localize "AOV_SKJALDBORG.RunicMagic.RuneSkill" skill=runeMagicSkillName}}</p>
+      <p class="skj-roll-dialog__note" data-seidur-skill-note {{#if selectedRuneMode}}hidden{{/if}}>{{localize "AOV_SKJALDBORG.RunicMagic.SeidurSkill" skill=seidurMagicSkillName}}</p>
+    </fieldset>
+
+    <div class="skj-roll-dialog__footer skj-runic-magic-dialog__footer">
+      <div class="skj-roll-dialog__summary">
+        <span>{{#if targets.hasTargets}}{{localize "AOV_SKJALDBORG.RunicMagic.Targets" targets=targets.targetNames}}{{else}}{{localize "AOV_SKJALDBORG.RunicMagic.Unopposed"}}{{/if}}</span>
+      </div>
+      <button type="button" class="skj-roll-dialog__action" data-action="runicMagicSubmit" {{#unless hasMagic}}disabled{{/unless}}>
+        {{localize "AOV_SKJALDBORG.RunicMagic.Submit"}}
+      </button>
+    </div>
+  </section>
+</div>

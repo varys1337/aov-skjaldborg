@@ -1,11 +1,23 @@
-import { ACTION_CATEGORIES, INTENT_STATUS, MODULE_ID } from "../constants.mjs";
+import {
+  ACTION_CATEGORIES,
+  DISENGAGING_STATUS_ID,
+  ENGAGED_STATUS_ID,
+  EVADING_STATUS_ID,
+  GRAPPLED_STATUS_ID,
+  IMMOBILIZED_STATUS_ID,
+  IMPALED_STATUS_ID,
+  INJURY_STATUS_ID,
+  INTENT_STATUS,
+  MODULE_ID,
+  UTILITY_ACTION_ID
+} from "../constants.mjs";
 import { AoVAdapter } from "../adapter/aov-adapter.mjs";
 import { getCombatState, getCombatantState } from "../combat/state.mjs";
-import { error } from "../logger.mjs";
+import { debug, error } from "../logger.mjs";
 import { requestGm } from "../socket.mjs";
-import { clearReadiedWeapon, getReadiedWeaponId, prepareReadiedWeaponState, setReadiedWeapon } from "../combat/weapon-state.mjs";
+import { clearReadiedWeapon, clearReadiedWeaponInHand, getReadiedWeaponIds, prepareReadiedWeaponState, setReadiedWeaponInHand } from "../combat/weapon-state.mjs";
 import { createModuleChatMessage } from "../compat/chat-message.mjs";
-import { CombatHUD } from "./combat-hud.mjs";
+import { effectHasStatus, effectParentActor, hotbarVisibleEffects, moduleFlag, openEffectSheet } from "../compat/active-effects.mjs";
 import { performanceDiagnostics, measureAsync } from "../performance/performance-monitor.mjs";
 import { RenderCoordinator } from "../ui/render-coordinator.mjs";
 import { PresentationCache } from "../ui/presentation-cache.mjs";
@@ -15,15 +27,19 @@ import {
   actorHotbarPartsForCombatChange,
   actorHotbarPartsForItemChange
 } from "../utils/changed-paths.mjs";
+import { handleCommitInputKeydown } from "../ui/dom-utils.mjs";
+import { reactionPenaltyForCount } from "../combat/reaction-penalty-effects.mjs";
 import {
   ACTOR_HOTBAR_QUICK_SLOT_CAPACITY,
   commitIntentCategory,
   cycleActorEquipmentStatus,
   executeActorItem,
   executeActorStat,
+  executeEvadeIntent,
   executeMacro,
   getActorPreparedIntent,
   getQuickAccessCircleCount,
+  invalidateActorItemSnapshot,
   isSkjaldborgCombatActive,
   openActorItem,
   persistActionOrder,
@@ -34,10 +50,10 @@ import {
   prepareActorHistoryFamily,
   prepareActorStats,
   prepareIntentActions,
-  promptOtherIntentText,
   resolveActorCombatant,
   resolveActorToken,
   resolveHotbarActor,
+  toggleIntentCategory,
   toggleActorItemXpCheck,
   updateActorEquipmentQuantity,
   updateActorWeaponHitPoints
@@ -68,6 +84,47 @@ const EXPLICIT_HOTBAR_DOCKS = new Set([
 const HOTBAR_DOCK_DRAG_THRESHOLD = 7;
 const HOTBAR_VIEWPORT_MARGIN = 8;
 const HOTBAR_MIN_RESPONSIVE_ACTION_WIDTH = 180;
+const HOTBAR_PARTS = Object.freeze({
+  SHELL: "shell"
+});
+const HOTBAR_REGIONS = Object.freeze({
+  RESOURCES: "resources",
+  PORTRAIT_QUICK_ACCESS: "portraitQuickAccess",
+  HEADER_EFFECTS: "headerEffects",
+  COMBAT_WORKFLOW: "combatWorkflow",
+  TAB_BODY: "tabBody"
+});
+const HOTBAR_RENDER_REGIONS = new Set(Object.values(HOTBAR_REGIONS));
+const HOTBAR_TAB_BODY_CATEGORIES = new Set([
+  "equipment",
+  "historyFamily",
+  "magic",
+  "macros",
+  "skills",
+  "stats",
+  "wellbeing"
+]);
+const HOTBAR_REGION_TEMPLATES = Object.freeze({
+  [HOTBAR_REGIONS.RESOURCES]: "modules/aov-skjaldborg/templates/actor-hotbar/resources.hbs",
+  [HOTBAR_REGIONS.PORTRAIT_QUICK_ACCESS]: "modules/aov-skjaldborg/templates/actor-hotbar/portrait-quick-access.hbs",
+  [HOTBAR_REGIONS.HEADER_EFFECTS]: "modules/aov-skjaldborg/templates/actor-hotbar/header-effects.hbs",
+  [HOTBAR_REGIONS.COMBAT_WORKFLOW]: "modules/aov-skjaldborg/templates/actor-hotbar/combat-workflow.hbs",
+  [HOTBAR_REGIONS.TAB_BODY]: "modules/aov-skjaldborg/templates/actor-hotbar/tab-body.hbs"
+});
+const HOTBAR_TEMPLATE_PATHS = Object.freeze([
+  "modules/aov-skjaldborg/templates/actor-hotbar.hbs",
+  ...Object.values(HOTBAR_REGION_TEMPLATES),
+  "modules/aov-skjaldborg/templates/actor-hotbar/equipment-controls.hbs"
+]);
+
+function intentDisplayLabel(category, publicText = "") {
+  const normalizedCategory = Object.values(ACTION_CATEGORIES).includes(category)
+    ? category
+    : ACTION_CATEGORIES.ATTACK;
+  const customText = String(publicText ?? "").trim();
+  if (normalizedCategory === ACTION_CATEGORIES.OTHER && customText) return customText;
+  return game.i18n.localize(`AOV_SKJALDBORG.ActionCategories.${normalizedCategory}`);
+}
 
 /**
  * Calculate a single-circle portrait layout for six through twelve slots.
@@ -215,6 +272,24 @@ function localizeMagicType(itemType) {
   return localized === key ? itemType : localized;
 }
 
+function measureHotbarContextPart(part, build) {
+  const measureId = performanceDiagnostics.markStart(`actorHotbar.context.${part}`);
+  try {
+    return build();
+  } finally {
+    performanceDiagnostics.markEnd(measureId, { part });
+  }
+}
+
+async function measureHotbarContextPartAsync(part, build) {
+  const measureId = performanceDiagnostics.markStart(`actorHotbar.context.${part}`);
+  try {
+    return await build();
+  } finally {
+    performanceDiagnostics.markEnd(measureId, { part });
+  }
+}
+
 /**
  * Lazy-load the Attack Roll dialog only when the Attack intent is invoked.
  *
@@ -225,6 +300,61 @@ async function openAttackRollDialog(context) {
   return measureAsync("attackDialog.open", async () => {
     const { AttackRollDialog } = await import("./attack-roll-dialog.mjs");
     return AttackRollDialog.show(context);
+  });
+}
+
+/**
+ * Lazy-load the Missile Roll dialog only when the Missile intent is invoked.
+ *
+ * @param {object} context Dialog context.
+ * @returns {Promise<unknown>}
+ */
+async function openMissileRollDialog(context) {
+  return measureAsync("missileDialog.open", async () => {
+    const { MissileRollDialog } = await import("./missile-roll-dialog.mjs");
+    return MissileRollDialog.show(context);
+  });
+}
+
+async function openDisengageDialog(context) {
+  return measureAsync("disengageDialog.open", async () => {
+    const { DisengageDialog } = await import("./disengage-dialog.mjs");
+    return DisengageDialog.show(context);
+  });
+}
+
+async function openKnockbackRollDialog(context) {
+  return measureAsync("knockbackDialog.open", async () => {
+    const { KnockbackRollDialog } = await import("./knockback-roll-dialog.mjs");
+    return KnockbackRollDialog.show(context);
+  });
+}
+
+async function openGrappleRollDialog(context) {
+  return measureAsync("grappleDialog.open", async () => {
+    const { GrappleRollDialog } = await import("./grapple-roll-dialog.mjs");
+    return GrappleRollDialog.show(context);
+  });
+}
+
+async function openDelayDialog(context) {
+  return measureAsync("delayDialog.open", async () => {
+    const { DelayDialog } = await import("./delay-dialog.mjs");
+    return DelayDialog.show(context);
+  });
+}
+
+async function openUtilityDialog(context) {
+  return measureAsync("utilityDialog.open", async () => {
+    const { UtilityDialog } = await import("./utility-dialog.mjs");
+    return UtilityDialog.show(context);
+  });
+}
+
+async function openRunicMagicDialog(context) {
+  return measureAsync("runicMagicDialog.open", async () => {
+    const { RunicMagicDialog } = await import("./runic-magic-dialog.mjs");
+    return RunicMagicDialog.show(context);
   });
 }
 
@@ -336,6 +466,8 @@ function prepareNamedGroups(actions, type) {
  */
 export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
   static current = null;
+  static #templatesLoaded = null;
+  static #renderQueue = Promise.resolve();
 
   static DEFAULT_OPTIONS = {
     id: "aov-skjaldborg-actor-hotbar",
@@ -347,7 +479,6 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
       activate: ActorHotbar.onActivate,
       incrementReaction: ActorHotbar.onIncrementReaction,
       openActor: ActorHotbar.onOpenActor,
-      openCombatHud: ActorHotbar.onOpenCombatHud,
       createWound: ActorHotbar.onCreateWound,
       deleteWound: ActorHotbar.onDeleteWound,
       openEquipment: ActorHotbar.onOpenEquipment,
@@ -367,7 +498,7 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
   };
 
   static PARTS = {
-    hotbar: {
+    [HOTBAR_PARTS.SHELL]: {
       template: "modules/aov-skjaldborg/templates/actor-hotbar.hbs"
     }
   };
@@ -410,8 +541,26 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
     this._xpUpdatePending = false;
     this._magicPreparationUpdatesPending = new Set();
     this._reactionUpdateQueue = Promise.resolve();
+    this._delegatedControlsAbort = null;
+    this._delegatedControlsRoot = null;
+    this._intentUpdatePending = false;
     this._scrollPositions = new Map();
     this._renderedActorKey = null;
+  }
+
+  /**
+   * Preload the hotbar shell and nested partial templates before first render.
+   *
+   * @returns {Promise<void>}
+   */
+  static async preloadTemplates() {
+    if (!this.#templatesLoaded) {
+      const loadTemplates = foundry.applications?.handlebars?.loadTemplates;
+      this.#templatesLoaded = typeof loadTemplates === "function"
+        ? loadTemplates(HOTBAR_TEMPLATE_PATHS)
+        : Promise.resolve();
+    }
+    await this.#templatesLoaded;
   }
 
   /**
@@ -419,19 +568,48 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
    *
    * @returns {Promise<ActorHotbar|null>}
    */
-  static async ensureRendered() {
+  static async ensureRendered(renderOptions = {}) {
+    return this.#enqueueRender(() => this.#ensureRenderedNow(renderOptions));
+  }
+
+  /**
+   * Serialize one hotbar render or internal refresh operation.
+   *
+   * @param {Function} operation Operation to execute after prior render work.
+   * @returns {Promise<unknown>}
+   */
+  static #enqueueRender(operation) {
+    const nextRender = this.#renderQueue
+      .catch(() => null)
+      .then(operation);
+    this.#renderQueue = nextRender.catch(() => null);
+    return nextRender;
+  }
+
+  /**
+   * Render the singleton after any previous hotbar render has settled.
+   *
+   * @param {object} [renderOptions={}] AppV2 render options.
+   * @returns {Promise<ActorHotbar|null>}
+   */
+  static async #ensureRenderedNow(renderOptions = {}) {
     if (!game.settings.get(MODULE_ID, "enableActorHotbar")) {
-      await this.closeCurrent();
+      await this.#closeCurrentNow();
       return null;
     }
 
     if (!resolveHotbarActor()) {
-      await this.closeCurrent();
+      await this.#closeCurrentNow();
       return null;
     }
 
+    if (this.current?.rendered && !this.#currentElement()?.isConnected) await this.#closeCurrentNow();
     if (!this.current) this.current = new ActorHotbar();
-    await this.current.render(!this.current.rendered);
+    this.pruneStaleRoots(this.#currentElement());
+    await this.preloadTemplates();
+    const force = renderOptions.force === true || renderOptions.full === true || !this.current.rendered;
+    if (force) await this.current.render({ ...renderOptions, force: true, parts: [HOTBAR_PARTS.SHELL] });
+    this.pruneStaleRoots(this.#currentElement());
     return this.current;
   }
 
@@ -453,18 +631,71 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
   }
 
   /**
-   * Render the hotbar after the shared render coordinator flushes.
-   *
-   * AppV2 part-aware invalidation is preserved in the detail payload for
-   * diagnostics and future part splitting. Unknown or shell-affecting changes
-   * continue to use a full safe render.
+   * Render or internally refresh the hotbar after the coordinator flushes.
    *
    * @param {object} [detail={}] Merged invalidation detail.
    * @returns {Promise<ActorHotbar|null>}
    */
   static async renderInvalidated(detail = {}) {
     performanceDiagnostics.count("actorHotbar.render.request", 1, detail);
-    return performanceDiagnostics.measureAsync("actorHotbar.render.complete", () => this.ensureRendered(), () => detail);
+    const parts = new Set(detail.parts ?? []);
+    const regions = this._regionsForInvalidation(parts);
+    const full = detail.full === true
+      || parts.has(HOTBAR_PARTS.SHELL)
+      || parts.has("portrait")
+      || !parts.size
+      || (!regions.size && parts.size > 0);
+    performanceDiagnostics.count(full ? "actorHotbar.render.fullRequest" : "actorHotbar.render.targetedRequest", 1, {
+      parts: Array.from(parts),
+      regions,
+      reason: detail.reason ?? null
+    });
+    return performanceDiagnostics.measureAsync(
+      "actorHotbar.render.complete",
+      () => this.#enqueueRender(async () => {
+        if (full) return this.#ensureRenderedNow({ full: true });
+        const current = await this.#ensureRenderedNow();
+        if (!current) return null;
+        await current.refreshRegions(regions, detail);
+        return current;
+      }),
+      () => ({ ...detail, regions })
+    );
+  }
+
+  /**
+   * Convert invalidation categories into non-overlapping internal hotbar regions.
+   *
+   * @param {Set<string>} parts Invalidation parts and cache categories.
+   * @returns {string[]} Renderable internal hotbar regions.
+   */
+  static _regionsForInvalidation(parts) {
+    const regions = new Set();
+    for (const part of parts) {
+      if (part === "quickAccess") {
+        regions.add(HOTBAR_REGIONS.PORTRAIT_QUICK_ACCESS);
+        continue;
+      }
+      if (part === "effects") {
+        regions.add(HOTBAR_REGIONS.HEADER_EFFECTS);
+        continue;
+      }
+      if (part === "workflow" || part === "weaponControls" || part === "equipmentControls") {
+        regions.add(HOTBAR_REGIONS.COMBAT_WORKFLOW);
+        continue;
+      }
+      if (part === "resources") {
+        regions.add(HOTBAR_REGIONS.RESOURCES);
+        continue;
+      }
+      if (HOTBAR_TAB_BODY_CATEGORIES.has(part)) {
+        regions.add(HOTBAR_REGIONS.TAB_BODY);
+        continue;
+      }
+      if (HOTBAR_RENDER_REGIONS.has(part)) regions.add(part);
+    }
+    if (regions.has(HOTBAR_REGIONS.TAB_BODY)) regions.delete(HOTBAR_REGIONS.COMBAT_WORKFLOW);
+    return Array.from(regions);
   }
 
   /**
@@ -473,10 +704,57 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
    * @returns {Promise<void>}
    */
   static async closeCurrent() {
+    return this.#enqueueRender(() => this.#closeCurrentNow());
+  }
+
+  /**
+   * Close the current singleton without enqueueing another render operation.
+   *
+   * @returns {Promise<void>}
+   */
+  static async #closeCurrentNow() {
     const current = this.current;
     this.current = null;
     document.querySelector("#hotbar")?.classList.remove("skj-core-hotbar-hidden");
     if (current?.rendered) await current.close({ animate: false });
+    this.pruneStaleRoots(null);
+  }
+
+  /**
+   * Return the currently rendered root when AppV2 exposes one.
+   *
+   * @returns {HTMLElement|null}
+   */
+  static #currentElement() {
+    try {
+      const element = this.current?.element ?? null;
+      return element instanceof HTMLElement ? element : null;
+    } catch (_exception) {
+      return null;
+    }
+  }
+
+  /**
+   * Remove stale frame-less hotbar roots left behind by overlapping renders.
+   *
+   * @param {HTMLElement|null} [currentElement=null] Root that must be preserved.
+   * @returns {number} Number of removed roots.
+   */
+  static pruneStaleRoots(currentElement = null) {
+    if (typeof document === "undefined") return 0;
+    const currentRoot = currentElement instanceof HTMLElement ? currentElement : null;
+    const roots = new Set([
+      ...document.querySelectorAll("#aov-skjaldborg-actor-hotbar"),
+      ...document.querySelectorAll(".skj-actor-hotbar.application")
+    ]);
+    let removed = 0;
+    for (const root of roots) {
+      if (!(root instanceof HTMLElement) || root === currentRoot) continue;
+      root.remove();
+      removed += 1;
+    }
+    if (removed) performanceDiagnostics.count("actorHotbar.dom.staleRootsPruned", removed, { removed });
+    return removed;
   }
 
   /**
@@ -502,94 +780,357 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
   _insertElement(element) {
     // Keep the overlay independent from the core hotbar/sidebar layout. Its
     // viewport-fixed position is managed explicitly through setPosition().
+    ActorHotbar.pruneStaleRoots(element);
     document.body.append(element);
+    ActorHotbar.pruneStaleRoots(element);
+  }
+
+  /** @inheritdoc */
+  _configureRenderOptions(options) {
+    super._configureRenderOptions(options);
+    options.parts = [HOTBAR_PARTS.SHELL];
   }
 
   /** @inheritdoc */
   async _prepareContext(options) {
     const measureId = performanceDiagnostics.markStart("actorHotbar.context");
     try {
-    const context = await super._prepareContext(options);
-    this.actor = resolveHotbarActor();
-    this.combatant = resolveActorCombatant(this.actor, game.combat);
-    if (!this.actor) return { ...context, actor: null };
+      const context = await super._prepareContext(options);
+      this.actor = resolveHotbarActor();
+      this.combatant = resolveActorCombatant(this.actor, game.combat);
+      if (!this.actor) return { ...context, actor: null };
+      return {
+        ...context,
+        ...this._prepareActorIdentityContext(),
+        collapsed: !!game.settings.get(MODULE_ID, "actorHotbarCollapsed"),
+        dock: this._hotbarDock
+      };
+    } finally {
+      performanceDiagnostics.markEnd(measureId, {
+        actorId: this.actor?.id ?? null,
+        combatantId: this.combatant?.id ?? null,
+        parts: options.parts ?? []
+      });
+    }
+  }
 
-    const prepared = PresentationCache.get(this.actor, "actions", () => prepareActorActions(this.actor));
-    const combat = game.combat ?? null;
-    const workflowActive = isSkjaldborgCombatActive(combat) && !!this.combatant;
-    const canControlCombatant = this.combatant
-      ? AoVAdapter.canUserControlCombatant(game.user, this.combatant)
-      : false;
-    const canDeclareIntent = this.actor.isOwner && (!this.combatant || canControlCombatant);
-    const combatantState = this.combatant ? getCombatantState(this.combatant) : null;
-    const combatState = workflowActive ? getCombatState(combat) : null;
-    const preparedIntent = getActorPreparedIntent(this.actor);
-    const committedIntent = workflowActive
-      && [INTENT_STATUS.COMMITTED, INTENT_STATUS.HELD].includes(combatantState?.intent?.status);
-    const displayedIntent = committedIntent ? combatantState.intent : preparedIntent;
-    const intentActions = canDeclareIntent
-      ? prepareIntentActions({
-        selectedCategory: displayedIntent?.actionCategory ?? null,
-        otherText: displayedIntent?.publicText ?? ""
-      })
-      : [];
-    const showMacroTab = game.settings.get(MODULE_ID, "replaceCoreHotbar");
-    const equipmentGroups = PresentationCache.get(this.actor, "equipment", () => prepareActorEquipment(this.actor));
-    const weaponState = PresentationCache.get(this.actor, "weapons", () => prepareReadiedWeaponState(this.actor));
-    const canManageWeapons = this.actor.isOwner
-      && (!this.combatant || AoVAdapter.canUserControlCombatant(game.user, this.combatant));
-    const showEquipTab = equipmentGroups.length > 0;
-    const historyFamily = await PresentationCache.getAsync(this.actor, "historyFamily", () => prepareActorHistoryFamily(this.actor));
-    const showHistoryFamilyTab = this.actor.type === "character" || historyFamily.hasContent;
-    const wellbeing = AoVAdapter.prepareActorWellbeing(this.actor);
-    const showWellbeingTab = wellbeing.supported;
-    const magicGroups = PresentationCache.get(this.actor, "magic", () => prepareNamedGroups(prepared.magic, "magic"));
-    const showMagicTab = magicGroups.length > 0;
-    const resources = await this._prepareResources();
+  /** @inheritdoc */
+  async _preparePartContext(partId, context, options) {
+    context = await super._preparePartContext(partId, context, options);
+    if (!this.actor) return context;
+    const measureId = performanceDiagnostics.markStart(`actorHotbar.part.${partId}`);
+    try {
+      if (partId === HOTBAR_PARTS.SHELL) return this._prepareShellPartContext(context);
+      return context;
+    } finally {
+      performanceDiagnostics.markEnd(measureId, {
+        part: partId,
+        actorId: this.actor?.id ?? null,
+        combatantId: this.combatant?.id ?? null
+      });
+    }
+  }
 
-    const activeTab = this.tabGroups?.sheet;
-    const hiddenActiveTab = (!showMacroTab && activeTab === "macros")
-      || (!showEquipTab && activeTab === "equip")
-      || (!showMagicTab && activeTab === "magic")
-      || (!showWellbeingTab && activeTab === "wellbeing")
-      || (!showHistoryFamilyTab && activeTab === "historyFamily");
-    if (hiddenActiveTab) {
-      this.tabGroups.sheet = "combat";
-      context.tabs[activeTab].cssClass = context.tabs[activeTab].cssClass.replace("active", "").trim();
-      context.tabs.combat.cssClass = [context.tabs.combat.cssClass, "active"].filter(Boolean).join(" ");
+  /**
+   * Refresh non-overlapping internal hotbar regions without invoking AppV2 part rendering.
+   *
+   * @param {string[]} regions Internal region ids.
+   * @param {object} [detail={}] Invalidation detail for diagnostics.
+   * @returns {Promise<boolean>} Whether the targeted refresh completed.
+   */
+  async refreshRegions(regions, detail = {}) {
+    const requested = new Set(regions ?? []);
+    if (!this.rendered || !this.element || !requested.size) return false;
+    if (!this.actor) {
+      await ActorHotbar.#ensureRenderedNow({ full: true });
+      return false;
     }
 
-    const statGroups = PresentationCache.get(this.actor, "stats", () => prepareActorStats(this.actor));
-    const skillGroups = PresentationCache.get(this.actor, "skills", () => prepareNamedGroups(prepared.skills, "skills"));
-    const macroSlots = showMacroTab ? this._prepareMacroSlots() : [];
-    const quickAccess = this._prepareQuickAccessSlots({
-      prepared,
-      statGroups
+    this._captureScrollPositions();
+    const baseContext = await this._prepareContext({
+      parts: [HOTBAR_PARTS.SHELL],
+      regions: Array.from(requested)
     });
+    if (!baseContext.actor) {
+      await ActorHotbar.#ensureRenderedNow({ full: true });
+      return false;
+    }
 
+    for (const region of requested) {
+      const template = HOTBAR_REGION_TEMPLATES[region];
+      if (!template) {
+        await ActorHotbar.#ensureRenderedNow({ full: true });
+        return false;
+      }
+      const current = this._currentRegionElement(region);
+      if (!(current instanceof HTMLElement)) {
+        await ActorHotbar.#ensureRenderedNow({ full: true });
+        return false;
+      }
+
+      const context = await this._prepareRegionContext(region, baseContext);
+      const html = await foundry.applications.handlebars.renderTemplate(template, context);
+      const replacement = this._regionElementFromHtml(html);
+      if (!(replacement instanceof HTMLElement)) {
+        await ActorHotbar.#ensureRenderedNow({ full: true });
+        return false;
+      }
+
+      current.replaceWith(replacement);
+      performanceDiagnostics.count("actorHotbar.region.replace", 1, {
+        region,
+        reason: detail.reason ?? null
+      });
+    }
+
+    ActorHotbar.pruneStaleRoots(this.element);
+    this._syncRenderedWeaponControls();
+    this._restoreScrollPositions();
+    this._assertHotbarInvariants();
+    return true;
+  }
+
+  /**
+   * Prepare a render context for a single internal region.
+   *
+   * @param {string} region Internal region id.
+   * @param {object} context Base render context.
+   * @returns {Promise<object>}
+   */
+  async _prepareRegionContext(region, context) {
+    const measureId = performanceDiagnostics.markStart(`actorHotbar.region.${region}`);
+    try {
+      if (region === HOTBAR_REGIONS.RESOURCES) return await this._prepareResourcesPartContext(context);
+      if (region === HOTBAR_REGIONS.PORTRAIT_QUICK_ACCESS) return this._preparePortraitQuickAccessPartContext(context);
+      if (region === HOTBAR_REGIONS.HEADER_EFFECTS) return this._prepareHeaderEffectsPartContext(context);
+      if (region === HOTBAR_REGIONS.COMBAT_WORKFLOW) return this._prepareCombatWorkflowPartContext(context);
+      if (region === HOTBAR_REGIONS.TAB_BODY) return await this._prepareTabBodyPartContext(context);
+      return context;
+    } finally {
+      performanceDiagnostics.markEnd(measureId, {
+        region,
+        actorId: this.actor?.id ?? null,
+        combatantId: this.combatant?.id ?? null
+      });
+    }
+  }
+
+  /**
+   * Resolve the current DOM root for one internal hotbar region.
+   *
+   * @param {string} region Internal region id.
+   * @returns {HTMLElement|null}
+   */
+  _currentRegionElement(region) {
+    const selector = `[data-hotbar-region="${region}"], [data-hotbar-part="${region}"]`;
+    const element = this.element?.querySelector?.(selector);
+    return element instanceof HTMLElement ? element : null;
+  }
+
+  /**
+   * Convert rendered region HTML into exactly one element.
+   *
+   * @param {string|HTMLElement|HTMLElement[]} html Rendered region output.
+   * @returns {HTMLElement|null}
+   */
+  _regionElementFromHtml(html) {
+    if (html instanceof HTMLElement) return html;
+    if (Array.isArray(html) && html[0] instanceof HTMLElement) return html[0];
+    const template = document.createElement("template");
+    template.innerHTML = String(html ?? "").trim();
+    const element = template.content.firstElementChild;
+    return element instanceof HTMLElement ? element : null;
+  }
+
+  /**
+   * Emit debug-only structural counts for the singleton and nested workflow UI.
+   *
+   * @returns {void}
+   */
+  _assertHotbarInvariants() {
+    if (!game.settings.get(MODULE_ID, "debug")) return;
+    const rootCount = document.querySelectorAll("#aov-skjaldborg-actor-hotbar").length;
+    const combatStageCount = this.element?.querySelectorAll?.(".skj-combat-stage").length ?? 0;
+    const weaponControlCount = this.element?.querySelectorAll?.(".skj-weapon-control-stack").length ?? 0;
+    if (rootCount === 1 && combatStageCount <= 1 && weaponControlCount <= 1) return;
+    debug("Actor hotbar invariant check failed.", {
+      roots: rootCount,
+      combatStages: combatStageCount,
+      weaponControls: weaponControlCount
+    });
+  }
+
+  /**
+   * Prepare stable actor identity fields shared by every hotbar part.
+   *
+   * @returns {object}
+   */
+  _prepareActorIdentityContext() {
     return {
-      ...context,
       actor: {
         id: this.actor.id,
         uuid: this.actor.uuid,
         name: this.actor.name,
         img: this.actor.img
-      },
+      }
+    };
+  }
+
+  /**
+   * Prepare all data needed by the full hotbar shell.
+   *
+   * @param {object} context Base render context.
+   * @returns {Promise<object>}
+   */
+  async _prepareShellPartContext(context) {
+    return this._prepareTabBodyPartContext(
+      this._prepareHeaderEffectsPartContext(
+        await this._prepareResourcesPartContext(
+          this._preparePortraitQuickAccessPartContext(context)
+        )
+      )
+    );
+  }
+
+  /**
+   * Prepare only the resource pill data.
+   *
+   * @param {object} context Base render context.
+   * @returns {Promise<object>}
+   */
+  async _prepareResourcesPartContext(context) {
+    const resources = await measureHotbarContextPartAsync("resources", () => this._prepareResources());
+    return {
+      ...context,
       resources,
-      singleResource: resources.length === 1,
+      singleResource: resources.length === 1
+    };
+  }
+
+  /**
+   * Prepare quick-access portrait data.
+   *
+   * @param {object} context Base render context.
+   * @returns {object}
+   */
+  _preparePortraitQuickAccessPartContext(context) {
+    const prepared = measureHotbarContextPart("actions", () =>
+      PresentationCache.get(this.actor, "actions", () => prepareActorActions(this.actor))
+    );
+    const statGroups = measureHotbarContextPart("stats", () =>
+      PresentationCache.get(this.actor, "stats", () => prepareActorStats(this.actor))
+    );
+    const quickAccess = measureHotbarContextPart("quickAccess", () => this._prepareQuickAccessSlots({
+      prepared,
+      statGroups
+    }));
+    const combatData = this._prepareCombatData();
+    return {
+      ...context,
       quickAccessSlots: quickAccess.slots,
       quickAccessStageSize: quickAccess.stageSize,
-      effects: this._prepareEffects(),
+      workflow: this._prepareWorkflow(combatData.combat, combatData.combatState, combatData.combatantState)
+    };
+  }
+
+  /**
+   * Prepare active effect icons.
+   *
+   * @param {object} context Base render context.
+   * @returns {object}
+   */
+  _prepareHeaderEffectsPartContext(context) {
+    return {
+      ...context,
+      effects: measureHotbarContextPart("effects", () => this._prepareEffects())
+    };
+  }
+
+  /**
+   * Prepare intent and workflow controls.
+   *
+   * @param {object} context Base render context.
+   * @returns {object}
+   */
+  _prepareCombatWorkflowPartContext(context) {
+    const combatData = this._prepareCombatData();
+    const intentActions = this._prepareIntentActions(combatData);
+    return {
+      ...this._prepareEquipmentControlsPartContext(context),
       combatActions: intentActions,
+      workflow: this._prepareWorkflow(combatData.combat, combatData.combatState, combatData.combatantState),
+      hasCombatActions: intentActions.length > 0
+    };
+  }
+
+  /**
+   * Prepare compact weapon controls.
+   *
+   * @param {object} context Base render context.
+   * @returns {object}
+   */
+  _prepareEquipmentControlsPartContext(context) {
+    const combatData = this._prepareCombatData();
+    const weaponState = measureHotbarContextPart("weapons", () =>
+      PresentationCache.get(this.actor, "weapons", () => prepareReadiedWeaponState(this.actor))
+    );
+    return {
+      ...context,
       weaponState: {
         ...weaponState,
-        currentLabel: weaponState.name || game.i18n.localize("AOV_SKJALDBORG.Weapons.None"),
-        canManage: canManageWeapons,
-        canRoll: canManageWeapons && weaponState.carriedWeapons.length > 0,
-        selectedIsReadied: !!weaponState.id && weaponState.carriedWeapons.some(weapon => weapon.selected && weapon.id === weaponState.id),
-        toggleDisabled: !canManageWeapons || !weaponState.canDraw,
-        dropDisabled: !canManageWeapons || !weaponState.canSheathe
-      },
+        currentLabel: weaponState.names?.length
+          ? weaponState.names.join(", ")
+          : game.i18n.localize("AOV_SKJALDBORG.Weapons.None"),
+        canManage: combatData.canManageWeapons,
+        canRoll: combatData.canManageWeapons && weaponState.carriedWeapons.length > 0,
+        selectedIsReadied: weaponState.carriedWeapons.some(weapon => weapon.selected && weapon.readied),
+        toggleDisabled: !combatData.canManageWeapons || !weaponState.canDraw,
+        dropDisabled: !combatData.canManageWeapons || !weaponState.canSheathe
+      }
+    };
+  }
+
+  /**
+   * Prepare the tab panels and tab availability.
+   *
+   * @param {object} context Base render context.
+   * @returns {Promise<object>}
+   */
+  async _prepareTabBodyPartContext(context) {
+    const prepared = measureHotbarContextPart("actions", () =>
+      PresentationCache.get(this.actor, "actions", () => prepareActorActions(this.actor))
+    );
+    const showMacroTab = game.settings.get(MODULE_ID, "replaceCoreHotbar");
+    const equipmentGroups = measureHotbarContextPart("equipment", () =>
+      PresentationCache.get(this.actor, "equipment", () => prepareActorEquipment(this.actor))
+    );
+    const showEquipTab = equipmentGroups.length > 0;
+    const historyFamily = await measureHotbarContextPartAsync("historyFamily", () =>
+      PresentationCache.getAsync(this.actor, "historyFamily", () => prepareActorHistoryFamily(this.actor))
+    );
+    const showHistoryFamilyTab = this.actor.type === "character" || historyFamily.hasContent;
+    const wellbeing = measureHotbarContextPart("wellbeing", () => AoVAdapter.prepareActorWellbeing(this.actor));
+    const showWellbeingTab = wellbeing.supported;
+    const magicGroups = measureHotbarContextPart("magic", () =>
+      PresentationCache.get(this.actor, "magic", () => prepareNamedGroups(prepared.magic, "magic"))
+    );
+    const showMagicTab = magicGroups.length > 0;
+    this._ensureVisibleTab(context, {
+      showMacroTab,
+      showEquipTab,
+      showMagicTab,
+      showWellbeingTab,
+      showHistoryFamilyTab
+    });
+    const statGroups = measureHotbarContextPart("stats", () =>
+      PresentationCache.get(this.actor, "stats", () => prepareActorStats(this.actor))
+    );
+    const skillGroups = measureHotbarContextPart("skills", () =>
+      PresentationCache.get(this.actor, "skills", () => prepareNamedGroups(prepared.skills, "skills"))
+    );
+    const macroSlots = showMacroTab ? measureHotbarContextPart("macros", () => this._prepareMacroSlots()) : [];
+    return {
+      ...this._prepareCombatWorkflowPartContext(context),
       statGroups,
       skillGroups,
       magicGroups,
@@ -602,21 +1143,77 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
       showMagicTab,
       showWellbeingTab,
       showHistoryFamilyTab,
-      workflow: this._prepareWorkflow(combat, combatState, combatantState),
-      hasCombatActions: intentActions.length > 0,
       hasStatActions: statGroups.length > 0,
       hasSkillActions: skillGroups.length > 0,
       hasMagicActions: magicGroups.length > 0,
       hasEquipment: equipmentGroups.length > 0,
-      hasHistoryFamily: historyFamily.hasDisplayContent,
-      collapsed: !!game.settings.get(MODULE_ID, "actorHotbarCollapsed"),
-      dock: this._hotbarDock
+      hasHistoryFamily: historyFamily.hasDisplayContent
     };
-    } finally {
-      performanceDiagnostics.markEnd(measureId, {
-        actorId: this.actor?.id ?? null,
-        combatantId: this.combatant?.id ?? null
-      });
+  }
+
+  /**
+   * Resolve combat values shared by workflow and weapon-control context.
+   *
+   * @returns {object}
+   */
+  _prepareCombatData() {
+    const combat = game.combat ?? null;
+    const workflowActive = isSkjaldborgCombatActive(combat) && !!this.combatant;
+    const canControlCombatant = this.combatant
+      ? AoVAdapter.canUserControlCombatant(game.user, this.combatant)
+      : false;
+    const combatantState = this.combatant ? getCombatantState(this.combatant) : null;
+    const combatState = workflowActive ? getCombatState(combat) : null;
+    return {
+      combat,
+      workflowActive,
+      canControlCombatant,
+      canDeclareIntent: this.actor.isOwner && (!this.combatant || canControlCombatant),
+      canManageWeapons: this.actor.isOwner && (!this.combatant || canControlCombatant),
+      combatantState,
+      combatState
+    };
+  }
+
+  /**
+   * Prepare intent controls from current prepared or committed intent state.
+   *
+   * @param {object} combatData Shared combat values.
+   * @returns {object[]}
+   */
+  _prepareIntentActions(combatData) {
+    if (!combatData.canDeclareIntent) return [];
+    const preparedIntent = getActorPreparedIntent(this.actor);
+    const committedIntent = combatData.workflowActive
+      && [INTENT_STATUS.COMMITTED, INTENT_STATUS.HELD].includes(combatData.combatantState?.intent?.status);
+    const displayedIntent = committedIntent ? combatData.combatantState.intent : preparedIntent;
+    return prepareIntentActions({
+      selectedCategory: displayedIntent?.actionCategory ?? null,
+      otherText: displayedIntent?.publicText ?? ""
+    });
+  }
+
+  /**
+   * Keep AppV2 tab state on a rendered tab when optional tabs disappear.
+   *
+   * @param {object} context Render context.
+   * @param {object} visibility Tab visibility flags.
+   * @returns {void}
+   */
+  _ensureVisibleTab(context, visibility) {
+    const activeTab = this.tabGroups?.sheet;
+    const hiddenActiveTab = (!visibility.showMacroTab && activeTab === "macros")
+      || (!visibility.showEquipTab && activeTab === "equip")
+      || (!visibility.showMagicTab && activeTab === "magic")
+      || (!visibility.showWellbeingTab && activeTab === "wellbeing")
+      || (!visibility.showHistoryFamilyTab && activeTab === "historyFamily");
+    if (!hiddenActiveTab) return;
+    this.tabGroups.sheet = "combat";
+    if (context.tabs?.[activeTab]) {
+      context.tabs[activeTab].cssClass = context.tabs[activeTab].cssClass.replace("active", "").trim();
+    }
+    if (context.tabs?.combat) {
+      context.tabs.combat.cssClass = [context.tabs.combat.cssClass, "active"].filter(Boolean).join(" ");
     }
   }
 
@@ -803,8 +1400,7 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
    * @returns {object[]}
    */
   _prepareEffects() {
-    return Array.from(this.actor.effects ?? [])
-      .filter(effect => !effect.disabled && !effect.isSuppressed)
+    return hotbarVisibleEffects(this.actor)
       .slice(0, 10)
       .map(effect => ({
         id: effect.id,
@@ -850,6 +1446,10 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
       ?? AoVAdapter.getDex(this.actor);
     const category = combatantState?.intent?.actionCategory ?? "attack";
     const status = combatantState?.intent?.status ?? "uncommitted";
+    const categoryLabel = active ? intentDisplayLabel(category, combatantState?.intent?.publicText ?? "") : "";
+    const statusLabel = active ? game.i18n.localize(`AOV_SKJALDBORG.IntentStatus.${status}`) : "";
+    const reactions = Number(combatantState?.reactionCount ?? 0);
+    const reactionPenalty = reactionPenaltyForCount(reactions);
     const currentCombatantId = combat?.combatant?.id ?? combat?.current?.combatantId ?? null;
     const myTurn = active && currentCombatantId === this.combatant?.id;
     const dispositionPalette = resolveDispositionPalette(this.actor, this.combatant);
@@ -863,11 +1463,19 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
       dispositionGlowSoft: dispositionPalette.glowSoft,
       dispositionGlowStrong: dispositionPalette.glowStrong,
       phase: active ? game.i18n.localize(`AOV_SKJALDBORG.Phases.${combatState.phase}`) : "",
-      category: active ? game.i18n.localize(`AOV_SKJALDBORG.ActionCategories.${category}`) : "",
+      category: categoryLabel,
       status,
-      statusLabel: active ? game.i18n.localize(`AOV_SKJALDBORG.IntentStatus.${status}`) : "",
+      statusLabel: categoryLabel,
+      statusTooltip: active ? `${statusLabel}: ${categoryLabel}` : "",
       dex: Number(finalDex ?? 0),
-      reactions: Number(combatantState?.reactionCount ?? 0)
+      reactions,
+      reactionPenalty,
+      reactionTooltip: active
+        ? game.i18n.format("AOV_SKJALDBORG.ActorHotbar.ReactionPenaltyHint", {
+            count: reactions,
+            penalty: reactionPenalty
+          })
+        : ""
     };
   }
 
@@ -880,6 +1488,7 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
   /** @inheritdoc */
   async _onRender(context, options) {
     await super._onRender(context, options);
+    ActorHotbar.pruneStaleRoots(this.element);
     this._syncCoreHotbarVisibility();
     this._applyClientDimensions();
     this._applyThemeClass();
@@ -887,22 +1496,24 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
     this._restoreOrInitializePosition();
     this._activateDockDragging();
     this._activatePositionDragging();
-    this._activateResourceEditing();
-    this._activateWellbeingEditing();
-    this._activateEquipmentEditing();
-    this._activateWeaponControls();
-    this._activateContextMenus();
-    this._activateCombatInteractions();
-    this._activateActionDragging();
-    this._activateXpToggleDragGuards();
-    this._activateQuickAccessSlots();
+    this._activateDelegatedControls();
+    this._syncRenderedWeaponControls();
     this._restoreScrollPositions();
+    this._assertHotbarInvariants();
+  }
+
+  /** @inheritdoc */
+  _replaceHTML(result, content, options) {
+    return super._replaceHTML(result, content, options);
   }
 
   /** @inheritdoc */
   _onClose(options) {
     this._cancelDockDrag();
     this._cancelPositionDrag();
+    this._delegatedControlsAbort?.abort();
+    this._delegatedControlsAbort = null;
+    this._delegatedControlsRoot = null;
     document.querySelector("#hotbar")?.classList.remove("skj-core-hotbar-hidden");
     if (ActorHotbar.current === this) ActorHotbar.current = null;
     return super._onClose(options);
@@ -964,12 +1575,6 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
       };
 
       restore();
-      element.addEventListener("scroll", () => {
-        this._scrollPositions.set(key, {
-          top: element.scrollTop,
-          left: element.scrollLeft
-        });
-      }, { passive: true });
       tracked.push(restore);
     }
 
@@ -1347,6 +1952,8 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
   _activateDockDragging() {
     const handle = this.element.querySelector(".skj-hotbar-collapse-toggle");
     if (!handle) return;
+    if (handle.dataset.skjDockDraggingBound === "true") return;
+    handle.dataset.skjDockDraggingBound = "true";
     handle.addEventListener("pointerdown", event => this._beginDockDrag(event));
     handle.addEventListener("click", event => {
       if (!this._suppressCollapseClick) return;
@@ -1455,6 +2062,8 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
   _activatePositionDragging() {
     const handle = this.element.querySelector(".skj-avatar-button");
     if (!handle) return;
+    if (handle.dataset.skjPositionDraggingBound === "true") return;
+    handle.dataset.skjPositionDraggingBound = "true";
     handle.addEventListener("pointerdown", event => this._beginPositionDrag(event));
     handle.addEventListener("contextmenu", event => {
       event.preventDefault();
@@ -1522,24 +2131,181 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
   }
 
   /**
-   * Bind deterministic resource input commits.
+   * Bind ordinary controls with one listener per event type on the rendered root.
+   *
+   * AppV2 replaces the hotbar HTML during render, so root-scoped delegation
+   * avoids repeated query-and-bind loops while keeping native form semantics.
    *
    * @returns {void}
    */
-  _activateResourceEditing() {
-    for (const input of this.element.querySelectorAll("[data-resource-input]")) {
-      input.addEventListener("keydown", event => {
-        if (event.key === "Enter") {
-          event.preventDefault();
-          input.blur();
-        } else if (event.key === "Escape") {
-          event.preventDefault();
-          input.value = input.dataset.originalValue ?? input.defaultValue;
-          input.blur();
-        }
-      });
-      input.addEventListener("change", event => void this._commitResourceInput(event));
+  _activateDelegatedControls() {
+    if (this._delegatedControlsRoot === this.element) return;
+    this._delegatedControlsAbort?.abort();
+    const abort = new AbortController();
+    this._delegatedControlsAbort = abort;
+    this._delegatedControlsRoot = this.element;
+    const options = { signal: abort.signal };
+    const captureOptions = { ...options, capture: true };
+    this.element.addEventListener("pointerdown", event => this._onDelegatedCapturePointerDown(event), captureOptions);
+    this.element.addEventListener("auxclick", event => this._onDelegatedAuxClick(event), captureOptions);
+    this.element.addEventListener("contextmenu", event => this._onDelegatedContextMenu(event), captureOptions);
+    this.element.addEventListener("keydown", event => this._onDelegatedKeydown(event), options);
+    this.element.addEventListener("change", event => this._onDelegatedChange(event), options);
+    this.element.addEventListener("pointerdown", event => this._onDelegatedPointerDown(event), options);
+    this.element.addEventListener("dragstart", event => this._onDelegatedDragStart(event), options);
+    this.element.addEventListener("dragend", event => this._onDelegatedDragEnd(event), options);
+    this.element.addEventListener("dragover", event => this._onDelegatedDragOver(event), options);
+    this.element.addEventListener("dragleave", event => this._onDelegatedDragLeave(event), options);
+    this.element.addEventListener("drop", event => this._onDelegatedDrop(event), options);
+    this.element.addEventListener("scroll", event => this._onDelegatedScroll(event), {
+      ...options,
+      capture: true,
+      passive: true
+    });
+  }
+
+  /**
+   * Resolve an input matching a selector from a delegated event.
+   *
+   * @param {Event} event Delegated DOM event.
+   * @param {string} selector Selector for the editable input.
+   * @returns {HTMLInputElement|null}
+   */
+  _inputFromDelegatedEvent(event, selector) {
+    const target = event.target instanceof Element ? event.target.closest(selector) : null;
+    return target instanceof HTMLInputElement ? target : null;
+  }
+
+  /**
+   * Handle Enter/Escape commit ergonomics for hotbar inline inputs.
+   *
+   * @param {KeyboardEvent} event Delegated key event.
+   * @returns {void}
+   */
+  _onDelegatedKeydown(event) {
+    if (!(event.target instanceof Element)) return;
+    if (!event.target.closest("[data-resource-input], [data-wellbeing-damage], [data-equipment-quantity], [data-weapon-hp]")) return;
+    handleCommitInputKeydown(event);
+  }
+
+  /**
+   * Track scroll positions through one root listener.
+   *
+   * @param {Event} event Delegated scroll event.
+   * @returns {void}
+   */
+  _onDelegatedScroll(event) {
+    const target = event.target instanceof Element ? event.target.closest("[data-scroll-state]") : null;
+    if (!(target instanceof HTMLElement)) return;
+    const actorKey = this._actorScrollKey();
+    const id = target.dataset.scrollState;
+    if (!actorKey || !id) return;
+    this._scrollPositions.set(`${actorKey}:${id}`, {
+      top: target.scrollTop,
+      left: target.scrollLeft
+    });
+  }
+
+  /**
+   * Route delegated input changes to their deterministic document writes.
+   *
+   * @param {Event} event Delegated change event.
+   * @returns {void}
+   */
+  _onDelegatedChange(event) {
+    if (this._inputFromDelegatedEvent(event, "[data-resource-input]")) {
+      void this._commitResourceInput(event);
+      return;
     }
+    if (this._inputFromDelegatedEvent(event, "[data-wellbeing-damage]")) {
+      void this._commitWellbeingDamage(event);
+      return;
+    }
+    if (this._inputFromDelegatedEvent(event, "[data-equipment-quantity]")) {
+      void this._commitEquipmentQuantity(event);
+      return;
+    }
+    if (this._inputFromDelegatedEvent(event, "[data-weapon-hp]")) {
+      void this._commitWeaponHitPoints(event);
+      return;
+    }
+
+    const select = event.target instanceof Element
+      ? event.target.closest("[data-readied-weapon-select]")
+      : null;
+    if (select instanceof HTMLSelectElement) this._syncRenderedWeaponControls();
+  }
+
+  /**
+   * Determine whether a delegated event targets an action-like control.
+   *
+   * @param {Event} event Delegated DOM event.
+   * @returns {HTMLElement|null}
+   */
+  _actionControlFromDelegatedEvent(event) {
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest?.(".skj-avatar-button, [data-hotbar-dock-handle]")) return null;
+    const control = target?.closest?.([
+      "[data-intent-action-control]",
+      "[data-quick-slot-index]",
+      "[data-reaction-control]",
+      "[data-post-item-description]",
+      '[data-action-kind="item"]',
+      "[data-readied-weapon-toggle]",
+      "[data-action=\"dropReadiedWeapon\"]",
+      "[data-action=\"rollSelectedWeapon\"]"
+    ].join(", "));
+    return control instanceof HTMLElement ? control : null;
+  }
+
+  /**
+   * Temporarily disable a draggable parent while a secondary click resolves.
+   *
+   * @param {Element|null|undefined} control Interaction control.
+   * @returns {void}
+   */
+  _temporarilyDisableDragSource(control) {
+    const source = control?.closest?.('[draggable="true"]');
+    if (!(source instanceof HTMLElement)) return;
+    source.draggable = false;
+    const abort = new AbortController();
+    const restore = () => {
+      if (source.isConnected) source.draggable = true;
+      abort.abort();
+    };
+    window.addEventListener("pointerup", restore, { once: true, signal: abort.signal });
+    window.addEventListener("pointercancel", restore, { once: true, signal: abort.signal });
+    window.addEventListener("contextmenu", restore, { once: true, signal: abort.signal });
+    window.addEventListener("auxclick", restore, { once: true, signal: abort.signal });
+  }
+
+  /**
+   * Stop secondary-button presses before AppV2 activation or drag handlers see them.
+   *
+   * @param {PointerEvent} event Delegated pointer event.
+   * @returns {void}
+   */
+  _onDelegatedCapturePointerDown(event) {
+    if (event.button !== 2) return;
+    const control = this._actionControlFromDelegatedEvent(event);
+    if (!control) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    this._temporarilyDisableDragSource(control);
+  }
+
+  /**
+   * Suppress browser auxclick delivery after right-click context actions.
+   *
+   * @param {MouseEvent} event Delegated auxclick event.
+   * @returns {void}
+   */
+  _onDelegatedAuxClick(event) {
+    if (event.button !== 2) return;
+    const control = this._actionControlFromDelegatedEvent(event);
+    if (!control) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
   }
 
   /**
@@ -1553,7 +2319,8 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
    * @returns {Promise<void>}
    */
   async _commitResourceInput(event) {
-    const input = event.currentTarget;
+    const input = this._inputFromDelegatedEvent(event, "[data-resource-input]");
+    if (!input) return;
     const resourceId = String(input.dataset.resourceInput ?? "");
     const binding = this._resourceBindings.get(resourceId);
     if (!this.actor || this._resourceUpdatePending || !binding?.editable) return;
@@ -1585,34 +2352,14 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
   }
 
   /**
-   * Bind deterministic damage commits for character Wounds and NPC Hit Locations.
-   *
-   * @returns {void}
-   */
-  _activateWellbeingEditing() {
-    for (const input of this.element.querySelectorAll("[data-wellbeing-damage]")) {
-      input.addEventListener("keydown", event => {
-        if (event.key === "Enter") {
-          event.preventDefault();
-          input.blur();
-        } else if (event.key === "Escape") {
-          event.preventDefault();
-          input.value = input.dataset.originalValue ?? input.defaultValue;
-          input.blur();
-        }
-      });
-      input.addEventListener("change", event => void this._commitWellbeingDamage(event));
-    }
-  }
-
-  /**
    * Persist one wellbeing damage edit through the AoV adapter.
    *
    * @param {Event} event Input change event.
    * @returns {Promise<void>}
    */
   async _commitWellbeingDamage(event) {
-    const input = event.currentTarget;
+    const input = this._inputFromDelegatedEvent(event, "[data-wellbeing-damage]");
+    if (!input) return;
     const itemId = String(input.dataset.wellbeingDamage ?? "");
     if (!this.actor || !itemId || this._wellbeingUpdatesPending.has(itemId)) return;
 
@@ -1633,45 +2380,15 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
 
 
   /**
-   * Bind quantity commits for gear rows in the Equip tab.
-   *
-   * @returns {void}
-   */
-  _activateEquipmentEditing() {
-    const bindCommitInput = (input, commit) => {
-      input.addEventListener("keydown", event => {
-        if (event.key === "Enter") {
-          event.preventDefault();
-          input.blur();
-        } else if (event.key === "Escape") {
-          event.preventDefault();
-          input.value = input.dataset.originalValue ?? input.defaultValue;
-          input.blur();
-        }
-      });
-      input.addEventListener("change", event => void commit.call(this, event));
-    };
-
-    for (const input of this.element.querySelectorAll("[data-equipment-quantity]")) {
-      bindCommitInput(input, this._commitEquipmentQuantity);
-    }
-    for (const input of this.element.querySelectorAll("[data-weapon-hp]")) {
-      bindCommitInput(input, this._commitWeaponHitPoints);
-    }
-  }
-
-  /**
    * Keep the readied-weapon toggle label aligned with the selected weapon.
    *
    * @returns {void}
    */
-  _activateWeaponControls() {
+  _syncRenderedWeaponControls() {
     const select = this.element.querySelector("[data-readied-weapon-select]");
     const toggle = this.element.querySelector("[data-readied-weapon-toggle]");
     if (!select || !toggle) return;
-    const update = () => this._syncWeaponToggle(toggle, select);
-    select.addEventListener("change", update);
-    update();
+    this._syncWeaponToggle(toggle, select);
   }
 
   /**
@@ -1683,8 +2400,9 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
    */
   _syncWeaponToggle(toggle, select) {
     const selectedWeaponId = String(select?.value ?? "");
-    const currentWeaponId = String(getReadiedWeaponId(this.actor) ?? "");
-    const isReadiedSelection = !!selectedWeaponId && selectedWeaponId === currentWeaponId;
+    const current = getReadiedWeaponIds(this.actor);
+    const isReadiedSelection = !!selectedWeaponId
+      && (selectedWeaponId === String(current.right ?? "") || selectedWeaponId === String(current.left ?? ""));
     const labelKey = isReadiedSelection ? "AOV_SKJALDBORG.Weapons.Sheathe" : "AOV_SKJALDBORG.Weapons.Draw";
     const hintKey = isReadiedSelection ? "AOV_SKJALDBORG.Weapons.SheatheHint" : "AOV_SKJALDBORG.Weapons.DrawHint";
     const icon = toggle.querySelector("i");
@@ -1704,7 +2422,8 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
    * @returns {Promise<void>}
    */
   async _commitEquipmentQuantity(event) {
-    const input = event.currentTarget;
+    const input = this._inputFromDelegatedEvent(event, "[data-equipment-quantity]");
+    if (!input) return;
     const itemId = input.dataset.equipmentQuantity;
     if (!this.actor || !itemId || this._equipmentUpdatePending) return;
 
@@ -1731,7 +2450,8 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
    * @returns {Promise<void>}
    */
   async _commitWeaponHitPoints(event) {
-    const input = event.currentTarget;
+    const input = this._inputFromDelegatedEvent(event, "[data-weapon-hp]");
+    if (!input) return;
     const itemId = String(input.dataset.weaponHp ?? "");
     if (!this.actor || !itemId || this._weaponHpUpdatesPending.has(itemId)) return;
 
@@ -1752,60 +2472,60 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
   }
 
   /**
-   * Bind right-click behavior for actor-owned Items.
+   * Route right-click behavior for actor-owned items and combat controls.
    *
-   * Magic and equipment cards publish their Description-tab content to chat.
-   * Other item controls retain the existing right-click-to-open-sheet behavior.
    * Native form-field context menus are preserved for editable inputs.
    *
+   * @param {PointerEvent} event Delegated context-menu event.
    * @returns {void}
    */
-  _activateContextMenus() {
-    for (const control of this.element.querySelectorAll("[data-post-item-description]")) {
-      control.addEventListener("contextmenu", event => {
-        if (event.target instanceof Element && event.target.closest("input, textarea, select")) return;
-        event.preventDefault();
-        event.stopPropagation();
-        void this._postItemDescriptionToChat(control.dataset.postItemDescription);
-      });
+  _onDelegatedContextMenu(event) {
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target) return;
+
+    const quickSlot = target.closest("[data-quick-slot-index]");
+    if (quickSlot instanceof HTMLElement) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      void this._removeQuickAccessAction(Number(quickSlot.dataset.quickSlotIndex));
+      return;
     }
 
-    for (const control of this.element.querySelectorAll('[data-action-kind="item"]:not([data-quick-slot-index])')) {
-      if (control.closest("[data-post-item-description]")) continue;
-      control.addEventListener("contextmenu", event => {
-        event.preventDefault();
-        event.stopPropagation();
-        void openActorItem(this.actor, control.dataset.actionId);
-      });
-    }
-  }
+    if (target.closest("input, textarea, select")) return;
 
-  /**
-   * Bind the asymmetric combat-control interactions used as scaffolding for
-   * later action-resolution workflows.
-   *
-   * Combat-tab intent controls reserve primary click for future configuration
-   * and integration hooks. Their existing declaration behavior is moved to
-   * right click. The existing reaction pill remains the only visual control:
-   * primary click adds one reaction and right click removes one.
-   *
-   * @returns {void}
-   */
-  _activateCombatInteractions() {
-    for (const control of this.element.querySelectorAll("[data-intent-action-control]")) {
-      control.addEventListener("contextmenu", event => {
-        event.preventDefault();
-        event.stopPropagation();
-        void this._commitIntentAction(control.dataset.actionId);
-      });
+    const intentControl = target.closest("[data-intent-action-control]");
+    if (intentControl instanceof HTMLElement) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (intentControl.dataset.actionKind === "utility" || intentControl.dataset.actionId === UTILITY_ACTION_ID) {
+        void openUtilityDialog({ actor: this.actor, combatant: this.combatant, combat: game.combat ?? null, originEvent: event });
+        return;
+      }
+      void this._commitIntentAction(intentControl.dataset.actionId);
+      return;
     }
 
-    for (const control of this.element.querySelectorAll("[data-reaction-control]")) {
-      control.addEventListener("contextmenu", event => {
-        event.preventDefault();
-        event.stopPropagation();
-        void this._queueReactionChange("decrementReaction");
-      });
+    const reactionControl = target.closest("[data-reaction-control]");
+    if (reactionControl instanceof HTMLElement) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      void this._queueReactionChange("decrementReaction");
+      return;
+    }
+
+    const postControl = target.closest("[data-post-item-description]");
+    if (postControl instanceof HTMLElement) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      void this._postItemDescriptionToChat(postControl.dataset.postItemDescription);
+      return;
+    }
+
+    const itemControl = target.closest('[data-action-kind="item"]:not([data-quick-slot-index])');
+    if (itemControl instanceof HTMLElement && !itemControl.closest("[data-post-item-description]")) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      void openActorItem(this.actor, itemControl.dataset.actionId);
     }
   }
 
@@ -1861,146 +2581,229 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
   }
 
   /**
-   * Temporarily disable a draggable row while a nested state toggle is pressed.
+   * Temporarily disable parent drags for nested XP and magic toggles.
    *
-   * Native dragstart targets the nearest draggable ancestor rather than
-   * necessarily the nested button which initiated the pointer gesture. The
-   * temporary attribute change therefore prevents XP and magic preparation
-   * clicks from becoming row drags while preserving row reordering elsewhere.
-   *
+   * @param {PointerEvent} event Delegated pointer event.
    * @returns {void}
    */
-  _activateXpToggleDragGuards() {
-    for (const toggle of this.element.querySelectorAll("[data-xp-toggle], [data-magic-prepared-toggle]")) {
-      toggle.addEventListener("pointerdown", () => {
-        const source = toggle.closest('[draggable="true"]');
-        if (!(source instanceof HTMLElement)) return;
-
-        source.draggable = false;
-        const abort = new AbortController();
-        const restore = () => {
-          if (source.isConnected) source.draggable = true;
-          abort.abort();
-        };
-        window.addEventListener("pointerup", restore, { once: true, signal: abort.signal });
-        window.addEventListener("pointercancel", restore, { once: true, signal: abort.signal });
-      });
+  _onDelegatedPointerDown(event) {
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target) return;
+    if (event.button === 2) {
+      const actionControl = target.closest("[data-action], [data-intent-action-control]");
+      const source = actionControl?.closest?.('[draggable="true"]');
+      if (!(source instanceof HTMLElement)) return;
+      source.draggable = false;
+      const abort = new AbortController();
+      const restore = () => {
+        if (source.isConnected) source.draggable = true;
+        abort.abort();
+      };
+      window.addEventListener("pointerup", restore, { once: true, signal: abort.signal });
+      window.addEventListener("pointercancel", restore, { once: true, signal: abort.signal });
+      window.addEventListener("contextmenu", restore, { once: true, signal: abort.signal });
+      return;
     }
+
+    const toggle = target
+      ? target.closest("[data-xp-toggle], [data-magic-prepared-toggle]")
+      : null;
+    if (!(toggle instanceof HTMLElement)) return;
+    const source = toggle.closest('[draggable="true"]');
+    if (!(source instanceof HTMLElement)) return;
+
+    source.draggable = false;
+    const abort = new AbortController();
+    const restore = () => {
+      if (source.isConnected) source.draggable = true;
+      abort.abort();
+    };
+    window.addEventListener("pointerup", restore, { once: true, signal: abort.signal });
+    window.addEventListener("pointercancel", restore, { once: true, signal: abort.signal });
   }
 
   /**
-   * Bind native drag/drop reordering for actor item groups.
+   * Resolve a delegated hotbar drag source.
+   *
+   * @param {DragEvent} event Delegated drag event.
+   * @returns {HTMLElement|null}
+   */
+  _dragSourceFromDelegatedEvent(event) {
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target) return null;
+    const source = target.closest("[data-quick-source][draggable=true], [data-drag-group][draggable=true], .skj-quick-slot[draggable=true]");
+    return source instanceof HTMLElement ? source : null;
+  }
+
+  /**
+   * Start quick-access or reorder drag data from one delegated listener.
+   *
+   * @param {DragEvent} event Delegated drag event.
+   * @returns {void}
+   */
+  _onDelegatedDragStart(event) {
+    const dragTarget = event.target instanceof Element ? event.target : null;
+    if (dragTarget?.closest("[data-xp-toggle], [data-magic-prepared-toggle]")) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    if (dragTarget?.closest("[data-intent-action-control]") && Number(event.buttons) === 2) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      return;
+    }
+    const source = this._dragSourceFromDelegatedEvent(event);
+    if (!source) return;
+    if (!event.dataTransfer) return;
+
+    const kind = source.dataset.quickKind ?? source.dataset.actionKind ?? "";
+    const id = source.dataset.quickId ?? source.dataset.actionId ?? "";
+    const sourceSlot = source.dataset.quickSlotIndex;
+    this._dragData = source.dataset.dragGroup ? {
+      id,
+      group: source.dataset.dragGroup,
+      section: source.dataset.actionSection ?? ""
+    } : null;
+
+    const payload = {
+      type: QUICK_ACCESS_DRAG_TYPE,
+      module: MODULE_ID,
+      actorId: this.actor?.id ?? "",
+      kind,
+      id
+    };
+    if (sourceSlot !== undefined) payload.sourceSlot = Number(sourceSlot);
+
+    event.dataTransfer.effectAllowed = sourceSlot !== undefined ? "move" : "copyMove";
+    this._quickDragData = payload;
+    this.element.classList.add("skj-quick-drag-active");
+    const serialized = JSON.stringify(payload);
+    event.dataTransfer.setData(QUICK_ACCESS_DRAG_MIME, serialized);
+    event.dataTransfer.setData("text/plain", serialized);
+    source.classList.add("dragging");
+  }
+
+  /**
+   * Clear delegated drag state.
    *
    * @returns {void}
    */
-  _activateActionDragging() {
-    const selector = "[data-quick-source][draggable=true], [data-drag-group][draggable=true], .skj-quick-slot[draggable=true]";
-    for (const control of this.element.querySelectorAll(selector)) {
-      control.addEventListener("dragstart", event => {
-        if (event.target instanceof Element && event.target.closest("[data-xp-toggle], [data-magic-prepared-toggle]")) {
-          event.preventDefault();
-          event.stopPropagation();
-          return;
-        }
-        const kind = control.dataset.quickKind ?? control.dataset.actionKind ?? "";
-        const id = control.dataset.quickId ?? control.dataset.actionId ?? "";
-        const sourceSlot = control.dataset.quickSlotIndex;
-        this._dragData = control.dataset.dragGroup ? {
-          id,
-          group: control.dataset.dragGroup,
-          section: control.dataset.actionSection ?? ""
-        } : null;
+  _onDelegatedDragEnd() {
+    this._dragData = null;
+    this._quickDragData = null;
+    this.element.classList.remove("skj-quick-drag-active");
+    this.element.querySelectorAll(".dragging, .drop-target, .quick-drop-target, .quick-auto-preview").forEach(element => {
+      element.classList.remove("dragging", "drop-target", "quick-drop-target", "quick-auto-preview");
+    });
+  }
 
-        const payload = {
-          type: QUICK_ACCESS_DRAG_TYPE,
-          module: MODULE_ID,
-          actorId: this.actor?.id ?? "",
-          kind,
-          id
-        };
-        if (sourceSlot !== undefined) payload.sourceSlot = Number(sourceSlot);
+  /**
+   * Route quick-access slot and portrait drag-over events.
+   *
+   * @param {DragEvent} event Delegated drag event.
+   * @returns {void}
+   */
+  _onDelegatedDragOver(event) {
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target) return;
 
-        event.dataTransfer.effectAllowed = sourceSlot !== undefined ? "move" : "copyMove";
-        this._quickDragData = payload;
-        this.element.classList.add("skj-quick-drag-active");
-        const serialized = JSON.stringify(payload);
-        event.dataTransfer.setData(QUICK_ACCESS_DRAG_MIME, serialized);
-        event.dataTransfer.setData("text/plain", serialized);
-        control.classList.add("dragging");
-      });
-      control.addEventListener("dragend", () => {
-        this._dragData = null;
-        this._quickDragData = null;
-        this.element.classList.remove("skj-quick-drag-active");
-        this.element.querySelectorAll(".dragging, .drop-target, .quick-drop-target, .quick-auto-preview").forEach(element => {
-          element.classList.remove("dragging", "drop-target", "quick-drop-target", "quick-auto-preview");
-        });
-      });
-      control.addEventListener("dragover", event => {
-        const sameGroup = this._dragData?.group === control.dataset.dragGroup;
-        const sameSection = (this._dragData?.section ?? "") === (control.dataset.actionSection ?? "");
-        if (!sameGroup || !sameSection) return;
+    const reorderTarget = target.closest("[data-drag-group][draggable=true]");
+    if (reorderTarget instanceof HTMLElement) {
+      const sameGroup = this._dragData?.group === reorderTarget.dataset.dragGroup;
+      const sameSection = (this._dragData?.section ?? "") === (reorderTarget.dataset.actionSection ?? "");
+      if (sameGroup && sameSection) {
         event.preventDefault();
         event.dataTransfer.dropEffect = "move";
-        control.classList.add("drop-target");
-      });
-      control.addEventListener("dragleave", () => control.classList.remove("drop-target"));
-      control.addEventListener("drop", event => {
-        event.preventDefault();
-        control.classList.remove("drop-target");
-        void this._dropAction(control);
-      });
-    }
-  }
-
-  /**
-   * Bind portrait and slot drop targets plus right-click removal.
-   *
-   * Empty circles remain visually hidden. The central portrait is therefore a
-   * large catch-all target which assigns a dragged action to the first empty
-   * slot. Direct drops on visible or temporarily revealed slot circles retain
-   * deterministic replacement and swap behavior.
-   *
-   * @returns {void}
-   */
-  _activateQuickAccessSlots() {
-    for (const slot of this.element.querySelectorAll("[data-quick-slot-index]")) {
-      slot.addEventListener("dragover", event => {
-        const payload = this._readQuickAccessDragData(event);
-        if (!payload) return;
-        event.preventDefault();
-        event.stopPropagation();
-        event.dataTransfer.dropEffect = Number.isInteger(payload.sourceSlot) ? "move" : "copy";
-        slot.classList.add("quick-drop-target");
-      });
-      slot.addEventListener("dragleave", () => slot.classList.remove("quick-drop-target"));
-      slot.addEventListener("drop", event => void this._dropQuickAccessAction(event, slot));
-      slot.addEventListener("contextmenu", event => {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        void this._removeQuickAccessAction(Number(slot.dataset.quickSlotIndex));
-      });
+        reorderTarget.classList.add("drop-target");
+        return;
+      }
     }
 
-    const portraitTarget = this.element.querySelector("[data-quick-auto-target]");
-    if (!portraitTarget) return;
-    portraitTarget.addEventListener("dragover", event => {
-      const payload = this._readQuickAccessDragData(event);
-      if (!payload) return;
+    const payload = this._readQuickAccessDragData(event);
+    if (!payload) return;
+
+    const slot = target.closest("[data-quick-slot-index]");
+    if (slot instanceof HTMLElement) {
       event.preventDefault();
       event.stopPropagation();
       event.dataTransfer.dropEffect = Number.isInteger(payload.sourceSlot) ? "move" : "copy";
-      portraitTarget.classList.add("quick-drop-target");
-      portraitTarget.parentElement?.classList.add("quick-drop-target");
-      this.element.querySelectorAll(".skj-quick-slot.empty").forEach(slot => slot.classList.add("quick-auto-preview"));
+      slot.classList.add("quick-drop-target");
+      return;
+    }
+
+    const portraitTarget = target.closest("[data-quick-auto-target]");
+    if (!(portraitTarget instanceof HTMLElement)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = Number.isInteger(payload.sourceSlot) ? "move" : "copy";
+    portraitTarget.classList.add("quick-drop-target");
+    portraitTarget.parentElement?.classList.add("quick-drop-target");
+    this.element.querySelectorAll(".skj-quick-slot.empty").forEach(slotElement => slotElement.classList.add("quick-auto-preview"));
+  }
+
+  /**
+   * Clear quick-access drag affordances when leaving delegated drop targets.
+   *
+   * @param {DragEvent} event Delegated drag-leave event.
+   * @returns {void}
+   */
+  _onDelegatedDragLeave(event) {
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target) return;
+    const reorderTarget = target.closest("[data-drag-group][draggable=true]");
+    if (reorderTarget instanceof HTMLElement) {
+      reorderTarget.classList.remove("drop-target");
+      return;
+    }
+
+    const slot = target.closest("[data-quick-slot-index]");
+    if (slot instanceof HTMLElement) {
+      slot.classList.remove("quick-drop-target");
+      return;
+    }
+
+    const portraitTarget = target.closest("[data-quick-auto-target]");
+    if (!(portraitTarget instanceof HTMLElement)) return;
+    if (event.relatedTarget instanceof Node && portraitTarget.contains(event.relatedTarget)) return;
+    portraitTarget.classList.remove("quick-drop-target");
+    portraitTarget.parentElement?.classList.remove("quick-drop-target");
+    this.element.querySelectorAll(".skj-quick-slot.quick-auto-preview").forEach(slotElement => {
+      slotElement.classList.remove("quick-auto-preview");
     });
-    portraitTarget.addEventListener("dragleave", event => {
-      if (event.relatedTarget instanceof Node && portraitTarget.contains(event.relatedTarget)) return;
-      portraitTarget.classList.remove("quick-drop-target");
-      portraitTarget.parentElement?.classList.remove("quick-drop-target");
-      this.element.querySelectorAll(".skj-quick-slot.quick-auto-preview").forEach(slot => slot.classList.remove("quick-auto-preview"));
-    });
-    portraitTarget.addEventListener("drop", event => void this._dropQuickAccessActionOnPortrait(event, portraitTarget));
+  }
+
+  /**
+   * Route quick-access slot and portrait drops.
+   *
+   * @param {DragEvent} event Delegated drop event.
+   * @returns {void}
+   */
+  _onDelegatedDrop(event) {
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target) return;
+    const reorderTarget = target.closest("[data-drag-group][draggable=true]");
+    if (reorderTarget instanceof HTMLElement) {
+      const sameGroup = this._dragData?.group === reorderTarget.dataset.dragGroup;
+      const sameSection = (this._dragData?.section ?? "") === (reorderTarget.dataset.actionSection ?? "");
+      if (sameGroup && sameSection) {
+        event.preventDefault();
+        reorderTarget.classList.remove("drop-target");
+        void this._dropAction(reorderTarget);
+        return;
+      }
+    }
+
+    const slot = target.closest("[data-quick-slot-index]");
+    if (slot instanceof HTMLElement) {
+      void this._dropQuickAccessAction(event, slot);
+      return;
+    }
+
+    const portraitTarget = target.closest("[data-quick-auto-target]");
+    if (portraitTarget instanceof HTMLElement) {
+      void this._dropQuickAccessActionOnPortrait(event, portraitTarget);
+    }
   }
 
   /**
@@ -2188,9 +2991,10 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
    *
    * @param {"draw"|"sheathe"} action Weapon action.
    * @param {string|null} weaponId Selected carried weapon id.
+   * @param {"right"|"left"} [hand="right"] Target hand.
    * @returns {Promise<unknown|null>} Completed document operation.
    */
-  async _performWeaponAction(action, weaponId = null) {
+  async _performWeaponAction(action, weaponId = null, hand = "right") {
     if (!this.actor || this._weaponActionPending) return null;
     this._weaponActionPending = true;
     try {
@@ -2201,12 +3005,13 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
           combatantId: this.combatant.id,
           amount: 5,
           weaponAction: action,
-          weaponId
+          weaponId,
+          hand
         });
       } else if (action === "draw") {
-        result = await setReadiedWeapon(this.actor, weaponId);
+        result = await setReadiedWeaponInHand(this.actor, hand, weaponId);
       } else {
-        result = await clearReadiedWeapon(this.actor);
+        result = await clearReadiedWeaponInHand(this.actor, hand);
       }
       ActorHotbar.scheduleRender({ parts: ["workflow", "weaponControls"], reason: "weapon-action" });
       RenderCoordinator.invalidate("combatTracker", { reason: "weapon-action" });
@@ -2229,15 +3034,24 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
    */
   static async onActivate(event, target) {
     event.preventDefault();
+    if (event instanceof MouseEvent && event.button !== 0) {
+      event.stopImmediatePropagation();
+      return null;
+    }
     const kind = target.dataset.actionKind;
     const actionId = target.dataset.actionId;
 
     if (kind === "item") return executeActorItem(this.actor, actionId, event);
     if (kind === "stat") return executeActorStat(this.actor, actionId, event);
     if (kind === "macro") return executeMacro(actionId);
+    if (kind === "utility" || actionId === UTILITY_ACTION_ID) {
+      return openUtilityDialog({ actor: this.actor, combatant: this.combatant, combat: game.combat ?? null, originEvent: event });
+    }
     if (kind === "effect") {
-      const effect = this.actor?.effects?.get(actionId) ?? null;
-      return effect?.sheet?.render?.(true) ?? null;
+      const effect = this.actor?.effects?.get?.(actionId)
+        ?? Array.from(this.actor?.effects ?? []).find(candidate => candidate?.id === actionId)
+        ?? null;
+      return openEffectSheet(effect);
     }
     if (kind === "intent") {
       if (target.hasAttribute("data-intent-action-control")) {
@@ -2254,6 +3068,27 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
         if (actionId === ACTION_CATEGORIES.ATTACK) {
           return openAttackRollDialog({ actor: this.actor, originEvent: event });
         }
+        if (actionId === ACTION_CATEGORIES.MISSILE) {
+          return openMissileRollDialog({ actor: this.actor, originEvent: event });
+        }
+        if (actionId === ACTION_CATEGORIES.KNOCKBACK) {
+          return openKnockbackRollDialog({ actor: this.actor, originEvent: event });
+        }
+        if (actionId === ACTION_CATEGORIES.GRAPPLE) {
+          return openGrappleRollDialog({ actor: this.actor, originEvent: event });
+        }
+        if (actionId === ACTION_CATEGORIES.DELAY) {
+          return openDelayDialog({ actor: this.actor, combatant: this.combatant, combat: game.combat ?? null, originEvent: event });
+        }
+        if (actionId === ACTION_CATEGORIES.MAGIC) {
+          return openRunicMagicDialog({ actor: this.actor, combatant: this.combatant, combat: game.combat ?? null, originEvent: event });
+        }
+        if (actionId === ACTION_CATEGORIES.RETREAT) {
+          return openDisengageDialog({ actor: this.actor, combatant: this.combatant, combat: game.combat ?? null, originEvent: event });
+        }
+        if (actionId === ACTION_CATEGORIES.DEFEND) {
+          return executeEvadeIntent(this.actor, this.combatant, game.combat ?? null);
+        }
         return null;
       }
       return this._commitIntentAction(actionId);
@@ -2269,25 +3104,22 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
    * @returns {Promise<unknown|null>}
    */
   async _commitIntentAction(actionId) {
-    const combat = game.combat ?? null;
-    let publicText = "";
-    if (actionId === ACTION_CATEGORIES.OTHER) {
-      const activeText = isSkjaldborgCombatActive(combat) && this.combatant
-        ? getCombatantState(this.combatant).intent?.publicText
-        : getActorPreparedIntent(this.actor)?.publicText;
-      const entered = await promptOtherIntentText(activeText ?? "");
-      if (entered === null) return null;
-      publicText = entered;
+    if (this._intentUpdatePending) return null;
+    this._intentUpdatePending = true;
+    try {
+      const combat = game.combat ?? null;
+      const liveCombatant = resolveActorCombatant(this.actor, combat) ?? this.combatant;
+      const result = await toggleIntentCategory(
+        this.actor,
+        liveCombatant,
+        combat,
+        actionId,
+        { promptOther: true }
+      );
+      return result;
+    } finally {
+      this._intentUpdatePending = false;
     }
-    const result = await commitIntentCategory(
-      this.actor,
-      this.combatant,
-      combat,
-      actionId,
-      { publicText }
-    );
-    ActorHotbar.scheduleRender({ parts: ["workflow"], reason: "intent-commit" });
-    return result;
   }
 
   /**
@@ -2434,8 +3266,11 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
       ui.notifications.warn(game.i18n.localize("AOV_SKJALDBORG.Warnings.SelectCarriedWeapon"));
       return null;
     }
-    const currentWeaponId = String(getReadiedWeaponId(this.actor) ?? "");
-    return this._performWeaponAction(weaponId === currentWeaponId ? "sheathe" : "draw", weaponId);
+    const current = getReadiedWeaponIds(this.actor);
+    if (weaponId === String(current.right ?? "")) return this._performWeaponAction("sheathe", weaponId, "right");
+    if (weaponId === String(current.left ?? "")) return this._performWeaponAction("sheathe", weaponId, "left");
+    const hand = current.right ? (current.left ? "right" : "left") : "right";
+    return this._performWeaponAction("draw", weaponId, hand);
   }
 
   /**
@@ -2668,15 +3503,6 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
     ActorHotbar.scheduleRender({ parts: ["tabBody", "weaponControls"], reason: "equipment-toggle" });
     return result;
   }
-
-  /** @returns {Promise<CombatHUD|null>} */
-  static onOpenCombatHud() {
-    if (!this.combatant || !game.combat) {
-      ui.notifications.warn(game.i18n.localize("AOV_SKJALDBORG.Warnings.NoCombatant"));
-      return null;
-    }
-    return CombatHUD.showForCombatant(this.combatant, game.combat);
-  }
 }
 
 /**
@@ -2716,6 +3542,7 @@ function currentHotbarActorId() {
  */
 function documentActorId(document) {
   if (!document) return null;
+  if (document.documentName === "ActiveEffect") return effectParentActor(document)?.id ?? null;
   if (document.documentName === "Actor") return document.id ?? null;
   if (document.actor?.id) return document.actor.id;
   const parent = document.parent ?? null;
@@ -2768,6 +3595,68 @@ function combatantAffectsCurrentHotbar(combatant) {
 }
 
 /**
+ * Classify ActiveEffect changes into the narrowest safe hotbar regions.
+ *
+ * @param {ActiveEffect|object|null} effect Candidate ActiveEffect.
+ * @returns {Set<string>} Hotbar invalidation regions.
+ */
+function actorHotbarPartsForActiveEffect(effect) {
+  const parts = new Set(["effects"]);
+
+  if (moduleFlag(effect, "managedEvading") !== undefined || effectHasStatus(effect, EVADING_STATUS_ID)) {
+    parts.add("workflow");
+    return parts;
+  }
+  if (moduleFlag(effect, "managedReactionPenalty") !== undefined) {
+    parts.add("workflow");
+    return parts;
+  }
+  if (moduleFlag(effect, "managedEngagement") !== undefined || effectHasStatus(effect, ENGAGED_STATUS_ID)) {
+    parts.add("workflow");
+    return parts;
+  }
+  if (moduleFlag(effect, "managedDisengaging") !== undefined || effectHasStatus(effect, DISENGAGING_STATUS_ID)) {
+    parts.add("workflow");
+    return parts;
+  }
+  if (moduleFlag(effect, "managedKnockbackStatus") !== undefined || effectHasStatus(effect, "prone")) {
+    parts.add("workflow");
+    return parts;
+  }
+  if (moduleFlag(effect, "grapple") !== undefined || effectHasStatus(effect, GRAPPLED_STATUS_ID) || effectHasStatus(effect, IMMOBILIZED_STATUS_ID)) {
+    parts.add("workflow");
+    parts.add("tabBody");
+    parts.add("wellbeing");
+    return parts;
+  }
+  if (moduleFlag(effect, "stunStatus") !== undefined) {
+    parts.add("workflow");
+    parts.add("tabBody");
+    parts.add("wellbeing");
+    return parts;
+  }
+  if (
+    moduleFlag(effect, "impalement") !== undefined
+    || moduleFlag(effect, "injuryThreshold") !== undefined
+    || effectHasStatus(effect, IMPALED_STATUS_ID)
+    || effectHasStatus(effect, INJURY_STATUS_ID)
+  ) {
+    parts.add("resources");
+    parts.add("tabBody");
+    parts.add("wellbeing");
+    return parts;
+  }
+  if (Object.keys(effect?.flags?.[MODULE_ID] ?? {}).length) {
+    parts.add("tabBody");
+    return parts;
+  }
+
+  parts.add("resources");
+  parts.add("tabBody");
+  return parts;
+}
+
+/**
  * Invalidate cached presentation data affected by hotbar render parts.
  *
  * @param {Actor|null|undefined} actor Actor document.
@@ -2777,15 +3666,41 @@ function combatantAffectsCurrentHotbar(combatant) {
 function invalidatePresentationForHotbarParts(actor, parts) {
   const affected = new Set(parts ?? []);
   const categories = new Set();
+  let itemSnapshotAffected = false;
   if (affected.has("resources")) categories.add("resources");
-  if (affected.has("weaponControls")) {
+  if (affected.has("effects") || affected.has("headerEffects")) categories.add("effects");
+  if (affected.has("weaponControls") || affected.has("equipmentControls")) {
     categories.add("weapons");
     categories.add("equipment");
+    itemSnapshotAffected = true;
   }
   if (affected.has("quickAccess")) {
     categories.add("actions");
     categories.add("stats");
+    itemSnapshotAffected = true;
   }
+  if (affected.has("equipment")) {
+    categories.add("equipment");
+    categories.add("weapons");
+    itemSnapshotAffected = true;
+  }
+  if (affected.has("magic")) {
+    categories.add("magic");
+    categories.add("actions");
+    itemSnapshotAffected = true;
+  }
+  if (affected.has("skills")) {
+    categories.add("skills");
+    categories.add("actions");
+    itemSnapshotAffected = true;
+  }
+  if (affected.has("stats")) categories.add("stats");
+  if (affected.has("historyFamily")) {
+    categories.add("historyFamily");
+    categories.add("actions");
+    itemSnapshotAffected = true;
+  }
+  if (affected.has("wellbeing")) categories.add("wellbeing");
   if (affected.has("tabBody")) {
     categories.add("actions");
     categories.add("equipment");
@@ -2793,9 +3708,15 @@ function invalidatePresentationForHotbarParts(actor, parts) {
     categories.add("skills");
     categories.add("magic");
     categories.add("historyFamily");
+    itemSnapshotAffected = true;
   }
-  if (!categories.size || affected.has("shell")) PresentationCache.invalidate(actor);
-  else PresentationCache.invalidate(actor, categories);
+  if (affected.has("shell")) {
+    PresentationCache.invalidate(actor);
+    invalidateActorItemSnapshot(actor);
+  } else {
+    if (categories.size) PresentationCache.invalidate(actor, categories);
+    if (itemSnapshotAffected) invalidateActorItemSnapshot(actor);
+  }
 }
 
 /**
@@ -2866,15 +3787,19 @@ export function registerActorHotbarHooks() {
     if (documentBelongsToCurrentHotbarActor(item)) invalidateActorHotbar(["shell"], "item-delete", item.actor);
   });
   Hooks.on("createActiveEffect", effect => {
-    if (documentBelongsToCurrentHotbarActor(effect)) invalidateActorHotbar(["shell"], "effect-create", effect.parent);
+    if (documentBelongsToCurrentHotbarActor(effect)) {
+      invalidateActorHotbar(actorHotbarPartsForActiveEffect(effect), "effect-create", effectParentActor(effect));
+    }
   });
   Hooks.on("updateActiveEffect", (effect, changed) => {
     if (!documentBelongsToCurrentHotbarActor(effect)) return;
     if (!Object.keys(changed ?? {}).length) return;
-    invalidateActorHotbar(["shell"], "effect-update", effect.parent);
+    invalidateActorHotbar(actorHotbarPartsForActiveEffect(effect), "effect-update", effectParentActor(effect));
   });
   Hooks.on("deleteActiveEffect", effect => {
-    if (documentBelongsToCurrentHotbarActor(effect)) invalidateActorHotbar(["shell"], "effect-delete", effect.parent);
+    if (documentBelongsToCurrentHotbarActor(effect)) {
+      invalidateActorHotbar(actorHotbarPartsForActiveEffect(effect), "effect-delete", effectParentActor(effect));
+    }
   });
   Hooks.on("updateCombat", (combat, changed) => {
     if (combatAffectsCurrentHotbar(combat)) invalidateActorHotbar(actorHotbarPartsForCombatChange(changed), "combat-update");
@@ -2886,3 +3811,7 @@ export function registerActorHotbarHooks() {
   window.addEventListener("resize", () => ActorHotbar.current?._clampCurrentPosition());
   ActorHotbar.scheduleRender({ parts: ["shell"], reason: "register-hooks", full: true });
 }
+
+export const __test = {
+  actorHotbarPartsForActiveEffect
+};

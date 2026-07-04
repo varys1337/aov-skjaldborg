@@ -1,0 +1,38 @@
+      <div class="skj-avatar-container" data-hotbar-region="portraitQuickAccess">
+        <button
+          type="button"
+          class="skj-avatar-button {{#if workflow.myTurn}}my-turn{{/if}}"
+          data-action="openActor"
+          data-tooltip="{{actor.name}}"
+        >
+          <img class="skj-avatar" src="{{actor.img}}" alt="{{actor.name}}" draggable="false">
+        </button>
+        <div
+          class="skj-avatar-drop-zone"
+          data-quick-auto-target
+          aria-label="{{localize 'AOV_SKJALDBORG.ActorHotbar.QuickAccess.PortraitDropHint'}}"
+        ></div>
+        {{#each quickAccessSlots}}
+          <button
+            type="button"
+            class="skj-quick-slot {{#if empty}}empty{{/if}}"
+            style="{{style}}"
+            data-quick-slot-index="{{index}}"
+            {{#unless empty}}
+              data-action="activate"
+              data-action-kind="{{kind}}"
+              data-action-id="{{id}}"
+              data-quick-kind="{{kind}}"
+              data-quick-id="{{id}}"
+              draggable="true"
+            {{/unless}}
+            aria-label="{{tooltip}}"
+            {{#unless empty}}data-tooltip="{{tooltip}}"{{/unless}}
+          >
+            {{#unless empty}}
+              {{#if img}}<img src="{{img}}" alt="">{{else}}<i class="{{icon}}" inert></i>{{/if}}
+              {{#if score}}<span class="skj-slot-score">{{score}}</span>{{/if}}
+            {{/unless}}
+          </button>
+        {{/each}}
+      </div>

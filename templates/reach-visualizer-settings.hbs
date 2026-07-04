@@ -1,0 +1,75 @@
+<div class="skj-reach-visualizer-settings-form">
+  <p class="hint">{{localize "AOV_SKJALDBORG.Settings.ReachVisualizerMenu.Intro"}}</p>
+
+  <fieldset>
+    <legend>{{localize "AOV_SKJALDBORG.ReachVisualizer.Display"}}</legend>
+
+    <div class="form-group">
+      <label>{{localize "AOV_SKJALDBORG.ReachVisualizer.Enabled.Name"}}</label>
+      <div class="form-fields">
+        <input type="checkbox" name="enabled" value="true" data-dtype="Boolean" {{checked settings.enabled}}>
+      </div>
+      <p class="hint">{{localize "AOV_SKJALDBORG.ReachVisualizer.Enabled.Hint"}}</p>
+    </div>
+
+    <div class="form-group">
+      <label>{{localize "AOV_SKJALDBORG.ReachVisualizer.Visibility.Name"}}</label>
+      <div class="form-fields">
+        <select name="visibility">
+          {{#each visibilityChoices}}
+            <option value="{{value}}" {{#if selected}}selected{{/if}}>{{label}}</option>
+          {{/each}}
+        </select>
+      </div>
+      <p class="hint">{{localize "AOV_SKJALDBORG.ReachVisualizer.Visibility.Hint"}}</p>
+    </div>
+
+    <div class="form-group">
+      <label>{{localize "AOV_SKJALDBORG.ReachVisualizer.Shape.Name"}}</label>
+      <div class="form-fields">
+        <select name="shape">
+          {{#each shapeChoices}}
+            <option value="{{value}}" {{#if selected}}selected{{/if}}>{{label}}</option>
+          {{/each}}
+        </select>
+      </div>
+      <p class="hint">{{localize "AOV_SKJALDBORG.ReachVisualizer.Shape.Hint"}}</p>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>{{localize "AOV_SKJALDBORG.ReachVisualizer.Style"}}</legend>
+
+    <div class="form-group">
+      <label>{{localize "AOV_SKJALDBORG.ReachVisualizer.Opacity.Name"}}</label>
+      <div class="form-fields">
+        <input type="number" name="opacity" value="{{settings.opacity}}" min="{{limits.opacity.min}}" max="{{limits.opacity.max}}" step="{{limits.opacity.step}}" data-dtype="Number">
+      </div>
+      <p class="hint">{{localize "AOV_SKJALDBORG.ReachVisualizer.Opacity.Hint"}}</p>
+    </div>
+
+    <div class="form-group">
+      <label>{{localize "AOV_SKJALDBORG.ReachVisualizer.PassiveOpacity.Name"}}</label>
+      <div class="form-fields">
+        <input type="number" name="passiveOpacity" value="{{settings.passiveOpacity}}" min="{{limits.passiveOpacity.min}}" max="{{limits.passiveOpacity.max}}" step="{{limits.passiveOpacity.step}}" data-dtype="Number">
+      </div>
+      <p class="hint">{{localize "AOV_SKJALDBORG.ReachVisualizer.PassiveOpacity.Hint"}}</p>
+    </div>
+
+    <div class="form-group">
+      <label>{{localize "AOV_SKJALDBORG.ReachVisualizer.ActiveOpacity.Name"}}</label>
+      <div class="form-fields">
+        <input type="number" name="activeOpacity" value="{{settings.activeOpacity}}" min="{{limits.activeOpacity.min}}" max="{{limits.activeOpacity.max}}" step="{{limits.activeOpacity.step}}" data-dtype="Number">
+      </div>
+      <p class="hint">{{localize "AOV_SKJALDBORG.ReachVisualizer.ActiveOpacity.Hint"}}</p>
+    </div>
+
+    <div class="form-group">
+      <label>{{localize "AOV_SKJALDBORG.ReachVisualizer.LineWidth.Name"}}</label>
+      <div class="form-fields">
+        <input type="number" name="lineWidth" value="{{settings.lineWidth}}" min="{{limits.lineWidth.min}}" max="{{limits.lineWidth.max}}" step="{{limits.lineWidth.step}}" data-dtype="Number">
+      </div>
+      <p class="hint">{{localize "AOV_SKJALDBORG.ReachVisualizer.LineWidth.Hint"}}</p>
+    </div>
+  </fieldset>
+</div>

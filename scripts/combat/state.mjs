@@ -1,4 +1,4 @@
-import { ACTION_CATEGORIES, ENGAGEMENT_STATUS, FLAG_KEYS, INTENT_STATUS, MODULE_ID, MODULE_VERSION, MOVEMENT_PLAN_STATUS, PHASES } from "../constants.mjs";
+import { ACTION_CATEGORIES, DISENGAGEMENT_METHODS, DISENGAGEMENT_STATUS, ENGAGEMENT_STATUS, FLAG_KEYS, INTENT_STATUS, MODULE_ID, MODULE_VERSION, MOVEMENT_PLAN_STATUS, PHASES } from "../constants.mjs";
 import { AoVAdapter } from "../adapter/aov-adapter.mjs";
 import { firstEnabledPhase, getEnabledPhases } from "./phase-structure.mjs";
 
@@ -108,7 +108,10 @@ export function defaultCombatantState() {
       },
       delay: {
         enabled: false,
-        targetDex: null
+        targetDex: null,
+        targetCombatantId: null,
+        position: "",
+        tiebreakerInt: null
       },
       waitInterrupt: {
         enabled: false,
@@ -118,6 +121,7 @@ export function defaultCombatantState() {
       fixedRank: null,
       runeCarryover: false
     },
+    runeMagic: defaultRuneMagicState(),
     movement: {
       mode: "none",
       origin: null,
@@ -142,6 +146,29 @@ export function defaultCombatantState() {
       engaged: false,
       partnerIds: [],
       reachUnits: 1,
+      reason: "",
+      egress: {
+        status: "none",
+        ignoredPartnerIds: [],
+        method: DISENGAGEMENT_METHODS.NONE,
+        sourceRound: null,
+        activatedAt: null,
+        reason: ""
+      }
+    },
+    disengagement: {
+      method: DISENGAGEMENT_METHODS.NONE,
+      status: DISENGAGEMENT_STATUS.NONE,
+      declaredRound: null,
+      resolvesAtRound: null,
+      partnerIds: [],
+      mountedAtDeclaration: false,
+      opponentMountedAtDeclaration: false,
+      defensiveOnly: false,
+      freeAttackResolved: false,
+      opportunityAttackerId: null,
+      opportunityAttackerIds: [],
+      opportunityMode: "one",
       reason: ""
     },
     dexLedger: null,
@@ -157,6 +184,38 @@ export function defaultCombatantState() {
     gmNotes: "",
     activeGroupId: null,
     updatedAt: Date.now()
+  };
+}
+
+/**
+ * Build the default Rune Script combat tracking state.
+ *
+ * @returns {import("../types.mjs").SkjaldborgRuneMagicState}
+ */
+export function defaultRuneMagicState() {
+  return {
+    status: "none",
+    itemUuid: null,
+    itemId: null,
+    itemType: "",
+    itemName: "",
+    runeCount: 0,
+    mpCost: 0,
+    maxEffects: 0,
+    dexPenalty: 0,
+    flatMod: 0,
+    flatModReason: "",
+    startedRound: null,
+    readyRound: null,
+    targetRefs: [],
+    resistance: false,
+    craftSkillId: null,
+    craftMessageId: null,
+    castMessageId: null,
+    eventMessageId: null,
+    resistanceMessageIds: [],
+    notes: "",
+    updatedAt: 0
   };
 }
 
@@ -305,6 +364,7 @@ export async function resetCombatantRoundState(combat) {
     updates.push(setCombatantState(combatant, {
       ...defaultCombatantState(),
       engagement: foundry.utils.deepClone(state.engagement ?? defaultCombatantState().engagement),
+      runeMagic: foundry.utils.deepClone(state.runeMagic ?? defaultCombatantState().runeMagic),
       gmNotes: state.gmNotes
     }));
   }

@@ -49,8 +49,27 @@ function addIfMissing(list, label, ok) {
  */
 function statusEffectMode(statusEffects, capabilities) {
   if (capabilities.effects.statusEffectsObject && capabilities.effects.activeEffectClass) return "native";
+  if (capabilities.effects.statusEffectsMap && capabilities.effects.activeEffectClass) return "native";
+  if (capabilities.effects.statusEffectsArray && capabilities.effects.activeEffectClass) return "module-fallback";
   if (!statusEffects && capabilities.effects.activeEffectClass) return "module-fallback";
   return "disabled";
+}
+
+function routeForImport(path) {
+  return foundry.utils.getRoute?.(path) ?? `/${path}`;
+}
+
+function dataModelHasSystemField(itemType, fieldName) {
+  const models = [
+    game.system?.model?.Item?.[itemType],
+    CONFIG?.Item?.dataModels?.[itemType],
+    CONFIG?.Item?.documentClass?.metadata?.types?.[itemType]
+  ].filter(Boolean);
+  for (const model of models) {
+    const system = model.system ?? model.schema?.fields?.system ?? model.schema?.fields ?? model;
+    if (system && Object.prototype.hasOwnProperty.call(system, fieldName)) return true;
+  }
+  return models.length ? false : null;
 }
 
 /**
@@ -105,6 +124,7 @@ export function detectV14Capabilities() {
     },
     applications: {
       applicationV2: typeof foundry.applications?.api?.ApplicationV2 === "function",
+      documentSheetV2: typeof foundry.applications?.api?.DocumentSheetV2 === "function",
       handlebarsMixin: typeof foundry.applications?.api?.HandlebarsApplicationMixin === "function",
       dialogV2: typeof foundry.applications?.api?.DialogV2 === "function",
       handlebarsRender: typeof foundry.applications?.handlebars?.renderTemplate === "function"
@@ -127,11 +147,32 @@ export function detectV14Capabilities() {
     },
     effects: {
       statusEffectsObject: !!statusEffects && typeof statusEffects === "object" && !Array.isArray(statusEffects),
+      statusEffectsArray: Array.isArray(statusEffects),
+      statusEffectsMap: typeof statusEffects?.set === "function",
       activeEffectClass: typeof CONFIG?.ActiveEffect?.documentClass === "function",
+      activeEffectFromStatusEffect: typeof CONFIG?.ActiveEffect?.documentClass?.fromStatusEffect === "function"
+        || typeof foundry.documents?.ActiveEffect?.fromStatusEffect === "function"
+        || typeof globalThis.ActiveEffect?.fromStatusEffect === "function",
       actorToggleStatusEffect: typeof CONFIG?.Actor?.documentClass?.prototype?.toggleStatusEffect === "function"
     },
     sockets: {
       available: typeof game.socket?.on === "function" && typeof game.socket?.emit === "function"
+    },
+    aovApi: {
+      routeResolvedImports: typeof foundry.utils?.getRoute === "function",
+      checkApiImport: null,
+      trigger: null,
+      successLevel: null,
+      rollType: null,
+      cardType: null,
+      rollTypesImport: null,
+      aovRollType: null
+    },
+    dataModels: {
+      skillCritMult: dataModelHasSystemField("skill", "critMult"),
+      skillFumbleMult: dataModelHasSystemField("skill", "fumbleMult"),
+      passionCritMult: dataModelHasSystemField("passion", "critMult"),
+      passionFumbleMult: dataModelHasSystemField("passion", "fumbleMult")
     },
     hardBlockers: [],
     warnings: [],
@@ -146,6 +187,7 @@ export function detectV14Capabilities() {
   addIfMissing(hardBlockers, "Foundry generation 14", capabilities.foundry.generationOk);
   addIfMissing(hardBlockers, "Age of Vikings system id", capabilities.system.idOk);
   addIfMissing(hardBlockers, "ApplicationV2", capabilities.applications.applicationV2);
+  addIfMissing(hardBlockers, "DocumentSheetV2", capabilities.applications.documentSheetV2);
   addIfMissing(hardBlockers, "HandlebarsApplicationMixin", capabilities.applications.handlebarsMixin);
   addIfMissing(hardBlockers, "DialogV2", capabilities.applications.dialogV2);
   addIfMissing(hardBlockers, "Handlebars renderTemplate", capabilities.applications.handlebarsRender);
@@ -162,23 +204,85 @@ export function detectV14Capabilities() {
   addIfMissing(warnings, "AoV CombatTracker class name not recognized", capabilities.combat.aovTrackerClass);
   addIfMissing(warnings, "AoV tracker adjustInit unavailable", capabilities.combat.trackerAdjustInit);
   addIfMissing(warnings, "AoV tracker adjDex unavailable", capabilities.combat.trackerAdjDex);
+  addIfMissing(warnings, "Foundry route-resolved import support unavailable", capabilities.aovApi.routeResolvedImports);
+  if (capabilities.dataModels.skillCritMult === false || capabilities.dataModels.skillFumbleMult === false) {
+    warnings.push("AoV skill data model does not expose critMult/fumbleMult");
+  }
+  if (capabilities.dataModels.passionCritMult === false || capabilities.dataModels.passionFumbleMult === false) {
+    warnings.push("AoV passion data model does not expose critMult/fumbleMult");
+  }
   addIfMissing(warnings, "TokenDocument#getCompleteMovementPath unavailable", capabilities.movement.completeMovementPath);
   addIfMissing(warnings, "Scene#moveTokens unavailable; per-token movement fallback will be used", capabilities.movement.sceneMoveTokens);
   addIfMissing(warnings, "ActiveEffect document class unavailable; engagement visual mirroring disabled", capabilities.effects.activeEffectClass);
+  addIfMissing(warnings, "ActiveEffect.fromStatusEffect unavailable; explicit status data fallback required", capabilities.effects.activeEffectFromStatusEffect);
   addIfMissing(warnings, "Actor#toggleStatusEffect unavailable; status creation fallback required", capabilities.effects.actorToggleStatusEffect);
 
   const degraded = capabilities.degradedFeatures;
   if (!capabilities.movement.sceneMoveTokens) degraded.push("scene-move-tokens");
   if (!capabilities.movement.completeMovementPath) degraded.push("complete-movement-path");
   if (!capabilities.combat.trackerAdjustInit || !capabilities.combat.trackerAdjDex) degraded.push("adjust-initiative-integration");
+  if (!capabilities.effects.activeEffectFromStatusEffect) degraded.push("active-effect-from-status-fallback");
   capabilities.statusEffectMode = statusEffectMode(statusEffects, capabilities);
-  if (!capabilities.effects.statusEffectsObject && capabilities.effects.activeEffectClass) {
+  if (!capabilities.effects.statusEffectsObject && !capabilities.effects.statusEffectsMap && capabilities.effects.activeEffectClass) {
     degraded.push("engagement-status-catalog-fallback");
   }
   if (!capabilities.effects.activeEffectClass) degraded.push("engagement-status-effects");
   capabilities.runtimeEnabled = hardBlockers.length === 0;
   capabilities.supported = capabilities.runtimeEnabled && warnings.length === 0;
   capabilities.missing = hardBlockers;
+  lastCapabilityReport = capabilities;
+  return capabilities;
+}
+
+/**
+ * Probe dynamically imported AoV APIs which are not exposed as stable globals.
+ *
+ * @param {object} [capabilities=detectV14Capabilities()] Existing capability report.
+ * @returns {Promise<object>}
+ */
+export async function detectAoVApiCapabilities(capabilities = detectV14Capabilities()) {
+  if (!capabilities?.system?.idOk) return capabilities;
+
+  try {
+    const checks = await import(routeForImport("systems/aov/system/apps/checks.mjs"));
+    capabilities.aovApi.checkApiImport = true;
+    capabilities.aovApi.trigger = typeof checks.AOVCheck?._trigger === "function";
+    capabilities.aovApi.successLevel = typeof checks.AOVCheck?.successLevel === "function";
+    capabilities.aovApi.rollType = !!checks.RollType;
+    capabilities.aovApi.cardType = !!checks.CardType;
+  } catch (_exception) {
+    capabilities.aovApi.checkApiImport = false;
+    capabilities.aovApi.trigger = false;
+    capabilities.aovApi.successLevel = false;
+    capabilities.aovApi.rollType = false;
+    capabilities.aovApi.cardType = false;
+  }
+
+  try {
+    const rollTypes = await import(routeForImport("systems/aov/system/apps/roll-types.mjs"));
+    capabilities.aovApi.rollTypesImport = true;
+    capabilities.aovApi.aovRollType = typeof rollTypes.AOVRollType?._onDetermineCheck === "function";
+  } catch (_exception) {
+    capabilities.aovApi.rollTypesImport = false;
+    capabilities.aovApi.aovRollType = false;
+  }
+
+  const warnings = capabilities.warnings ?? [];
+  addIfMissing(warnings, "AoV check API import unavailable", capabilities.aovApi.checkApiImport);
+  addIfMissing(warnings, "AoV AOVCheck._trigger unavailable", capabilities.aovApi.trigger);
+  addIfMissing(warnings, "AoV AOVCheck.successLevel unavailable", capabilities.aovApi.successLevel);
+  addIfMissing(warnings, "AoV RollType unavailable", capabilities.aovApi.rollType);
+  addIfMissing(warnings, "AoV CardType unavailable", capabilities.aovApi.cardType);
+  addIfMissing(warnings, "AoV roll-types import unavailable", capabilities.aovApi.rollTypesImport);
+  addIfMissing(warnings, "AoV AOVRollType._onDetermineCheck unavailable", capabilities.aovApi.aovRollType);
+  capabilities.degradedFeatures = Array.from(new Set(capabilities.degradedFeatures ?? []));
+  if (!capabilities.aovApi.checkApiImport || !capabilities.aovApi.trigger || !capabilities.aovApi.successLevel) {
+    capabilities.degradedFeatures.push("aov-check-api");
+  }
+  if (!capabilities.aovApi.rollTypesImport || !capabilities.aovApi.aovRollType) {
+    capabilities.degradedFeatures.push("aov-roll-type-router");
+  }
+  capabilities.supported = capabilities.runtimeEnabled && warnings.length === 0;
   lastCapabilityReport = capabilities;
   return capabilities;
 }

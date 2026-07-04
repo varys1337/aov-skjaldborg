@@ -8,13 +8,17 @@
     "node": ">=20"
   },
   "scripts": {
-    "styles:build": "sass --style=expanded --no-source-map src/styles/skjaldborg.scss styles/skjaldborg.css",
-    "styles:watch": "sass --watch --style=expanded --no-source-map src/styles/skjaldborg.scss:styles/skjaldborg.css",
+    "styles:dev": "node ./node_modules/sass/sass.js --style=expanded --no-source-map src/styles/skjaldborg.scss styles/skjaldborg.css",
+    "styles:release": "node ./node_modules/sass/sass.js --style=compressed --no-source-map src/styles/skjaldborg.scss styles/skjaldborg.css",
+    "styles:build": "npm run styles:dev",
+    "styles:watch": "node ./node_modules/sass/sass.js --watch --style=expanded --no-source-map src/styles/skjaldborg.scss:styles/skjaldborg.css",
+    "styles:audit": "node tools/css-size-audit.mjs",
     "check:syntax": "node tools/check-syntax.mjs",
+    "test:regression": "node tools/regression-tests.mjs",
     "validate": "node tools/validate-module.mjs",
-    "build": "npm run styles:build && node tools/build-release.mjs",
-    "build:folder": "npm run styles:build && node tools/build-dist.mjs",
-    "ci": "npm run check:syntax && npm run styles:build && npm run validate",
+    "build": "npm run styles:release && node tools/build-release.mjs",
+    "build:folder": "npm run styles:release && node tools/build-dist.mjs",
+    "ci": "npm run check:syntax && npm run styles:dev && npm run styles:audit && npm run validate && npm run test:regression",
     "set-version": "node tools/set-version.mjs"
   },
   "devDependencies": {

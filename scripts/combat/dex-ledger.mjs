@@ -2,6 +2,8 @@ import { AoVAdapter } from "../adapter/aov-adapter.mjs";
 import {
   ACTION_CATEGORIES,
   DEX_MODIFIERS,
+  DISENGAGEMENT_METHODS,
+  DISENGAGEMENT_STATUS,
   MODULE_ID,
   MOVEMENT_DEBUG_CATEGORIES,
   MOVEMENT_DEBUG_LEVELS,
@@ -78,7 +80,7 @@ export function computeDexLedger(
 ) {
   const actor = combatant.actor;
   const baseDex = AoVAdapter.getDex(actor);
-  const int = AoVAdapter.getInt(actor);
+  let int = AoVAdapter.getInt(actor);
   const mov = AoVAdapter.getMov(actor);
   const intent = combatantState.intent ?? {};
   const movement = combatantState.movement ?? {};
@@ -126,10 +128,14 @@ export function computeDexLedger(
   if (intent.delay?.enabled) {
     const targetDex = numberOr(intent.delay.targetDex, null);
     if (Number.isFinite(targetDex) && targetDex > 0) finalDex = Math.min(finalDex, targetDex);
+    const tiebreakerInt = numberOr(intent.delay.tiebreakerInt, null);
+    if (Number.isFinite(tiebreakerInt)) int = tiebreakerInt;
   }
 
   const preventedThisRound = finalDex <= 0;
-  const projectedInitiative = preventedThisRound ? null : AoVAdapter.projectInitiative(finalDex, int);
+  const projectedInitiative = preventedThisRound
+    ? null
+    : Number((finalDex + ((Number(int) || 0) / 100)).toFixed(2));
 
   const ledger = {
     combatantId: combatant.id,
@@ -184,6 +190,11 @@ export function computeDexLedger(
  */
 export function buildScheduledActions(combatant, combatantState, ledger) {
   const intent = combatantState.intent ?? {};
+  const disengagement = combatantState.disengagement ?? {};
+  if (disengagement.status === DISENGAGEMENT_STATUS.DECLARED
+    && [DISENGAGEMENT_METHODS.RETREAT, DISENGAGEMENT_METHODS.FLEE].includes(disengagement.method)) {
+    return [];
+  }
   if (ledger.preventedThisRound || intent.runeCarryover) {
     return [{
       id: `${combatant.id}-carryover`,

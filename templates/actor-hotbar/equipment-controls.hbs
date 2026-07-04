@@ -1,0 +1,33 @@
+          <div class="skj-weapon-control-stack">
+            <div class="skj-weapon-action-strip">
+              <div class="skj-weapon-select-wrap {{#unless weaponState.canManage}}is-disabled{{/unless}}">
+                <button
+                  type="button"
+                  class="skj-selected-weapon-roll"
+                  data-action="rollSelectedWeapon"
+                  data-tooltip="AOV_SKJALDBORG.Weapons.RollSelectedHint"
+                  aria-label="{{localize 'AOV_SKJALDBORG.Weapons.RollSelected'}}"
+                  {{#unless weaponState.canRoll}}disabled{{/unless}}
+                ><i class="fa-solid fa-swords" inert></i></button>
+                <select data-readied-weapon-select aria-label="{{localize 'AOV_SKJALDBORG.Weapons.WeaponToDraw'}}" {{#unless weaponState.canManage}}disabled{{/unless}}>
+                  {{#each weaponState.carriedWeapons}}
+                    <option value="{{id}}" {{#if selected}}selected{{/if}}>{{name}}</option>
+                  {{else}}
+                    <option value="">{{localize 'AOV_SKJALDBORG.Weapons.NoCarriedWeapons'}}</option>
+                  {{/each}}
+                </select>
+              </div>
+              <button type="button" class="skj-weapon-action-button {{#if weaponState.selectedIsReadied}}is-sheathe{{else}}is-draw{{/if}}" data-action="toggleReadiedWeapon" data-readied-weapon-toggle data-tooltip="{{#if weaponState.selectedIsReadied}}AOV_SKJALDBORG.Weapons.SheatheHint{{else}}AOV_SKJALDBORG.Weapons.DrawHint{{/if}}" {{#if weaponState.toggleDisabled}}disabled{{/if}}>
+                <i class="fa-solid {{#if weaponState.selectedIsReadied}}fa-hand{{else}}fa-swords{{/if}}" inert></i>
+                <span>{{#if weaponState.selectedIsReadied}}{{localize 'AOV_SKJALDBORG.Weapons.Sheathe'}}{{else}}{{localize 'AOV_SKJALDBORG.Weapons.Draw'}}{{/if}}</span>
+              </button>
+              <button type="button" class="skj-weapon-action-button" data-action="dropReadiedWeapon" data-tooltip="AOV_SKJALDBORG.Weapons.DropHint" {{#if weaponState.dropDisabled}}disabled{{/if}}>
+                <i class="fa-solid fa-hand-holding" inert></i>
+                <span>{{localize 'AOV_SKJALDBORG.Weapons.Drop'}}</span>
+              </button>
+            </div>
+            <div class="skj-readied-weapon-label" data-tooltip="AOV_SKJALDBORG.Weapons.CurrentlyReadied">
+              <i class="fa-solid fa-swords" inert></i>
+              <span>{{localize 'AOV_SKJALDBORG.Weapons.CurrentlyReadied'}}: {{weaponState.currentLabel}}</span>
+            </div>
+          </div>

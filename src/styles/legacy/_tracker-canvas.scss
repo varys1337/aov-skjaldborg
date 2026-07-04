@@ -1,0 +1,291 @@
+/* ------------------------------------------------------------------------- */
+/* v0.2.26 restored tracker intent and workflow indicators                    */
+/* ------------------------------------------------------------------------- */
+
+.skj-combatant-status {
+  align-items: center;
+  display: inline-flex;
+  gap: 3px;
+  justify-content: center;
+}
+
+.skj-combatant-status > i {
+  flex: 0 0 auto;
+  font-size: 9px;
+  line-height: 1;
+}
+
+.skj-combatant-status > span {
+  min-width: max-content;
+  overflow: visible;
+  white-space: nowrap;
+}
+
+.skj-combatant-indicators {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 4px;
+  margin-top: 2px;
+  max-width: 100%;
+  min-width: 0;
+  overflow: visible;
+}
+
+.skj-tracker-indicator {
+  align-items: center;
+  background: rgba(35, 32, 30, 0.78);
+  border: 1px solid var(--color-border-light-tertiary, #777);
+  border-radius: 9px;
+  box-sizing: border-box;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 9px;
+  gap: 3px;
+  line-height: 1;
+  max-width: none;
+  min-height: 17px;
+  min-width: 17px;
+  overflow: hidden;
+  padding: 2px 5px;
+  white-space: nowrap;
+}
+
+.skj-tracker-indicator > i {
+  flex: 0 0 auto;
+  font-size: 9px;
+  line-height: 1;
+}
+
+.skj-tracker-indicator > span {
+  min-width: max-content;
+  overflow: visible;
+  white-space: nowrap;
+}
+
+.skj-tracker-indicator.readied-weapon > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.skj-tracker-indicator.readied-weapon {
+  flex: 0 1 auto;
+  max-width: 112px;
+}
+
+body.theme-dark .skj-tracker-indicator {
+  background: rgba(14, 14, 14, 0.72);
+  color: var(--color-text-light-highlight, #f0f0e0);
+}
+
+/* ------------------------------------------------------------------------- */
+/* v0.2.27 compact tracker intent labels and actor-HUD geometry correction    */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * Keep the persisted intent status available through icon, CSS state, and
+ * tooltip while displaying only the selected action name in the tracker row.
+ * Long localized action names may shrink rather than displacing initiative.
+ */
+.skj-combatant-status {
+  flex: 0 1 auto;
+  max-width: 92px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.skj-combatant-status > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ------------------------------------------------------------------------- */
+/* v0.2.28 intent-grid spacing and compact tracker workflow row               */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * The shared hotbar slot rule sets intent buttons to 48px. Match the grid
+ * tracks to that resolved height so the controls remain inside their rows,
+ * then keep a visible gap between both rows and the weapon action strip.
+ */
+.skj-combat-stage .skj-intent-grid {
+  grid-template-rows: repeat(2, var(--skj-slot-size));
+  min-height: calc(var(--skj-slot-size) + var(--skj-slot-size) + 8px);
+  row-gap: 8px;
+}
+
+.skj-combat-stage .skj-weapon-action-strip {
+  margin-top: 2px;
+}
+
+/* Keep reactions, movement, and the readied weapon on one compact row. */
+.skj-combatant-indicators {
+  flex-wrap: nowrap;
+  overflow: hidden;
+  width: 100%;
+}
+
+.skj-tracker-indicator.reactions,
+.skj-tracker-indicator.movement {
+  flex: 0 0 auto;
+}
+
+.skj-tracker-indicator.readied-weapon {
+  flex: 0 1 auto;
+  max-width: 72px;
+  min-width: 36px;
+}
+
+.skj-tracker-indicator.readied-weapon > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+
+/* ------------------------------------------------------------------------- */
+/* v0.2.29 tracker sizing, collapse alignment, and canvas intent markers      */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * Viewport-level markers reuse the exact Font Awesome classes from the Combat
+ * Action HUD while remaining visually attached to canvas tokens.
+ */
+.skj-token-intent-layer {
+  contain: layout style paint;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  position: fixed;
+  z-index: 5;
+}
+
+.skj-token-intent-indicator {
+  align-items: center;
+  background: radial-gradient(circle at 35% 30%, rgba(52, 76, 68, 0.97), rgba(12, 18, 17, 0.96));
+  border: 2px solid #4f9b82;
+  border-radius: 50%;
+  box-shadow: 0 2px 7px rgba(0, 0, 0, 0.78), 0 0 8px rgba(79, 155, 130, 0.48);
+  color: #f3ead1;
+  display: flex;
+  height: 32px;
+  justify-content: center;
+  position: absolute;
+  transform: translate(-50%, calc(-100% - 7px));
+  width: 32px;
+}
+
+.skj-token-intent-indicator > i {
+  font-size: 16px;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.skj-token-intent-indicator.held {
+  border-color: #a47bb8;
+  box-shadow: 0 2px 7px rgba(0, 0, 0, 0.78), 0 0 8px rgba(164, 123, 184, 0.58);
+}
+
+.skj-token-intent-indicator.shield-cover {
+  border-color: rgba(89, 199, 176, 0.95);
+  box-shadow: 0 0 0 1px rgba(89, 199, 176, 0.58), 0 0 8px rgba(89, 199, 176, 0.45);
+  transform: translate(calc(-50% - 38px), calc(-100% - 7px));
+}
+
+.skj-token-intent-indicator.shieldwall {
+  border-color: rgba(120, 174, 232, 0.95);
+  box-shadow: 0 0 0 1px rgba(120, 174, 232, 0.55), 0 0 8px rgba(120, 174, 232, 0.45);
+  transform: translate(calc(-50% + 38px), calc(-100% - 7px));
+}
+
+.skj-priority-status-effect {
+  border-color: rgba(89, 199, 176, 0.9) !important;
+  box-shadow: 0 0 0 1px rgba(89, 199, 176, 0.45), 0 0 8px rgba(89, 199, 176, 0.35);
+}
+
+.skj-priority-status-effect img,
+.skj-priority-status-effect svg,
+.skj-priority-status-effect i {
+  filter: sepia(1) saturate(2.5) hue-rotate(116deg) brightness(1.08);
+}
+
+
+/* ------------------------------------------------------------------------- */
+/* v0.2.30 disposition turn highlight and reliable canvas intent markers     */
+/* ------------------------------------------------------------------------- */
+
+/* Keep the tracker intent immediately after the native left-side controls. */
+.combatant-controls > .skj-combatant-status {
+  margin-inline: 3px 2px;
+}
+
+/*
+ * The viewport layer itself never intercepts canvas input. Individual markers
+ * opt back into pointer events only so Foundry's tooltip service can resolve
+ * their data-tooltip label.
+ */
+.skj-token-intent-indicator {
+  cursor: help;
+  pointer-events: auto;
+  user-select: none;
+}
+
+
+/* ------------------------------------------------------------------------- */
+/* Stable table labels and semantic tracker accents                           */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * Compact table and segment labels use the same theme text colour as their
+ * parent section heading. Token disposition remains authoritative for the
+ * portrait and encounter highlight only; it no longer recolours HUD labels.
+ */
+.skj-actor-hotbar .skj-stat-header,
+.skj-actor-hotbar .skj-family-header,
+.skj-actor-hotbar .skj-thrall-header,
+.skj-actor-hotbar .skj-farm-header,
+.skj-actor-hotbar .skj-history-action-header,
+.skj-actor-hotbar .skj-equipment-header {
+  color: var(--skj-text);
+  font-weight: 800;
+  text-shadow: none;
+}
+
+/*
+ * Tracker pill accents follow semantic roles rather than arbitrary per-widget
+ * colours: intent is action-specific, defense is blue, movement is teal,
+ * equipment is amber, interruption is violet, and danger is red.
+ */
+.skj-tracker-indicator {
+  --skj-indicator-accent: #9aa4b2;
+  border-color: var(--skj-indicator-accent);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.035);
+}
+
+.skj-tracker-indicator > i {
+  color: var(--skj-indicator-accent);
+}
+
+.skj-tracker-indicator.status-action.intent-attack { --skj-indicator-accent: #e57a6b; }
+.skj-tracker-indicator.status-action.intent-missile { --skj-indicator-accent: #d9a84f; }
+.skj-tracker-indicator.status-action.intent-magic { --skj-indicator-accent: #b78be3; }
+.skj-tracker-indicator.status-action.intent-defend { --skj-indicator-accent: #78aee8; }
+.skj-tracker-indicator.status-action.intent-retreat,
+.skj-tracker-indicator.status-action.intent-flee { --skj-indicator-accent: #d8905d; }
+.skj-tracker-indicator.status-action.intent-knockback { --skj-indicator-accent: #e18478; }
+.skj-tracker-indicator.status-action.intent-wait { --skj-indicator-accent: #75b99b; }
+.skj-tracker-indicator.status-action.intent-delay { --skj-indicator-accent: #9790d7; }
+.skj-tracker-indicator.status-action.intent-other { --skj-indicator-accent: #a7aab2; }
+.skj-tracker-indicator.status-action.intent-uncommitted { --skj-indicator-accent: #8e98a7; }
+
+/* Reactions use the native Age of Vikings green so they remain distinct from Defend. */
+.skj-tracker-indicator.reactions {
+  --skj-indicator-accent: var(--aov-title-font-colour, #66b596);
+}
+.skj-tracker-indicator.movement { --skj-indicator-accent: #68c1b2; }
+.skj-tracker-indicator.movement.stopped { --skj-indicator-accent: #d96b63; }
+.skj-tracker-indicator.readied-weapon { --skj-indicator-accent: #d8aa55; }
+.skj-tracker-indicator.shieldwall { --skj-indicator-accent: #78aee8; }

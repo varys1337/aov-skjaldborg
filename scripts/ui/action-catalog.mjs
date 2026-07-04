@@ -1,10 +1,12 @@
-import { ACTION_CATEGORIES, ACTION_UI_DEFAULTS, ACTION_UI_LIMITS, INTENT_STATUS, MODULE_ID } from "../constants.mjs";
-import { AoVAdapter } from "../adapter/aov-adapter.mjs";
+import { ACTION_CATEGORIES, ACTION_UI_DEFAULTS, ACTION_UI_LIMITS, INTENT_STATUS, MODULE_ID, UTILITY_ACTION_ID } from "../constants.mjs";
+import { AoVAdapter, importAoVSystemModule } from "../adapter/aov-adapter.mjs";
 import { defaultCombatantState, getCombatState, getCombatantState } from "../combat/state.mjs";
 import { requestGm } from "../socket.mjs";
 import { error } from "../logger.mjs";
-import { clearReadiedWeapon, getReadiedWeapon, getReadiedWeaponId } from "../combat/weapon-state.mjs";
+import { clearReadiedWeaponInHand, getReadiedWeapon, getReadiedWeaponIds, getReadiedWeaponList } from "../combat/weapon-state.mjs";
 import { RenderCoordinator } from "./render-coordinator.mjs";
+import { activateEvadingForActor } from "../combat/evade-status.mjs";
+import { performanceDiagnostics } from "../performance/performance-monitor.mjs";
 import {
   clearActorPreparedIntent,
   getActorPreparedIntent,
@@ -12,6 +14,7 @@ import {
   sanitizePreparedIntentText,
   setActorPreparedIntent
 } from "../combat/prepared-intent.mjs";
+import { actionThemeClass, finiteNumber, localizeOrFallback } from "./dom-utils.mjs";
 
 export { getActorPreparedIntent } from "../combat/prepared-intent.mjs";
 
@@ -21,6 +24,9 @@ const HISTORY_FAMILY_ACTION_TYPES = new Set(["passion", "devotion"]);
 const EQUIPMENT_ITEM_TYPES = new Set(["weapon", "gear", "armour"]);
 export const ACTOR_HOTBAR_QUICK_SLOT_CAPACITY = ACTION_UI_LIMITS.actionRingMaxItems.max;
 const QUICK_ACCESS_ACTION_KINDS = new Set(["item", "stat", "intent", "macro"]);
+const pendingIntentCommits = new Map();
+const DISPLAYABLE_INTENT_STATUSES = new Set([INTENT_STATUS.COMMITTED, INTENT_STATUS.HELD]);
+const itemSnapshotsByActor = new WeakMap();
 
 const EQUIPMENT_STATUS = Object.freeze({
   1: { key: "AOV.carried", icon: "fa-solid fa-hand-holding" },
@@ -33,36 +39,14 @@ const ACTION_ICONS = Object.freeze({
   [ACTION_CATEGORIES.MISSILE]: "fa-solid fa-crosshairs",
   [ACTION_CATEGORIES.KNOCKBACK]: "fa-solid fa-people-arrows-left-right",
   [ACTION_CATEGORIES.GRAPPLE]: "fa-solid fa-people-pulling",
-  [ACTION_CATEGORIES.DEFEND]: "fa-solid fa-shield-halved",
+  [ACTION_CATEGORIES.DEFEND]: "fa-solid fa-person-running",
   [ACTION_CATEGORIES.MAGIC]: "fa-solid fa-wand-magic-sparkles",
   [ACTION_CATEGORIES.RETREAT]: "fa-solid fa-person-walking-arrow-right",
   [ACTION_CATEGORIES.WAIT]: "fa-solid fa-hand",
   [ACTION_CATEGORIES.DELAY]: "fa-solid fa-clock",
-  [ACTION_CATEGORIES.OTHER]: "fa-solid fa-ellipsis"
+  [ACTION_CATEGORIES.OTHER]: "fa-solid fa-ellipsis",
+  [UTILITY_ACTION_ID]: "fa-solid fa-toolbox"
 });
-
-/**
- * Convert a candidate value to a finite number when possible.
- *
- * @param {unknown} value Candidate value.
- * @returns {number|null}
- */
-function finiteNumber(value) {
-  const number = Number(value);
-  return Number.isFinite(number) ? number : null;
-}
-
-/**
- * Resolve a localized string while preserving a deterministic fallback.
- *
- * @param {string} key Localization key.
- * @param {string} fallback Fallback label.
- * @returns {string}
- */
-function localizeOrFallback(key, fallback) {
-  const localized = game.i18n.localize(key);
-  return localized === key ? fallback : localized;
-}
 
 /**
  * Normalize the AoV carried, packed, or stored state for equipment.
@@ -78,6 +62,65 @@ function equipmentStatus(value) {
     label: localizeOrFallback(descriptor.key, normalized === 1 ? "Carried" : normalized === 2 ? "Packed" : "Stored"),
     icon: descriptor.icon
   };
+}
+
+function actorRevision(actor) {
+  return [
+    actor?.uuid ?? actor?.id ?? "",
+    actor?.updatedAt ?? actor?._stats?.modifiedTime ?? "",
+    actor?.items?.size ?? 0
+  ].join(":");
+}
+
+/**
+ * Build a stable per-render item index for hotbar, ring, and dialog prep.
+ *
+ * The snapshot avoids repeated full collection scans while remaining derived
+ * from authoritative Actor-owned Item documents. Callers must not mutate the
+ * returned arrays.
+ *
+ * @param {Actor|null|undefined} actor Actor document.
+ * @returns {{items: Item[], byType: Map<string, Item[]>}}
+ */
+export function actorItemSnapshot(actor) {
+  if (!actor) return { items: [], byType: new Map() };
+  const revision = actorRevision(actor);
+  const cached = itemSnapshotsByActor.get(actor);
+  if (cached?.revision === revision) {
+    performanceDiagnostics.count("actionCatalog.itemSnapshot.hit");
+    return cached.snapshot;
+  }
+
+  const items = Array.from(actor.items ?? []);
+  const byType = new Map();
+  for (const item of items) {
+    const type = String(item?.type ?? "");
+    if (!type) continue;
+    const bucket = byType.get(type) ?? [];
+    bucket.push(item);
+    byType.set(type, bucket);
+  }
+  const snapshot = { items, byType };
+  itemSnapshotsByActor.set(actor, { revision, snapshot });
+  performanceDiagnostics.count("actionCatalog.itemSnapshot.miss", 1, { actorId: actor.id ?? null, itemCount: items.length });
+  return snapshot;
+}
+
+/**
+ * Explicitly drop a cached item snapshot when hook-level invalidation knows the
+ * actor's owned Item collection changed.
+ *
+ * @param {Actor|null|undefined} actor Actor document.
+ * @returns {void}
+ */
+export function invalidateActorItemSnapshot(actor) {
+  if (!actor) return;
+  itemSnapshotsByActor.delete(actor);
+  performanceDiagnostics.count("actionCatalog.itemSnapshot.invalidate", 1, { actorId: actor.id ?? null });
+}
+
+function snapshotItemsOfType(snapshot, type) {
+  return snapshot.byType.get(type) ?? [];
 }
 
 
@@ -212,10 +255,11 @@ export function isSkjaldborgCombatActive(combat) {
  *
  * @returns {object[]}
  */
-export function prepareIntentActions({ selectedCategory = null, otherText = "" } = {}) {
+export function prepareIntentActions({ selectedCategory = null, otherText = "", includeWait = false, includeUtility = true } = {}) {
   const selected = selectedCategory ? normalizeIntentCategory(selectedCategory) : null;
   const customText = sanitizePreparedIntentText(otherText);
-  return Object.values(ACTION_CATEGORIES).map(category => {
+  const categories = Object.values(ACTION_CATEGORIES).filter(category => includeWait || category !== ACTION_CATEGORIES.WAIT);
+  const actions = categories.map(category => {
     const name = game.i18n.localize(`AOV_SKJALDBORG.ActionCategories.${category}`);
     return {
       id: category,
@@ -228,6 +272,19 @@ export function prepareIntentActions({ selectedCategory = null, otherText = "" }
       selected: selected === category
     };
   });
+  if (includeUtility) {
+    const otherIndex = actions.findIndex(action => action.id === ACTION_CATEGORIES.OTHER);
+    const insertIndex = otherIndex >= 0 ? otherIndex : actions.length;
+    actions.splice(insertIndex, 0, {
+      id: UTILITY_ACTION_ID,
+      kind: "utility",
+      icon: ACTION_ICONS[UTILITY_ACTION_ID],
+      name: game.i18n.localize("AOV_SKJALDBORG.ActionCategories.utility"),
+      tooltip: game.i18n.localize("AOV_SKJALDBORG.Utility.Title"),
+      selected: false
+    });
+  }
+  return actions;
 }
 
 /**
@@ -237,25 +294,19 @@ export function prepareIntentActions({ selectedCategory = null, otherText = "" }
  * @returns {Promise<string|null>} Sanitized text, or null when dismissed.
  */
 export async function promptOtherIntentText(currentText = "") {
-  const wrapper = document.createElement("div");
-  wrapper.className = "skj-other-intent-dialog";
-
-  const label = document.createElement("label");
-  const heading = document.createElement("span");
-  heading.textContent = game.i18n.localize("AOV_SKJALDBORG.IntentDialog.Label");
-  const textarea = document.createElement("textarea");
-  textarea.name = "intentText";
-  textarea.rows = 4;
-  textarea.maxLength = 500;
-  textarea.autofocus = true;
-  textarea.placeholder = game.i18n.localize("AOV_SKJALDBORG.IntentDialog.Placeholder");
-  textarea.textContent = sanitizePreparedIntentText(currentText);
-  label.append(heading, textarea);
-  wrapper.append(label);
+  const themeClass = actionThemeClass();
+  const content = await foundry.applications.handlebars.renderTemplate(
+    "modules/aov-skjaldborg/templates/other-intent-dialog.hbs",
+    { currentText: sanitizePreparedIntentText(currentText) }
+  );
 
   const result = await foundry.applications.api.DialogV2.prompt({
-    window: { title: game.i18n.localize("AOV_SKJALDBORG.IntentDialog.Title") },
-    content: wrapper.outerHTML,
+    classes: ["aov-skjaldborg", "dialog", "skj-attack-roll-window", "skj-other-intent-dialog-window", themeClass],
+    window: {
+      title: game.i18n.localize("AOV_SKJALDBORG.IntentDialog.Title"),
+      contentClasses: ["aov-skjaldborg", "skj-attack-roll-content", themeClass]
+    },
+    content,
     rejectClose: false,
     modal: true,
     ok: {
@@ -351,18 +402,17 @@ export function sortActorActions(actor, group, actions) {
  */
 export function prepareActorActions(actor) {
   if (!actor) return { weapons: [], skills: [], magic: [], historyFamily: [], ring: [] };
-  const items = Array.from(actor.items ?? []);
-  const weapons = items
-    .filter(item => item.type === "weapon" && Number(item.system?.equipStatus) === 1)
+  const snapshot = actorItemSnapshot(actor);
+  const weapons = snapshotItemsOfType(snapshot, "weapon")
+    .filter(item => Number(item.system?.equipStatus) === 1)
     .map(item => itemAction(item, "combat"));
-  const skills = items
-    .filter(item => item.type === "skill")
+  const skills = snapshotItemsOfType(snapshot, "skill")
     .map(item => itemAction(item, "skills"));
-  const magic = items
-    .filter(item => MAGIC_ITEM_TYPES.has(item.type))
+  const magic = Array.from(MAGIC_ITEM_TYPES)
+    .flatMap(type => snapshotItemsOfType(snapshot, type))
     .map(item => itemAction(item, "magic"));
-  const historyFamily = items
-    .filter(item => HISTORY_FAMILY_ACTION_TYPES.has(item.type))
+  const historyFamily = Array.from(HISTORY_FAMILY_ACTION_TYPES)
+    .flatMap(type => snapshotItemsOfType(snapshot, type))
     .map(item => itemAction(item, "historyFamily"));
 
   const sortedWeapons = sortActorActions(actor, "combat", weapons);
@@ -393,11 +443,11 @@ export function prepareActorEquipment(actor) {
   if (!actor) return [];
 
   const groups = [];
-  const items = Array.from(actor.items ?? []);
-  const readiedWeaponId = getReadiedWeapon(actor)?.id ?? null;
-  const carriedEquipment = items.filter(item =>
-    EQUIPMENT_ITEM_TYPES.has(item.type) && Number(item.system?.equipStatus) === 1
-  );
+  const snapshot = actorItemSnapshot(actor);
+  const readiedWeaponIds = new Set(getReadiedWeaponList(actor).map(item => String(item.id)));
+  const carriedEquipment = Array.from(EQUIPMENT_ITEM_TYPES)
+    .flatMap(type => snapshotItemsOfType(snapshot, type))
+    .filter(item => EQUIPMENT_ITEM_TYPES.has(item.type) && Number(item.system?.equipStatus) === 1);
   const computedEncumbrance = carriedEquipment.reduce((total, item) => {
     const quantity = item.type === "gear" ? Math.max(0, finiteNumber(item.system?.quantity) ?? 0) : 1;
     const actual = finiteNumber(item.system?.actlEnc);
@@ -414,8 +464,7 @@ export function prepareActorEquipment(actor) {
       : `${actualEncumbrance}/${Math.max(0, Math.floor(maximumEncumbrance))}`
   };
 
-  const weapons = items
-    .filter(item => item.type === "weapon")
+  const weapons = [...snapshotItemsOfType(snapshot, "weapon")]
     .sort((a, b) => a.name.localeCompare(b.name, game.i18n.lang))
     .map(item => {
       const status = equipmentStatus(item.system?.equipStatus);
@@ -441,11 +490,10 @@ export function prepareActorEquipment(actor) {
         statusValue: status.value,
         statusLabel: status.label,
         statusIcon: status.icon,
-        readied: item.id === readiedWeaponId
+        readied: readiedWeaponIds.has(String(item.id))
       };
     });
-  const gear = items
-    .filter(item => item.type === "gear")
+  const gear = [...snapshotItemsOfType(snapshot, "gear")]
     .sort((a, b) => a.name.localeCompare(b.name, game.i18n.lang))
     .map(item => {
       const status = equipmentStatus(item.system?.equipStatus);
@@ -461,8 +509,7 @@ export function prepareActorEquipment(actor) {
       };
     });
 
-  const armour = items
-    .filter(item => item.type === "armour")
+  const armour = [...snapshotItemsOfType(snapshot, "armour")]
     .sort((a, b) => a.name.localeCompare(b.name, game.i18n.lang))
     .map(item => {
       const status = equipmentStatus(item.system?.equipStatus);
@@ -1028,7 +1075,7 @@ export async function executeActorStat(actor, statId, event = null) {
   }
 
   try {
-    const { AOVRollType } = await import("/systems/aov/system/apps/roll-types.mjs");
+    const { AOVRollType } = await importAoVSystemModule("systems/aov/system/apps/roll-types.mjs");
     if (typeof AOVRollType?._onDetermineCheck !== "function") {
       throw new Error("AoV statistic roll router is unavailable.");
     }
@@ -1071,8 +1118,10 @@ export async function cycleActorEquipmentStatus(actor, itemId) {
       _id: item.id,
       "system.equipStatus": next
     }]);
-    if (item.type === "weapon" && next !== 1 && getReadiedWeaponId(actor) === item.id) {
-      await clearReadiedWeapon(actor);
+    if (item.type === "weapon" && next !== 1) {
+      const readied = getReadiedWeaponIds(actor);
+      if (readied.right === item.id) await clearReadiedWeaponInHand(actor, "right");
+      if (readied.left === item.id) await clearReadiedWeaponInHand(actor, "left");
     }
     return result;
   } catch (exception) {
@@ -1156,6 +1205,139 @@ export async function executeMacro(macroId) {
 }
 
 /**
+ * Determine whether one intent category is currently displayed for the actor or
+ * combatant. Used by right-click intent indicators so a repeated right-click on
+ * the same declaration clears the visible token marker instead of re-submitting
+ * it.
+ *
+ * @param {Actor} actor Target Actor.
+ * @param {Combatant|null} combatant Target Combatant when active.
+ * @param {Combat|null} combat Target Combat when active.
+ * @param {string} category Candidate action category.
+ * @returns {boolean}
+ */
+export function isIntentCategoryDeclared(actor, combatant, combat, category) {
+  const normalizedCategory = normalizeIntentCategory(category);
+  const liveCombatant = resolveActorCombatant(actor, combat) ?? combatant ?? null;
+  if (isSkjaldborgCombatActive(combat) && liveCombatant) {
+    const intent = getCombatantState(liveCombatant).intent;
+    return DISPLAYABLE_INTENT_STATUSES.has(intent?.status) && normalizeIntentCategory(intent?.actionCategory) === normalizedCategory;
+  }
+  const prepared = getActorPreparedIntent(actor);
+  return !!prepared && normalizeIntentCategory(prepared.actionCategory) === normalizedCategory;
+}
+
+/**
+ * Clear the current visual intent declaration from the actor or combatant.
+ * This does not execute the action; it only removes the marker used by the
+ * token intent visualizer.
+ *
+ * @param {Actor} actor Target Actor.
+ * @param {Combatant|null} combatant Target Combatant when active.
+ * @param {Combat|null} combat Target Combat when active.
+ * @returns {Promise<unknown|null>}
+ */
+export async function clearIntentCategory(actor, combatant, combat) {
+  if (!actor?.isOwner) {
+    ui.notifications.warn(game.i18n.localize("AOV_SKJALDBORG.Warnings.NotOwner"));
+    return null;
+  }
+
+  const liveCombatant = resolveActorCombatant(actor, combat) ?? combatant ?? null;
+  if (isSkjaldborgCombatActive(combat) && liveCombatant) {
+    if (!AoVAdapter.canUserControlCombatant(game.user, liveCombatant)) {
+      ui.notifications.warn(game.i18n.localize("AOV_SKJALDBORG.Warnings.NotOwner"));
+      return null;
+    }
+    const combatantState = getCombatantState(liveCombatant);
+    const result = await requestGm("clearIntent", {
+      combatId: combat.id,
+      combatantId: liveCombatant.id,
+      expectedCombatantUpdatedAt: combatantState.updatedAt
+    });
+    await clearActorPreparedIntent(actor);
+    RenderCoordinator.invalidateCombatTracker("intent-clear");
+    return result;
+  }
+
+  const result = await clearActorPreparedIntent(actor);
+  RenderCoordinator.invalidateCombatTracker("prepared-intent-clear");
+  return result;
+}
+
+/**
+ * Toggle the visual intent declaration used by right-click intent controls.
+ * Re-selecting the current intent clears it. Selecting a different intent only
+ * commits the declaration and never runs Evade, Attack, Missile, or other
+ * executable action automation.
+ *
+ * @param {Actor} actor Target Actor.
+ * @param {Combatant|null} combatant Target Combatant when active.
+ * @param {Combat|null} combat Target Combat when active.
+ * @param {string} category Candidate action category.
+ * @param {{publicText?: string, promptOther?: boolean}} [options={}] Toggle options.
+ * @returns {Promise<unknown|null>}
+ */
+export async function toggleIntentCategory(actor, combatant, combat, category, { publicText = "", promptOther = false } = {}) {
+  const normalizedCategory = normalizeIntentCategory(category);
+  const liveCombatant = resolveActorCombatant(actor, combat) ?? combatant ?? null;
+  if (isIntentCategoryDeclared(actor, liveCombatant, combat, normalizedCategory)) {
+    return clearIntentCategory(actor, liveCombatant, combat);
+  }
+
+  let resolvedPublicText = publicText;
+  if (normalizedCategory === ACTION_CATEGORIES.OTHER && promptOther) {
+    const activeText = isSkjaldborgCombatActive(combat) && liveCombatant
+      ? getCombatantState(liveCombatant).intent?.publicText
+      : getActorPreparedIntent(actor)?.publicText;
+    const entered = await promptOtherIntentText(activeText ?? "");
+    if (entered === null) return null;
+    resolvedPublicText = entered;
+  }
+
+  return commitIntentCategory(actor, liveCombatant, combat, normalizedCategory, { publicText: resolvedPublicText });
+}
+
+/**
+ * Commit the Evade intent and mark the actor with the module-owned Evading
+ * status effect. During enabled combat the status write is GM-authoritative;
+ * outside combat it is applied directly to the owned Actor as a visual marker.
+ *
+ * @param {Actor} actor Target Actor.
+ * @param {Combatant|null} combatant Target Combatant when active.
+ * @param {Combat|null} combat Target Combat when active.
+ * @param {{publicText?: string}} [options={}] Options.
+ * @returns {Promise<object|null>} Combined result.
+ */
+
+export async function executeEvadeIntent(actor, combatant, combat, { publicText = "" } = {}) {
+  if (!actor?.isOwner) {
+    ui.notifications.warn(game.i18n.localize("AOV_SKJALDBORG.Warnings.NotOwner"));
+    return null;
+  }
+
+  let evadeResult = null;
+  const liveCombatant = resolveActorCombatant(actor, combat) ?? combatant ?? null;
+  if (isSkjaldborgCombatActive(combat) && liveCombatant) {
+    if (!AoVAdapter.canUserControlCombatant(game.user, liveCombatant)) {
+      ui.notifications.warn(game.i18n.localize("AOV_SKJALDBORG.Warnings.NotOwner"));
+      return null;
+    }
+    const combatantState = getCombatantState(liveCombatant);
+    evadeResult = await requestGm("activateEvade", {
+      combatId: combat.id,
+      combatantId: liveCombatant.id,
+      expectedCombatantUpdatedAt: combatantState.updatedAt
+    });
+  } else {
+    evadeResult = await activateEvadingForActor(actor, { combat: null, combatant: liveCombatant });
+  }
+
+  const intentResult = await commitIntentCategory(actor, liveCombatant, combat, ACTION_CATEGORIES.DEFEND, { publicText });
+  return { evade: evadeResult, intent: intentResult };
+}
+
+/**
  * Commit a quick intent category using the module's GM-authoritative socket.
  *
  * Before combat, the declaration is staged on the Actor. During active combat,
@@ -1174,8 +1356,11 @@ export async function commitIntentCategory(actor, combatant, combat, category, {
   }
 
   const normalizedCategory = normalizeIntentCategory(category);
+  const sanitizedPublicText = normalizedCategory === ACTION_CATEGORIES.OTHER
+    ? sanitizePreparedIntentText(publicText)
+    : "";
   if (!isSkjaldborgCombatActive(combat) || !combatant) {
-    return setActorPreparedIntent(actor, normalizedCategory, publicText);
+    return setActorPreparedIntent(actor, normalizedCategory, sanitizedPublicText);
   }
 
   if (!AoVAdapter.canUserControlCombatant(game.user, combatant)) {
@@ -1187,17 +1372,42 @@ export async function commitIntentCategory(actor, combatant, combat, category, {
   const intent = foundry.utils.deepClone(defaultCombatantState().intent);
   intent.status = INTENT_STATUS.COMMITTED;
   intent.actionCategory = normalizedCategory;
-  intent.publicText = normalizedCategory === ACTION_CATEGORIES.OTHER
-    ? sanitizePreparedIntentText(publicText)
-    : "";
+  intent.publicText = sanitizedPublicText;
 
-  const result = await requestGm("submitIntent", {
-    combatId: combat.id,
-    combatantId: combatant.id,
-    expectedCombatantUpdatedAt: combatantState.updatedAt,
-    intent
+  const key = [
+    combat.id,
+    combatant.id,
+    normalizedCategory,
+    sanitizedPublicText
+  ].join(":");
+  const pending = pendingIntentCommits.get(key);
+  if (pending) {
+    performanceDiagnostics.count("intent.commit.duplicateSuppressed", 1, {
+      combatId: combat.id,
+      combatantId: combatant.id,
+      actionCategory: normalizedCategory
+    });
+    return pending;
+  }
+
+  const operation = (async () => {
+    const result = await requestGm("submitIntent", {
+      combatId: combat.id,
+      combatantId: combatant.id,
+      expectedCombatantUpdatedAt: combatantState.updatedAt,
+      intent
+    });
+    await clearActorPreparedIntent(actor);
+    RenderCoordinator.invalidateCombatTracker("intent-commit");
+    return result;
+  })().finally(() => {
+    if (pendingIntentCommits.get(key) === operation) pendingIntentCommits.delete(key);
   });
-  await clearActorPreparedIntent(actor);
-  RenderCoordinator.invalidateCombatTracker("intent-commit");
-  return result;
+
+  pendingIntentCommits.set(key, operation);
+  return operation;
 }
+
+export const __test = {
+  pendingIntentCommits
+};

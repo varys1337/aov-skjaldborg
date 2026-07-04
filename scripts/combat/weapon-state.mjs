@@ -1,38 +1,25 @@
 import { MODULE_ID } from "../constants.mjs";
 import { debug, warn } from "../logger.mjs";
+import {
+  actorItemById,
+  actorItems,
+  normalizeDescriptor as normalizeWeaponDescriptor
+} from "../utils/document-data.mjs";
 
 export const READIED_WEAPON_FLAG = "readiedWeaponId";
+export const READIED_WEAPONS_FLAG = "readiedWeapons";
+export const COMBAT_OPTIONS_FLAG = "combatOptions";
 
 let hooksRegistered = false;
 
 /**
- * Normalize an Actor embedded Item collection without depending on one
- * particular Collection iterator implementation.
+ * Return actor-owned Items in a deterministic array form for UI preparation.
  *
- * @param {Actor|object|null|undefined} actor Actor document.
+ * @param {Actor|object|null|undefined} actor Actor document or test double.
  * @returns {Array<Item|object>}
  */
-function actorItems(actor) {
-  const items = actor?.items;
-  if (!items) return [];
-  if (Array.isArray(items)) return items;
-  if (Array.isArray(items.contents)) return items.contents;
-  if (typeof items.values === "function") return Array.from(items.values());
-  return Array.from(items).map(entry => Array.isArray(entry) ? entry[1] : entry).filter(Boolean);
-}
-
-/**
- * Resolve one actor-owned Item by id.
- *
- * @param {Actor|object|null|undefined} actor Actor document.
- * @param {string|null|undefined} itemId Embedded Item id.
- * @returns {Item|object|null}
- */
-function actorItem(actor, itemId) {
-  if (!itemId) return null;
-  return actor?.items?.get?.(itemId)
-    ?? actorItems(actor).find(candidate => candidate?.id === itemId)
-    ?? null;
+export function getActorItems(actor) {
+  return actorItems(actor);
 }
 
 /**
@@ -47,22 +34,6 @@ function actorItem(actor, itemId) {
  */
 export function isCarriedWeapon(item) {
   return item?.type === "weapon" && Number(item.system?.equipStatus) === 1;
-}
-
-/**
- * Normalize authored weapon/category text for compatibility comparisons.
- * AoV weapon categories are normally stored as CIDs, but imported or
- * hand-authored Items may also contain human-readable values.
- *
- * @param {unknown} value Candidate descriptor.
- * @returns {string}
- */
-function normalizeWeaponDescriptor(value) {
-  return String(value ?? "")
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "");
 }
 
 const HAND_TO_HAND_DESCRIPTORS = Object.freeze(new Set([
@@ -149,7 +120,7 @@ export async function isHandToHandAttackWeapon(item) {
  * @returns {Promise<Array<Item|object>>}
  */
 export async function getAttackWeapons(actor) {
-  const readied = getReadiedWeapon(actor);
+  const readiedWeapons = getReadiedWeaponList(actor);
   const candidates = actorItems(actor).filter(item => item?.type === "weapon");
   const intrinsic = [];
 
@@ -160,15 +131,15 @@ export async function getAttackWeapons(actor) {
   }
 
   const unique = new Map();
-  if (readied) unique.set(String(readied.id), readied);
+  for (const readied of readiedWeapons) unique.set(String(readied.id), readied);
   for (const item of intrinsic) unique.set(String(item.id), item);
 
   const locale = globalThis.game?.i18n?.lang;
   const sortedIntrinsic = Array.from(unique.values())
-    .filter(item => item?.id !== readied?.id)
+    .filter(item => !readiedWeapons.some(readied => readied?.id === item?.id))
     .sort((a, b) => String(a.name ?? "").localeCompare(String(b.name ?? ""), locale));
 
-  return readied ? [readied, ...sortedIntrinsic] : sortedIntrinsic;
+  return [...readiedWeapons, ...sortedIntrinsic];
 }
 
 /**
@@ -191,8 +162,54 @@ export function getCarriedWeapons(actor) {
  * @returns {string|null}
  */
 export function getReadiedWeaponId(actor) {
-  const value = actor?.getFlag?.(MODULE_ID, READIED_WEAPON_FLAG);
-  return typeof value === "string" && value ? value : null;
+  return getReadiedWeaponIds(actor).right ?? null;
+}
+
+/**
+ * Read module-managed readied weapon ids with legacy single-weapon fallback.
+ *
+ * The new state stores separate right/left hands and an NPC-only unlimited
+ * flag. Older worlds may still have only `readiedWeaponId`; that value is
+ * treated as the right hand until the next explicit readiness write migrates
+ * the actor to `readiedWeapons`.
+ *
+ * @param {Actor|object|null|undefined} actor Actor document.
+ * @returns {import("../types.mjs").SkjaldborgReadiedWeapons}
+ */
+export function getReadiedWeaponIds(actor) {
+  const value = actor?.getFlag?.(MODULE_ID, READIED_WEAPONS_FLAG);
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return {
+      right: typeof value.right === "string" && value.right ? value.right : null,
+      left: typeof value.left === "string" && value.left ? value.left : null,
+      unlimited: value.unlimited === true
+    };
+  }
+  const legacy = actor?.getFlag?.(MODULE_ID, READIED_WEAPON_FLAG);
+  return {
+    right: typeof legacy === "string" && legacy ? legacy : null,
+    left: null,
+    unlimited: false
+  };
+}
+
+/**
+ * Resolve readied weapon ids to currently valid carried Item documents.
+ *
+ * @param {Actor|object|null|undefined} actor Actor document.
+ * @returns {{right: Item|object|null, left: Item|object|null, unlimited: boolean}}
+ */
+export function getReadiedWeapons(actor) {
+  const ids = getReadiedWeaponIds(actor);
+  const right = actorItemById(actor, ids.right);
+  const left = actorItemById(actor, ids.left);
+  const weapons = {
+    right: isCarriedWeapon(right) ? right : null,
+    left: isCarriedWeapon(left) ? left : null,
+    unlimited: ids.unlimited
+  };
+  if (weapons.left?.id === weapons.right?.id) weapons.left = null;
+  return weapons;
 }
 
 /**
@@ -206,24 +223,49 @@ export function getReadiedWeaponId(actor) {
  * @returns {Item|object|null}
  */
 export function getReadiedWeapon(actor) {
-  const weaponId = getReadiedWeaponId(actor);
-  if (!weaponId) return null;
-  const item = actorItem(actor, weaponId);
-  return isCarriedWeapon(item) ? item : null;
+  const readied = getReadiedWeapons(actor);
+  return readied.right ?? readied.left ?? null;
+}
+
+/**
+ * Return all weapons treated as available by module readiness state.
+ *
+ * Characters return the distinct hand-readied weapons. NPCs with the
+ * `unlimited` flag also return all carried weapons for monster-style weapon
+ * access without rewriting AoV equipment status.
+ *
+ * @param {Actor|object|null|undefined} actor Actor document.
+ * @returns {Array<Item|object>}
+ */
+export function getReadiedWeaponList(actor) {
+  const state = getReadiedWeapons(actor);
+  const unique = new Map();
+  for (const item of [state.right, state.left]) {
+    if (item?.id) unique.set(String(item.id), item);
+  }
+  if (state.unlimited) {
+    for (const item of getCarriedWeapons(actor)) unique.set(String(item.id), item);
+  }
+  return Array.from(unique.values());
 }
 
 /**
  * Prepare serializable readied-weapon state for module UIs.
  *
  * @param {Actor|object|null|undefined} actor Actor document.
- * @returns {{id: string|null, name: string, carriedWeapons: {id: string, name: string, selected: boolean}[], canDraw: boolean, canSheathe: boolean}}
+ * @returns {object}
  */
 export function prepareReadiedWeaponState(actor) {
   const current = getReadiedWeapon(actor);
+  const readied = getReadiedWeapons(actor);
+  const currentIds = new Set([readied.right?.id, readied.left?.id].filter(Boolean).map(String));
   const carriedWeapons = getCarriedWeapons(actor).map(item => ({
     id: String(item.id),
     name: String(item.name ?? ""),
-    selected: item.id === current?.id
+    selected: item.id === current?.id,
+    readied: currentIds.has(String(item.id)),
+    right: item.id === readied.right?.id,
+    left: item.id === readied.left?.id
   }));
   if (carriedWeapons.length && !carriedWeapons.some(item => item.selected)) {
     carriedWeapons[0].selected = true;
@@ -231,9 +273,15 @@ export function prepareReadiedWeaponState(actor) {
   return {
     id: current?.id ?? null,
     name: current?.name ?? "",
+    rightId: readied.right?.id ?? null,
+    leftId: readied.left?.id ?? null,
+    rightName: readied.right?.name ?? "",
+    leftName: readied.left?.name ?? "",
+    names: [readied.right?.name, readied.left?.name].filter(Boolean),
+    unlimited: readied.unlimited,
     carriedWeapons,
     canDraw: carriedWeapons.length > 0,
-    canSheathe: !!current
+    canSheathe: !!currentIds.size
   };
 }
 
@@ -245,12 +293,38 @@ export function prepareReadiedWeaponState(actor) {
  * @returns {Promise<Actor>}
  */
 export async function setReadiedWeapon(actor, weaponId) {
+  return setReadiedWeaponInHand(actor, "right", weaponId);
+}
+
+/**
+ * Mark one actor-owned carried weapon as readied in a specific hand.
+ *
+ * @param {Actor} actor Actor document.
+ * @param {"right"|"left"|string} hand Requested hand; unknown values become right.
+ * @param {string} weaponId Owned weapon Item id.
+ * @returns {Promise<Actor>}
+ */
+export async function setReadiedWeaponInHand(actor, hand, weaponId) {
   if (!actor) throw new Error("Actor unavailable.");
-  const item = actorItem(actor, weaponId);
+  const item = actorItemById(actor, weaponId);
   if (!isCarriedWeapon(item)) {
     throw new Error(game.i18n.localize("AOV_SKJALDBORG.Warnings.WeaponMustBeCarried"));
   }
-  return actor.setFlag(MODULE_ID, READIED_WEAPON_FLAG, item.id);
+  const side = hand === "left" ? "left" : "right";
+  const current = getReadiedWeaponIds(actor);
+  const next = {
+    right: current.right,
+    left: current.left,
+    unlimited: current.unlimited === true
+  };
+  next[side] = item.id;
+  const other = side === "right" ? "left" : "right";
+  if (next[other] === item.id) next[other] = null;
+  await actor.setFlag(MODULE_ID, READIED_WEAPONS_FLAG, next);
+  if (typeof actor.unsetFlag === "function" && actor.getFlag?.(MODULE_ID, READIED_WEAPON_FLAG)) {
+    await actor.unsetFlag(MODULE_ID, READIED_WEAPON_FLAG);
+  }
+  return actor;
 }
 
 /**
@@ -260,11 +334,144 @@ export async function setReadiedWeapon(actor, weaponId) {
  * @returns {Promise<Actor|undefined>}
  */
 export async function clearReadiedWeapon(actor) {
-  if (!actor || !getReadiedWeaponId(actor)) return actor;
-  if (typeof actor.unsetFlag === "function") {
-    return actor.unsetFlag(MODULE_ID, READIED_WEAPON_FLAG);
+  if (!actor) return actor;
+  const current = getReadiedWeaponIds(actor);
+  const hasState = current.right || current.left || current.unlimited || actor.getFlag?.(MODULE_ID, READIED_WEAPON_FLAG);
+  if (!hasState) return actor;
+  await actor.setFlag(MODULE_ID, READIED_WEAPONS_FLAG, {
+    right: null,
+    left: null,
+    unlimited: current.unlimited === true
+  });
+  if (typeof actor.unsetFlag === "function" && actor.getFlag?.(MODULE_ID, READIED_WEAPON_FLAG)) {
+    await actor.unsetFlag(MODULE_ID, READIED_WEAPON_FLAG);
   }
-  return actor.setFlag(MODULE_ID, READIED_WEAPON_FLAG, null);
+  return actor;
+}
+
+/**
+ * Clear one readied hand while preserving the other hand and NPC unlimited flag.
+ *
+ * @param {Actor} actor Actor document.
+ * @param {"right"|"left"|string} hand Requested hand; unknown values become right.
+ * @returns {Promise<Actor|undefined>}
+ */
+export async function clearReadiedWeaponInHand(actor, hand) {
+  if (!actor) return actor;
+  const side = hand === "left" ? "left" : "right";
+  const current = getReadiedWeaponIds(actor);
+  const next = {
+    right: current.right,
+    left: current.left,
+    unlimited: current.unlimited === true
+  };
+  next[side] = null;
+  await actor.setFlag(MODULE_ID, READIED_WEAPONS_FLAG, next);
+  if (typeof actor.unsetFlag === "function" && actor.getFlag?.(MODULE_ID, READIED_WEAPON_FLAG)) {
+    await actor.unsetFlag(MODULE_ID, READIED_WEAPON_FLAG);
+  }
+  return actor;
+}
+
+/**
+ * Persist normalized multi-hand readiness state.
+ *
+ * @param {Actor} actor Actor document.
+ * @param {Partial<import("../types.mjs").SkjaldborgReadiedWeapons>} [value={}] Readiness patch.
+ * @returns {Promise<Actor>}
+ */
+export async function setReadiedWeapons(actor, value = {}) {
+  if (!actor) throw new Error("Actor unavailable.");
+  const right = actorItemById(actor, value.right);
+  const left = actorItemById(actor, value.left);
+  const next = {
+    right: isCarriedWeapon(right) ? right.id : null,
+    left: isCarriedWeapon(left) ? left.id : null,
+    unlimited: value.unlimited === true
+  };
+  if (next.left && next.left === next.right) next.left = null;
+  await actor.setFlag(MODULE_ID, READIED_WEAPONS_FLAG, next);
+  if (typeof actor.unsetFlag === "function" && actor.getFlag?.(MODULE_ID, READIED_WEAPON_FLAG)) {
+    await actor.unsetFlag(MODULE_ID, READIED_WEAPON_FLAG);
+  }
+  return actor;
+}
+
+/**
+ * Read normalized utility combat options from module flags.
+ *
+ * @param {Actor|object|null|undefined} actor Actor document.
+ * @returns {import("../types.mjs").SkjaldborgCombatOptions}
+ */
+export function getCombatOptions(actor) {
+  const raw = actor?.getFlag?.(MODULE_ID, COMBAT_OPTIONS_FLAG);
+  const options = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  return {
+    twoWeaponFighting: {
+      enabled: options.twoWeaponFighting?.enabled === true,
+      primaryWeaponId: typeof options.twoWeaponFighting?.primaryWeaponId === "string" ? options.twoWeaponFighting.primaryWeaponId : "",
+      secondaryWeaponId: typeof options.twoWeaponFighting?.secondaryWeaponId === "string" ? options.twoWeaponFighting.secondaryWeaponId : "",
+      primaryChance: Math.max(0, Number(options.twoWeaponFighting?.primaryChance) || 0),
+      secondaryChance: Math.max(0, Number(options.twoWeaponFighting?.secondaryChance) || 0)
+    },
+    shieldCover: {
+      shieldId: typeof options.shieldCover?.shieldId === "string" ? options.shieldCover.shieldId : "",
+      locationIds: Array.isArray(options.shieldCover?.locationIds)
+        ? options.shieldCover.locationIds.map(String).filter(Boolean)
+        : []
+    },
+    shieldwall: {
+      enabled: options.shieldwall?.enabled === true
+    }
+  };
+}
+
+/**
+ * Persist normalized utility combat options.
+ *
+ * @param {Actor} actor Actor document.
+ * @param {Partial<import("../types.mjs").SkjaldborgCombatOptions>} [value={}] Options patch.
+ * @returns {Promise<unknown>}
+ */
+export async function setCombatOptions(actor, value = {}) {
+  if (!actor) throw new Error("Actor unavailable.");
+  const current = getCombatOptions(actor);
+  const next = foundry.utils.mergeObject(current, value, { inplace: false });
+  next.twoWeaponFighting = {
+    enabled: next.twoWeaponFighting?.enabled === true,
+    primaryWeaponId: typeof next.twoWeaponFighting?.primaryWeaponId === "string" ? next.twoWeaponFighting.primaryWeaponId : "",
+    secondaryWeaponId: typeof next.twoWeaponFighting?.secondaryWeaponId === "string" ? next.twoWeaponFighting.secondaryWeaponId : "",
+    primaryChance: Math.max(0, Number(next.twoWeaponFighting?.primaryChance) || 0),
+    secondaryChance: Math.max(0, Number(next.twoWeaponFighting?.secondaryChance) || 0)
+  };
+  next.shieldCover = {
+    shieldId: typeof next.shieldCover?.shieldId === "string" ? next.shieldCover.shieldId : "",
+    locationIds: Array.isArray(next.shieldCover?.locationIds)
+      ? Array.from(new Set(next.shieldCover.locationIds.map(String).filter(Boolean)))
+      : []
+  };
+  next.shieldwall = {
+    enabled: next.shieldwall?.enabled === true
+  };
+  return actor.setFlag(MODULE_ID, COMBAT_OPTIONS_FLAG, next);
+}
+
+/**
+ * Pragmatically identify shield-like weapons without changing AoV schemas.
+ *
+ * @param {Item|object|null|undefined} item Candidate weapon.
+ * @returns {boolean}
+ */
+export function isShieldLikeWeapon(item) {
+  if (item?.type !== "weapon") return false;
+  const descriptors = [
+    item.name,
+    item.system?.weaponCat,
+    item.system?.weaponCatName,
+    item.system?.skillCID,
+    item.system?.weaponType
+  ].map(normalizeWeaponDescriptor);
+  return descriptors.some(value => value.includes("shield"));
 }
 
 /**
@@ -275,12 +482,19 @@ export async function clearReadiedWeapon(actor) {
  * @returns {Promise<boolean>} Whether stale state was cleared.
  */
 export async function reconcileReadiedWeapon(actor) {
-  const weaponId = getReadiedWeaponId(actor);
-  if (!weaponId) return false;
-  if (getReadiedWeapon(actor)) return false;
+  const current = getReadiedWeaponIds(actor);
+  if (!current.right && !current.left) return false;
+  const right = actorItem(actor, current.right);
+  const left = actorItem(actor, current.left);
+  const next = {
+    right: isCarriedWeapon(right) ? right.id : null,
+    left: isCarriedWeapon(left) ? left.id : null,
+    unlimited: current.unlimited === true
+  };
+  if (next.right === current.right && next.left === current.left) return false;
   try {
-    await clearReadiedWeapon(actor);
-    debug("Cleared stale readied weapon", { actorId: actor?.id, weaponId });
+    await setReadiedWeapons(actor, next);
+    debug("Cleared stale readied weapon", { actorId: actor?.id, current, next });
     return true;
   } catch (exception) {
     warn(exception);
@@ -305,7 +519,8 @@ export function registerReadiedWeaponHooks() {
 
   Hooks.on("deleteItem", item => {
     if (item?.type !== "weapon" || !item.parent) return;
-    if (getReadiedWeaponId(item.parent) !== item.id) return;
-    void clearReadiedWeapon(item.parent).catch(warn);
+    const ids = getReadiedWeaponIds(item.parent);
+    if (ids.right !== item.id && ids.left !== item.id) return;
+    void reconcileReadiedWeapon(item.parent).catch(warn);
   });
 }

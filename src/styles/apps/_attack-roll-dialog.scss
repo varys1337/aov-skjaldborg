@@ -5,6 +5,9 @@
 /* Attack workflow dialog scaffold                                           */
 /* ------------------------------------------------------------------------- */
 
+/* Do not wrap these rules in global cascade layers yet. Foundry core styles
+ * are unlayered, so a broad @layer migration could weaken module overrides. */
+
 .application.dialog.skj-attack-roll-window {
   --skj-roll-text: #f2eadb;
   --skj-roll-muted: rgba(242, 234, 219, 0.68);
@@ -12,8 +15,8 @@
   --skj-roll-surface-soft: rgba(14, 17, 16, 0.68);
   --skj-roll-frame: rgba(84, 183, 126, 0.62);
   --skj-roll-frame-soft: rgba(84, 183, 126, 0.24);
-  --skj-roll-active: rgba(56, 121, 163, 0.82);
-  --skj-roll-hover: rgba(126, 45, 30, 0.84);
+  --skj-roll-active: rgba(34, 129, 103, 0.84);
+  --skj-roll-hover: rgba(42, 146, 116, 0.86);
   --skj-roll-accent: #f0d9ac;
   --skj-roll-warning: #e5b95d;
   font-family: Georgia, "Times New Roman", serif;
@@ -23,7 +26,7 @@
 .application.dialog.skj-attack-roll-window.skj-theme-classic {
   --skj-roll-frame: rgba(196, 137, 78, 0.62);
   --skj-roll-frame-soft: rgba(196, 137, 78, 0.24);
-  --skj-roll-active: rgba(109, 67, 38, 0.9);
+  --skj-roll-active: rgba(34, 129, 103, 0.84);
 }
 
 .application.dialog.skj-attack-roll-window .window-header {
@@ -69,7 +72,7 @@
   display: none;
 }
 
-.skj-attack-roll-dialog {
+.skj-roll-dialog {
   display: flex;
   flex-direction: column;
   max-height: 72vh;
@@ -77,8 +80,8 @@
   width: min(390px, 92vw);
 }
 
-.skj-attack-roll-dialog select,
-.skj-attack-roll-dialog input {
+.skj-roll-dialog select,
+.skj-roll-dialog input {
   background: rgba(3, 6, 6, 0.82);
   border: 1px solid var(--skj-roll-frame-soft);
   border-radius: 4px;
@@ -89,14 +92,14 @@
   padding: 0.2rem 0.45rem;
 }
 
-.skj-attack-roll-dialog select:focus,
-.skj-attack-roll-dialog input:focus {
+.skj-roll-dialog select:focus,
+.skj-roll-dialog input:focus {
   border-color: var(--skj-roll-frame);
   box-shadow: 0 0 0 1px var(--skj-roll-frame-soft);
   outline: none;
 }
 
-.skj-attack-roll-dialog__header {
+.skj-roll-dialog__header {
   align-items: stretch;
   background:
     linear-gradient(110deg, rgba(10, 43, 31, 0.9), rgba(5, 13, 12, 0.95)),
@@ -104,29 +107,89 @@
   border-bottom: 1px solid var(--skj-roll-frame);
   display: grid;
   gap: 0.6rem;
-  grid-template-columns: minmax(0, 1fr) 96px;
+  grid-template-columns: minmax(0, 1fr) 84px;
   padding: 0.72rem;
 }
 
-.skj-theme-classic .skj-attack-roll-dialog__header {
+.skj-theme-classic .skj-roll-dialog__header {
   background: linear-gradient(110deg, rgba(82, 39, 20, 0.92), rgba(20, 11, 8, 0.96));
 }
 
-.skj-attack-roll-dialog__identity {
+.skj-roll-dialog__identity {
   display: grid;
   gap: 0.28rem;
   min-width: 0;
 }
 
-.skj-attack-roll-dialog__target-summary {
-  align-items: center;
+.skj-roll-dialog__target-summary {
+  align-items: start;
   display: grid;
-  gap: 0.5rem;
-  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 0.32rem;
+  grid-template-columns: minmax(0, 1fr);
   min-width: 0;
 }
 
-.skj-attack-roll-dialog__target-portrait {
+.skj-roll-dialog__target-list {
+  align-content: start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  min-height: 2rem;
+  min-width: 0;
+}
+
+.skj-roll-dialog__target-chip {
+  align-items: center;
+  background: var(--skj-roll-surface-soft);
+  border: 1px solid var(--skj-roll-frame-soft);
+  border-radius: 999px;
+  color: var(--skj-roll-muted);
+  cursor: pointer;
+  display: inline-grid;
+  font-family: inherit;
+  font-size: 0.72rem;
+  gap: 0.32rem;
+  grid-template-columns: 28px minmax(0, 1fr);
+  min-height: 2rem;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0.14rem 0.48rem 0.14rem 0.16rem;
+}
+
+.skj-roll-dialog__target-chip .skj-roll-dialog__target-portrait {
+  height: 28px;
+  width: 28px;
+}
+
+.skj-roll-dialog__target-chip > span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skj-roll-dialog__target-chip:hover,
+.skj-roll-dialog__target-chip:focus-visible,
+.skj-roll-dialog__target-chip.is-active {
+  background: var(--skj-roll-active);
+  border-color: var(--skj-roll-frame);
+  color: var(--skj-roll-text);
+  outline: none;
+}
+
+.skj-roll-dialog__target-empty {
+  align-items: center;
+  background: rgba(3, 6, 6, 0.52);
+  border: 1px dashed var(--skj-roll-frame-soft);
+  border-radius: 999px;
+  color: var(--skj-roll-warning);
+  display: inline-flex;
+  font-size: 0.72rem;
+  min-height: 2rem;
+  padding: 0.2rem 0.62rem;
+}
+
+.skj-roll-dialog__target-portrait {
   align-items: center;
   background: rgba(2, 5, 5, 0.72);
   border: 1px solid var(--skj-roll-frame);
@@ -139,26 +202,26 @@
   width: 44px;
 }
 
-.skj-attack-roll-dialog__target-portrait img,
-.skj-attack-roll-dialog__target-portrait video {
+.skj-roll-dialog__target-portrait img,
+.skj-roll-dialog__target-portrait video {
   display: block;
   height: 100%;
   object-fit: cover;
   width: 100%;
 }
 
-.skj-attack-roll-dialog__target-portrait > i {
+.skj-roll-dialog__target-portrait > i {
   color: var(--skj-roll-muted);
   font-size: 0.96rem;
 }
 
-.skj-attack-roll-dialog__target-copy {
+.skj-roll-dialog__target-copy {
   display: grid;
   gap: 0.1rem;
   min-width: 0;
 }
 
-.skj-attack-roll-dialog__actor {
+.skj-roll-dialog__actor {
   color: var(--skj-roll-muted);
   font-size: 0.76rem;
   line-height: 1.1;
@@ -167,7 +230,7 @@
   white-space: nowrap;
 }
 
-.skj-attack-roll-dialog__versus {
+.skj-roll-dialog__target {
   align-items: center;
   color: var(--skj-roll-muted);
   display: flex;
@@ -180,7 +243,7 @@
   white-space: nowrap;
 }
 
-.skj-attack-roll-dialog__versus strong {
+.skj-roll-dialog__target strong {
   color: var(--skj-roll-text);
   font-size: 0.94rem;
   font-weight: 700;
@@ -188,7 +251,7 @@
   text-overflow: ellipsis;
 }
 
-.skj-attack-roll-dialog__weapon {
+.skj-roll-dialog__control {
   align-items: center;
   display: grid;
   gap: 0.38rem;
@@ -198,7 +261,7 @@
   width: 100%;
 }
 
-.skj-attack-roll-dialog__weapon > span {
+.skj-roll-dialog__control > span {
   color: var(--skj-roll-muted);
   font-size: 0.66rem;
   font-weight: 700;
@@ -208,7 +271,7 @@
   white-space: nowrap;
 }
 
-.skj-attack-roll-dialog__weapon-select {
+.skj-roll-dialog__select {
   box-sizing: border-box;
   font-size: 0.82rem;
   max-width: 100%;
@@ -216,7 +279,118 @@
   width: 190px;
 }
 
-.skj-attack-roll-dialog__target-card {
+.skj-attack-roll-dialog__two-weapon-toggle,
+.skj-attack-roll-dialog__split-toggle {
+  align-items: stretch;
+  cursor: pointer;
+  display: flex;
+  margin: 0.02rem 0 0 calc(50px + 0.38rem);
+  min-width: 0;
+  position: relative;
+  width: min(190px, calc(100% - 50px - 0.38rem));
+}
+
+.skj-attack-roll-dialog__two-weapon-toggle input,
+.skj-attack-roll-dialog__split-toggle input {
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  width: 1px;
+}
+
+.skj-attack-roll-dialog__two-weapon-toggle span,
+.skj-attack-roll-dialog__split-toggle span {
+  align-items: center;
+  background: var(--skj-roll-surface-soft);
+  border: 1px solid var(--skj-roll-frame-soft);
+  border-radius: 13px;
+  box-sizing: border-box;
+  color: var(--skj-roll-muted);
+  display: flex;
+  flex: 1 1 auto;
+  font-size: 0.72rem;
+  font-weight: 700;
+  justify-content: center;
+  line-height: 1;
+  min-height: 1.7rem;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0.2rem 0.42rem;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skj-attack-roll-dialog__two-weapon-toggle input:checked + span,
+.skj-attack-roll-dialog__split-toggle input:checked + span {
+  background: var(--skj-roll-active);
+  border-color: var(--skj-roll-frame);
+  box-shadow: inset 0 0 8px rgba(0, 0, 0, 0.28);
+  color: var(--skj-roll-text);
+}
+
+.skj-attack-roll-dialog__two-weapon-toggle:hover span,
+.skj-attack-roll-dialog__two-weapon-toggle input:focus-visible + span,
+.skj-attack-roll-dialog__split-toggle:hover span,
+.skj-attack-roll-dialog__split-toggle input:focus-visible + span {
+  background: var(--skj-roll-hover);
+  border-color: var(--skj-roll-frame);
+  color: var(--skj-roll-text);
+}
+
+.skj-attack-roll-dialog__split-fields {
+  display: grid;
+  gap: 0.3rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0.02rem 0 0 calc(50px + 0.38rem);
+  width: min(190px, calc(100% - 50px - 0.38rem));
+}
+
+.skj-attack-roll-dialog__split-fields[hidden] {
+  display: none;
+}
+
+.skj-attack-roll-dialog__split-fields label {
+  display: grid;
+  gap: 0.16rem;
+  margin: 0;
+  min-width: 0;
+}
+
+.skj-attack-roll-dialog__split-fields span,
+.skj-attack-roll-dialog__split-forced,
+.skj-attack-roll-dialog__split-unavailable {
+  color: var(--skj-roll-muted);
+  font-size: 0.66rem;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.skj-attack-roll-dialog__split-fields input {
+  min-width: 0;
+  text-align: center;
+  width: 100%;
+}
+
+.skj-attack-roll-dialog__split-forced,
+.skj-attack-roll-dialog__split-unavailable {
+  align-items: center;
+  background: rgba(3, 6, 6, 0.52);
+  border: 1px solid var(--skj-roll-frame-soft);
+  border-radius: 999px;
+  display: inline-flex;
+  margin: 0.02rem 0 0 calc(50px + 0.38rem);
+  min-height: 1.7rem;
+  padding: 0.2rem 0.54rem;
+  width: fit-content;
+}
+
+.skj-attack-roll-dialog__split-unavailable {
+  opacity: 0.56;
+}
+
+.skj-roll-dialog__rating-card {
   align-items: center;
   background: rgba(2, 5, 5, 0.66);
   border: 1px solid var(--skj-roll-frame);
@@ -227,59 +401,59 @@
   padding: 0.38rem;
 }
 
-.skj-attack-roll-dialog__target-card strong {
+.skj-roll-dialog__rating-card strong {
   color: var(--skj-roll-accent);
   font-size: 1.55rem;
   font-weight: 700;
   line-height: 1;
 }
 
-.skj-attack-roll-dialog__target-card span {
+.skj-roll-dialog__rating-card span {
   color: var(--skj-roll-muted);
   font-size: 0.61rem;
   line-height: 1.1;
   text-align: center;
 }
 
-.skj-attack-roll-dialog__target-label {
+.skj-roll-dialog__label {
   font-weight: 700;
   letter-spacing: 0.05em;
   text-transform: uppercase;
 }
 
-.skj-attack-roll-dialog__body {
+.skj-roll-dialog__body {
   display: grid;
   gap: 0.58rem;
   overflow-y: auto;
   padding: 0.72rem;
 }
 
-.skj-attack-roll-dialog__row,
-.skj-attack-roll-dialog__detail {
+.skj-roll-dialog__row,
+.skj-roll-dialog__detail {
   align-items: center;
   display: grid;
   gap: 0.44rem;
   grid-template-columns: 80px minmax(0, 1fr);
 }
 
-.skj-attack-roll-dialog__row > label,
-.skj-attack-roll-dialog__detail > label {
+.skj-roll-dialog__row > label,
+.skj-roll-dialog__detail > label {
   color: var(--skj-roll-muted);
   font-size: 0.76rem;
   font-weight: 700;
   margin: 0;
 }
 
-.skj-attack-roll-dialog__row--modifier {
+.skj-roll-dialog__row--modifier {
   grid-template-columns: 68px minmax(102px, 124px) minmax(0, 1fr);
 }
 
-.skj-attack-roll-dialog__row--modifier > select {
+.skj-roll-dialog__row--modifier > select {
   min-width: 0;
   width: 100%;
 }
 
-.skj-attack-roll-dialog__damage {
+.skj-roll-dialog__damage-pill {
   align-items: center;
   background: var(--skj-roll-surface-soft);
   border: 1px solid var(--skj-roll-frame-soft);
@@ -297,23 +471,23 @@
   white-space: nowrap;
 }
 
-.skj-attack-roll-dialog__damage.is-fixed {
+.skj-roll-dialog__damage-pill.is-fixed {
   cursor: default;
 }
 
-.skj-attack-roll-dialog__damage.is-switchable {
+.skj-roll-dialog__damage-pill.is-switchable {
   cursor: pointer;
 }
 
-.skj-attack-roll-dialog__damage.is-switchable:hover,
-.skj-attack-roll-dialog__damage.is-switchable:focus {
+.skj-roll-dialog__damage-pill.is-switchable:hover,
+.skj-roll-dialog__damage-pill.is-switchable:focus {
   background: var(--skj-roll-hover);
   border-color: var(--skj-roll-frame);
   box-shadow: 0 0 0 1px var(--skj-roll-frame-soft);
   outline: none;
 }
 
-.skj-attack-roll-dialog__damage-label {
+.skj-roll-dialog__damage-label {
   color: var(--skj-roll-muted);
   display: inline-block;
   font-size: 0.68rem;
@@ -322,7 +496,7 @@
   white-space: nowrap;
 }
 
-.skj-attack-roll-dialog__damage-type {
+.skj-roll-dialog__damage-type {
   color: var(--skj-roll-accent);
   display: inline-flex;
   font-size: 0.72rem;
@@ -334,7 +508,7 @@
   text-decoration: none;
 }
 
-.skj-attack-roll-dialog__damage-formula {
+.skj-roll-dialog__damage-formula {
   color: var(--skj-roll-text);
   display: inline-block;
   font-size: 0.74rem;
@@ -342,21 +516,21 @@
   white-space: nowrap;
 }
 
-.skj-attack-roll-dialog__fieldset {
+.skj-roll-dialog__augment {
   border: 1px solid var(--skj-roll-frame-soft);
   border-radius: 6px;
   margin: 0;
   padding: 0.5rem;
 }
 
-.skj-attack-roll-dialog__fieldset legend {
+.skj-roll-dialog__augment legend {
   color: var(--skj-roll-muted);
   font-size: 0.68rem;
   font-weight: 700;
   padding: 0 0.22rem;
 }
 
-.skj-attack-roll-dialog__segments {
+.skj-roll-dialog__segments {
   display: grid;
   gap: 0.32rem;
   grid-template-columns: repeat(2, minmax(0, 140px));
@@ -366,12 +540,12 @@
   width: 100%;
 }
 
-.skj-attack-roll-dialog__segment {
+.skj-roll-dialog__segment {
   margin: 0;
   min-width: 0;
 }
 
-.skj-attack-roll-dialog__segment input {
+.skj-roll-dialog__segment input {
   height: 1px;
   min-height: 0;
   opacity: 0;
@@ -380,7 +554,7 @@
   width: 1px;
 }
 
-.skj-attack-roll-dialog__segment span {
+.skj-roll-dialog__segment span {
   align-items: center;
   background: var(--skj-roll-surface-soft);
   border: 1px solid var(--skj-roll-frame-soft);
@@ -398,49 +572,211 @@
   white-space: nowrap;
 }
 
-.skj-attack-roll-dialog__segment input:checked + span {
+.skj-roll-dialog__segment input:checked + span {
   background: var(--skj-roll-active);
   border-color: var(--skj-roll-frame);
   color: var(--skj-roll-text);
   box-shadow: inset 0 0 8px rgba(0, 0, 0, 0.28);
 }
 
-.skj-attack-roll-dialog__segment:not(.is-disabled) span:hover {
+.skj-roll-dialog__segment:not(.is-disabled) span:hover {
   background: var(--skj-roll-hover);
   border-color: var(--skj-roll-frame);
   color: var(--skj-roll-text);
 }
 
-.skj-attack-roll-dialog__segment.is-disabled {
+.skj-roll-dialog__segment.is-disabled {
   opacity: 0.38;
 }
 
-.skj-attack-roll-dialog__segment.is-disabled span {
+.skj-roll-dialog__segment.is-disabled span {
   cursor: not-allowed;
 }
 
-.skj-attack-roll-dialog__details {
+.skj-roll-dialog__details {
   display: grid;
   gap: 0.42rem;
   min-height: 0;
 }
 
-.skj-attack-roll-dialog__detail[hidden] {
+.skj-roll-dialog__detail[hidden] {
   display: none;
 }
 
-.skj-attack-roll-dialog__detail--custom {
+.skj-roll-dialog__detail--custom {
   grid-template-columns: 80px minmax(0, 1fr) 60px;
 }
 
-.skj-attack-roll-dialog__actions {
-  align-items: center;
-  display: grid;
-  gap: 0.35rem;
-  grid-template-columns: minmax(0, 1fr) 96px;
+.skj-attack-roll-dialog__detail--aimed {
+  grid-template-columns: 80px minmax(0, 1fr) minmax(78px, 104px);
 }
 
-.skj-attack-roll-dialog__summary {
+.skj-attack-roll-dialog__detail--aimed > select {
+  min-width: 0;
+  width: 100%;
+}
+
+.skj-attack-roll-dialog__aimed-penalty {
+  display: grid;
+  gap: 0.28rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  min-width: 0;
+}
+
+.skj-attack-roll-dialog__aimed-penalty .skj-roll-dialog__segment span {
+  min-height: 1.75rem;
+  padding-inline: 0.22rem;
+}
+
+.skj-attack-roll-dialog__detail--stun {
+  grid-template-columns: 80px minmax(0, 1fr) 74px minmax(68px, 84px);
+}
+
+.skj-attack-roll-dialog__detail--stun > select {
+  min-width: 0;
+  width: 100%;
+}
+
+.skj-attack-roll-dialog__readonly {
+  align-items: center;
+  background: var(--skj-roll-surface-soft);
+  border: 1px solid var(--skj-roll-frame-soft);
+  border-radius: 8px;
+  box-sizing: border-box;
+  color: var(--skj-roll-text-strong);
+  display: inline-flex;
+  font-family: var(--skj-roll-body-font);
+  font-size: 0.76rem;
+  min-height: 1.85rem;
+  min-width: 0;
+  overflow: hidden;
+  padding-inline: 0.44rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  width: 100%;
+}
+
+.skj-attack-roll-dialog__readonly--penalty {
+  color: var(--skj-roll-warning);
+  font-family: var(--skj-roll-heading-font);
+  font-weight: 700;
+  justify-content: center;
+}
+
+.skj-attack-roll-dialog__detail--disarm {
+  grid-template-columns: 84px minmax(0, 1fr) 70px minmax(0, 1fr);
+}
+
+.skj-attack-roll-dialog__detail--disarm > select {
+  min-width: 0;
+  width: 100%;
+}
+
+.skj-attack-roll-dialog__disarm-controls {
+  display: grid;
+  gap: 0.28rem;
+  grid-column: 2 / -1;
+  grid-template-columns: 54px minmax(0, 1fr);
+  min-width: 0;
+}
+
+.skj-attack-roll-dialog__disarm-penalty {
+  display: grid;
+  gap: 0.28rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  min-width: 0;
+}
+
+.skj-attack-roll-dialog__disarm-penalty .skj-roll-dialog__segment span {
+  min-height: 1.75rem;
+  padding-inline: 0.22rem;
+}
+
+.skj-attack-roll-dialog__toggle {
+  align-items: center;
+  cursor: pointer;
+  display: inline-flex;
+  min-width: 0;
+  position: relative;
+}
+
+.skj-attack-roll-dialog__toggle input {
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  width: 1px;
+}
+
+.skj-attack-roll-dialog__toggle span {
+  align-items: center;
+  background: var(--skj-roll-surface);
+  border: 1px solid var(--skj-roll-frame-soft);
+  border-radius: 8px;
+  box-sizing: border-box;
+  color: var(--skj-roll-text);
+  display: inline-flex;
+  font-family: var(--skj-roll-heading-font);
+  font-size: 0.82rem;
+  font-weight: 700;
+  justify-content: center;
+  min-height: 1.75rem;
+  padding-inline: 0.36rem;
+  width: 100%;
+  white-space: nowrap;
+}
+
+.skj-attack-roll-dialog__toggle input:checked + span {
+  background: linear-gradient(180deg, var(--skj-roll-accent-soft), var(--skj-roll-accent));
+  border-color: var(--skj-roll-accent-strong);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--skj-roll-accent-strong) 40%, transparent);
+  color: var(--skj-roll-text-strong);
+}
+
+.skj-attack-roll-dialog__toggle input:focus-visible + span {
+  outline: 2px solid var(--skj-roll-warning);
+  outline-offset: 2px;
+}
+
+.skj-missile-roll-dialog__detail--into-melee {
+  grid-template-columns: 120px minmax(64px, 96px);
+  justify-content: center;
+}
+
+.skj-missile-roll-dialog__detail--into-melee input {
+  min-height: 1.85rem;
+  text-align: center;
+}
+
+.skj-missile-roll-dialog__detail--range {
+  grid-template-columns: 80px minmax(0, 1fr);
+}
+
+.skj-missile-roll-dialog__range-segments {
+  display: grid;
+  gap: 0.28rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  min-width: 0;
+}
+
+.skj-missile-roll-dialog__range-segments .skj-roll-dialog__segment span {
+  min-height: 1.75rem;
+  padding-inline: 0.22rem;
+}
+
+.skj-roll-dialog__footer {
+  align-items: end;
+  display: grid;
+  gap: 0.35rem;
+  grid-template-columns: minmax(0, 1fr) 84px;
+}
+
+.skj-attack-roll-dialog__actions {
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
+}
+
+.skj-roll-dialog__summary {
   align-items: center;
   background: var(--skj-roll-surface-soft);
   border: 1px solid var(--skj-roll-frame-soft);
@@ -452,66 +788,658 @@
   justify-content: center;
   justify-self: center;
   max-width: 100%;
-  min-height: 1.7rem;
+  box-sizing: border-box;
+  min-height: 1.75rem;
   overflow: hidden;
   padding: 0.22rem 0.3rem;
   text-align: center;
   width: fit-content;
 }
 
-.skj-attack-roll-dialog__summary span {
+.skj-roll-dialog__summary span {
   overflow: hidden;
   text-align: center;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.skj-attack-roll-dialog__roll-button {
+.skj-roll-dialog__action {
   align-items: center;
   background: linear-gradient(180deg, rgba(45, 105, 73, 0.94), rgba(20, 66, 43, 0.96));
   border: 1px solid var(--skj-roll-frame);
-  border-radius: 14px;
+  border-radius: 12px;
   color: var(--skj-roll-text);
   cursor: pointer;
   display: inline-flex;
   font-family: inherit;
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   font-weight: 700;
-  gap: 0.3rem;
+  gap: 0.26rem;
   justify-content: center;
-  min-height: 2rem;
-  padding: 0.28rem 0.5rem;
-  width: 100%;
+  justify-self: center;
+  box-sizing: border-box;
+  line-height: 1;
+  min-height: 1.75rem;
+  padding: 0.22rem 0.44rem;
+  width: 84px;
 }
 
-.skj-theme-classic .skj-attack-roll-dialog__roll-button {
-  background: linear-gradient(180deg, rgba(115, 67, 36, 0.96), rgba(69, 35, 20, 0.96));
+.skj-attack-roll-dialog__roll-button {
+  min-width: 9.8rem;
+  width: min(12rem, 100%);
 }
 
-.skj-attack-roll-dialog__roll-button:hover,
-.skj-attack-roll-dialog__roll-button:focus {
+
+.skj-roll-dialog__action:hover,
+.skj-roll-dialog__action:focus {
   background: var(--skj-roll-hover);
   box-shadow: 0 0 0 1px var(--skj-roll-frame-soft);
   outline: none;
 }
 
+ .skj-runic-magic-dialog {
+  max-height: 72vh;
+  width: min(390px, 92vw);
+}
+
+.skj-runic-magic-dialog__body {
+  gap: 0.46rem;
+}
+
+.skj-runic-magic-dialog__mode-row {
+  grid-template-columns: 60px minmax(0, 1fr);
+}
+
+.skj-runic-magic-dialog__mode-row > label {
+  color: var(--skj-roll-muted);
+  font-size: 0.76rem;
+  font-weight: 700;
+  margin: 0;
+}
+
+.skj-runic-magic-dialog__mode {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  max-width: none;
+}
+
+.skj-runic-magic-dialog__panel {
+  display: grid;
+  gap: 0.42rem;
+  padding: 0.45rem;
+}
+
+.skj-runic-magic-dialog__panel[hidden] {
+  display: none;
+}
+
+.skj-runic-magic-dialog__field {
+  grid-template-columns: 84px minmax(0, 1fr);
+}
+
+.skj-runic-magic-dialog__field > span {
+  color: var(--skj-roll-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.12;
+}
+
+.skj-runic-magic-dialog__field > input,
+.skj-runic-magic-dialog__field > select {
+  min-width: 0;
+  width: 100%;
+}
+
+.skj-runic-magic-dialog__field--dex > input {
+  max-width: 72px;
+  text-align: center;
+}
+
+.skj-runic-magic-dialog__options {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  max-width: none;
+}
+
+.skj-runic-magic-dialog__options [data-rune-only][hidden] {
+  display: none;
+}
+
+.skj-runic-magic-dialog__options:has([data-rune-only][hidden]) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.skj-runic-magic-dialog__details {
+  gap: 0.32rem;
+}
+
+.skj-runic-magic-dialog__detail--craft {
+  grid-template-columns: 80px minmax(0, 1fr);
+}
+
+.skj-runic-magic-dialog__detail--craft > select,
+.skj-runic-magic-dialog__detail--craft > input {
+  min-width: 0;
+  width: 100%;
+}
+
+.skj-runic-magic-dialog__detail--custom {
+  grid-template-columns: 80px minmax(0, 1fr) 60px;
+}
+
+.skj-runic-magic-dialog__craft-warning {
+  margin: 0;
+}
+
+.skj-runic-magic-dialog__footer {
+  grid-template-columns: minmax(0, 1fr) 96px;
+}
+
+.skj-runic-magic-result {
+  border-top: 1px solid rgba(120, 96, 68, 0.28);
+  margin-top: 0.45rem;
+  padding-top: 0.45rem;
+}
+
+.chat-message .aov.skj-runic-magic-result {
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.chat-message .aov.skj-runic-magic-result .actor-roll,
+.chat-message .aov.skj-runic-magic-result .roll-details,
+.chat-message .aov.skj-runic-magic-result .header,
+.chat-message .aov.skj-runic-magic-result .name {
+  box-sizing: border-box;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.chat-message .aov.skj-runic-magic-result .dice-roll.expanded .skj-runic-magic-detail-body {
+  display: grid;
+  gap: 0.38rem;
+}
+
+.chat-message .aov.skj-runic-magic-result .skj-runic-magic-detail-body {
+  box-sizing: border-box;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.chat-message .aov.skj-runic-magic-result .skj-runic-magic-detail-row {
+  box-sizing: border-box;
+  line-height: 1.22;
+  margin: 0;
+  max-width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  width: 100%;
+}
+
+.chat-message .aov.skj-runic-magic-result .rollHidden {
+  margin-left: 0;
+  width: 100%;
+}
+
+.chat-message .aov.skj-runic-magic-result .skj-runic-magic-description {
+  border-top: 1px solid rgba(120, 96, 68, 0.2);
+  padding-top: 0.34rem;
+
+  p {
+    margin: 0 0 0.35rem;
+  }
+
+  p:last-child {
+    margin-bottom: 0;
+  }
+}
+
+
 @media (max-width: 460px) {
-  .skj-attack-roll-dialog {
+  .skj-roll-dialog {
     min-width: 0;
     width: 90vw;
   }
 
-  .skj-attack-roll-dialog__header,
-  .skj-attack-roll-dialog__row,
-  .skj-attack-roll-dialog__row--modifier,
-  .skj-attack-roll-dialog__detail,
-  .skj-attack-roll-dialog__detail--custom,
-  .skj-attack-roll-dialog__actions {
+  .skj-roll-dialog__header,
+  .skj-roll-dialog__row,
+  .skj-roll-dialog__row--modifier,
+  .skj-roll-dialog__row--ammunition,
+  .skj-roll-dialog__detail,
+  .skj-roll-dialog__detail--custom,
+  .skj-attack-roll-dialog__detail--stun,
+  .skj-attack-roll-dialog__detail--disarm,
+  .skj-missile-roll-dialog__detail--into-melee,
+  .skj-missile-roll-dialog__detail--range,
+  .skj-roll-dialog__footer {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .skj-attack-roll-dialog__segments {
+  .skj-roll-dialog__segments {
     grid-template-columns: minmax(0, 1fr);
     max-width: none;
   }
+
+  .skj-attack-roll-dialog__two-weapon-toggle,
+  .skj-attack-roll-dialog__split-toggle,
+  .skj-attack-roll-dialog__split-fields,
+  .skj-attack-roll-dialog__split-forced,
+  .skj-attack-roll-dialog__split-unavailable {
+    margin-inline-start: 0;
+    width: 100%;
+  }
+
+  .skj-attack-roll-dialog__disarm-controls {
+    grid-column: 1 / -1;
+    grid-template-columns: 44px minmax(0, 1fr);
+  }
+}
+
+.skj-roll-dialog__row--ammunition {
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
+  min-height: 1.75rem;
+  position: relative;
+}
+
+.skj-roll-dialog__row--ammunition.is-hidden {
+  display: none;
+}
+
+.skj-roll-dialog__row--ammunition > label {
+  inset-inline-start: 0;
+  justify-self: start;
+  max-width: calc(50% - 74px);
+  overflow: hidden;
+  padding-inline-end: 0.65rem;
+  text-overflow: ellipsis;
+  position: absolute;
+  text-align: start;
+  top: 50%;
+  transform: translateY(-50%);
+  white-space: nowrap;
+}
+
+.skj-roll-dialog__row--ammunition > select {
+  justify-self: center;
+  min-width: 0;
+  width: 124px;
+}
+
+
+@media (max-width: 460px) {
+  .skj-roll-dialog__row--ammunition {
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: stretch;
+    min-height: 0;
+  }
+
+  .skj-roll-dialog__row--ammunition > label {
+    inset-inline-start: auto;
+    max-width: none;
+    padding-inline-end: 0;
+    position: static;
+    transform: none;
+  }
+
+  .skj-roll-dialog__row--ammunition > select {
+    justify-self: stretch;
+    width: 100%;
+  }
+}
+
+.skj-roll-dialog__action:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.chat-message .skj-target-queue,
+.chat-message .skj-split-attack-chat {
+  display: grid;
+  gap: 0.42rem;
+  line-height: 1.22;
+}
+
+.chat-message .skj-target-queue h3,
+.chat-message .skj-split-attack-chat h3 {
+  font-size: 1rem;
+  line-height: 1.15;
+  margin: 0;
+}
+
+.chat-message .skj-target-queue p,
+.chat-message .skj-split-attack-chat p {
+  margin: 0;
+}
+
+.chat-message .skj-target-queue ol {
+  display: grid;
+  gap: 0.28rem;
+  margin: 0;
+  padding-inline-start: 1.25rem;
+}
+
+.chat-message .skj-target-queue__row {
+  align-items: center;
+  display: grid;
+  gap: 0.36rem;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.chat-message .skj-target-queue__row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-message .skj-target-queue__row.is-resolved {
+  opacity: 0.58;
+}
+
+.chat-message .skj-target-queue button,
+.chat-message .skj-split-attack-chat button {
+  min-height: 1.8rem;
+  width: auto;
+}
+
+/* ------------------------------------------------------------------------- */
+/* Knockback workflow refinements                                            */
+/* ------------------------------------------------------------------------- */
+
+.skj-roll-dialog__row--knockback-modifier {
+  grid-template-columns: 68px minmax(0, 1fr) 128px;
+}
+
+.skj-roll-dialog__row--knockback-modifier > select {
+  min-width: 0;
+}
+
+.skj-knockback-resistance-note {
+  align-items: center;
+  align-self: stretch;
+  background: var(--skj-roll-surface-soft);
+  border: 1px solid var(--skj-roll-frame-soft);
+  border-radius: 999px;
+  box-sizing: border-box;
+  color: var(--skj-roll-accent);
+  display: inline-flex;
+  gap: 0.36rem;
+  justify-content: center;
+  justify-self: stretch;
+  min-height: 1.92rem;
+  min-width: 0;
+  padding: 0.2rem 0.52rem;
+  text-align: center;
+}
+
+.skj-knockback-resistance-note i {
+  color: var(--skj-roll-warning);
+  flex: 0 0 auto;
+  font-size: 0.72rem;
+}
+
+.skj-knockback-resistance-note span {
+  color: var(--skj-roll-text);
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-message .aov.aov-skjaldborg-knockback-chat .actor-roll {
+  align-items: center;
+}
+
+.chat-message .aov.aov-skjaldborg-knockback-chat .roll-details {
+  min-width: 0;
+}
+
+.chat-message .aov.aov-skjaldborg-knockback-chat .roll-details .header {
+  min-height: 0;
+}
+
+.chat-message .aov.aov-skjaldborg-knockback-chat .tag {
+  line-height: 1.14;
+  white-space: normal;
+}
+
+.chat-message .aov.aov-skjaldborg-knockback-chat .skj-knockback-chat-result {
+  display: grid;
+  gap: 0.22rem;
+  line-height: 1.22;
+  margin-top: 0.32rem;
+  min-height: auto;
+  overflow: visible;
+  padding: 0.4rem 0.46rem;
+  text-align: center;
+  white-space: normal;
+}
+
+.chat-message .aov.aov-skjaldborg-knockback-chat .skj-knockback-chat-result > strong {
+  color: inherit;
+  display: block;
+  font-size: 0.92em;
+  line-height: 1.12;
+}
+
+.chat-message .aov.aov-skjaldborg-knockback-chat .skj-knockback-chat-result > span {
+  display: grid;
+  gap: 0.18rem;
+  line-height: 1.18;
+  min-width: 0;
+}
+
+.chat-message .aov.aov-skjaldborg-knockback-chat .skj-knockback-chat-line {
+  display: block;
+  line-height: 1.18;
+  overflow-wrap: anywhere;
+}
+
+.chat-message .aov.aov-skjaldborg-knockback-chat .result-success,
+.chat-message .aov.aov-skjaldborg-knockback-chat .result-fail {
+  margin-inline-start: 0.18rem;
+}
+
+
+.chat-message .aov.aov-skjaldborg-knockback-chat .skj-knockback-chat-result.is-compact {
+  display: block;
+}
+
+.chat-message .aov.aov-skjaldborg-knockback-chat .skj-knockback-chat-result.is-compact > span {
+  align-items: center;
+  display: flex;
+  gap: 0.32rem;
+  justify-content: center;
+  line-height: 1.15;
+}
+
+.chat-message .aov.aov-skjaldborg-knockback-chat .skj-knockback-chat-line--inline {
+  align-items: center;
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.28rem;
+  justify-content: center;
+}
+
+.chat-message .aov.aov-skjaldborg-knockback-chat .skj-knockback-chat-line--inline .result-success,
+.chat-message .aov.aov-skjaldborg-knockback-chat .skj-knockback-chat-line--inline .result-fail {
+  margin-inline-start: 0;
+}
+
+.chat-message .aov.aov-skjaldborg-missile-chat .actor-roll {
+  align-items: center;
+}
+
+.chat-message .aov.aov-skjaldborg-missile-chat .roll-details {
+  min-width: 0;
+}
+
+.chat-message .aov.aov-skjaldborg-missile-chat .roll-details .header {
+  min-height: 0;
+}
+
+.chat-message .aov.aov-skjaldborg-missile-chat .tag {
+  line-height: 1.12;
+  white-space: normal;
+}
+
+.chat-message .aov.aov-skjaldborg-missile-chat .skj-missile-chat-result--into-melee {
+  display: block;
+  line-height: 1.18;
+  margin-top: 0.34rem;
+  min-height: auto;
+  overflow: visible;
+  padding: 0.42rem 0.5rem;
+  text-align: center;
+  white-space: normal;
+}
+
+.chat-message .aov.aov-skjaldborg-missile-chat .skj-missile-chat-result--into-melee > span {
+  display: block;
+  line-height: 1.18;
+  overflow-wrap: anywhere;
+}
+
+.chat-message .aov.aov-skjaldborg-shield-cover-chat .actor-roll {
+  align-items: center;
+}
+
+.chat-message .aov.aov-skjaldborg-shield-cover-chat .roll-details {
+  min-width: 0;
+}
+
+.chat-message .aov.aov-skjaldborg-shield-cover-chat .roll-details .header {
+  min-height: 0;
+}
+
+.chat-message .aov.aov-skjaldborg-shield-cover-chat .skj-shield-cover-details {
+  min-width: 0;
+  width: 100%;
+}
+
+.chat-message .aov.aov-skjaldborg-shield-cover-chat .dice-roll.expanded .skj-shield-cover-details {
+  display: block;
+}
+
+.chat-message .aov.aov-skjaldborg-shield-cover-chat .skj-shield-cover-damage-header {
+  margin: 0.28rem 0 0.18rem;
+  min-height: 0;
+  padding: 0.1rem 0.35rem;
+  text-align: center;
+}
+
+.chat-message .aov.aov-skjaldborg-shield-cover-chat .skj-shield-cover-damage-header .pending {
+  display: block;
+  line-height: 1.15;
+  white-space: normal;
+}
+
+.chat-message .aov.aov-skjaldborg-shield-cover-chat .skj-shield-cover-detail {
+  display: block;
+  line-height: 1.18;
+  overflow-wrap: normal;
+  text-align: left;
+  white-space: normal;
+  width: 100%;
+  word-break: normal;
+}
+
+.chat-message .aov.aov-skjaldborg-shield-cover-chat .combat-result {
+  line-height: 1.18;
+  white-space: normal;
+}
+
+@media (max-width: 460px) {
+  .skj-roll-dialog__row--knockback-modifier {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .skj-knockback-resistance-note {
+    justify-self: stretch;
+    width: 100%;
+  }
+}
+
+/* ------------------------------------------------------------------------- */
+/* Knockback failed-recovery choice dialog                                    */
+/* ------------------------------------------------------------------------- */
+
+.skj-knockback-choice-content {
+  background: var(--skj-roll-panel);
+  color: var(--skj-roll-text);
+}
+
+.skj-knockback-choice-dialog {
+  display: grid;
+  gap: 0.7rem;
+  padding: 0.85rem;
+}
+
+.skj-knockback-choice-dialog__hero {
+  align-items: center;
+  background: var(--skj-roll-surface-soft);
+  border: 1px solid var(--skj-roll-frame-soft);
+  border-radius: 0.9rem;
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: 3.1rem minmax(0, 1fr);
+  padding: 0.65rem;
+}
+
+.skj-knockback-choice-dialog__hero img {
+  border: 1px solid var(--skj-roll-frame-strong);
+  border-radius: 50%;
+  height: 3.1rem;
+  object-fit: cover;
+  width: 3.1rem;
+}
+
+.skj-knockback-choice-dialog__hero strong,
+.skj-knockback-choice-dialog__hero span,
+.skj-knockback-choice-dialog p {
+  display: block;
+  line-height: 1.16;
+}
+
+.skj-knockback-choice-dialog__hero strong {
+  color: var(--skj-roll-text-strong);
+  font-size: 1rem;
+}
+
+.skj-knockback-choice-dialog__hero span,
+.skj-knockback-choice-dialog p {
+  color: var(--skj-roll-text-muted);
+  font-size: 0.86rem;
+}
+
+.skj-knockback-choice-window .form-footer,
+.skj-knockback-choice-window .dialog-buttons {
+  justify-content: center;
+}
+
+.skj-knockback-choice-window .form-footer button,
+.skj-knockback-choice-window .dialog-buttons button {
+  border-radius: 999px;
+  flex: 0 0 8.6rem;
+}
+
+.chat-message .aov.aov-skjaldborg-knockback-chat .skj-knockback-fumble-result {
+  margin-block: 0.38rem 0.44rem;
+  padding-block: 0.42rem;
+}
+
+.chat-message .aov.aov-skjaldborg-knockback-chat .skj-knockback-fumble-result > span {
+  display: block;
+}
+
+.chat-message .aov.aov-skjaldborg-knockback-chat .skj-knockback-fumble-button {
+  box-sizing: border-box;
+  display: block;
+  margin: 0.2rem auto 0;
+  min-height: 2.15rem;
+  position: static;
+  width: 100%;
 }

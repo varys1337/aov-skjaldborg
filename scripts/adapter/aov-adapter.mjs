@@ -1,4 +1,9 @@
-import { MODULE_ID, PHASES } from "../constants.mjs";
+import { DAMAGE_EFFECT_SOURCE_FLAG, GRAPPLED_STATUS_ID, IMMOBILIZED_STATUS_ID, MODULE_ID, PHASES } from "../constants.mjs";
+import { effectHasStatus, effectIsActive, injuryThresholdSeverityFromEffects, moduleFlag } from "../compat/active-effects.mjs";
+import {
+  getItemCritFumbleChances,
+  getWeaponCritFumbleChances
+} from "../combat/automation-helpers.mjs";
 
 /**
  * Convert a possibly absent or textual value to a finite number.
@@ -36,7 +41,228 @@ function parseMovementText(value) {
   return match ? Number(match[0]) : undefined;
 }
 
+
+/**
+ * Normalize a Foundry embedded collection or ordinary iterable into an array.
+ *
+ * @param {Collection<Item>|Item[]|null|undefined} items Candidate item source.
+ * @returns {Item[]} Item array.
+ */
+function itemArray(items) {
+  if (!items) return [];
+  if (typeof items.values === "function") return Array.from(items.values());
+  return Array.from(items ?? []);
+}
+
+/**
+ * Whether an AoV weapon item is currently carried/equipped.
+ *
+ * @param {Item|null|undefined} item Candidate weapon item.
+ * @returns {boolean}
+ */
+function isCarriedWeapon(item) {
+  return item?.type === "weapon" && numberOr(item.system?.equipStatus, 0) === 1;
+}
+
+/**
+ * Whether an AoV weapon item is intrinsic/natural rather than equipment.
+ *
+ * @param {Item|null|undefined} item Candidate weapon item.
+ * @returns {boolean}
+ */
+function isNaturalWeapon(item) {
+  const descriptor = String(item?.system?.weaponType ?? "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
+  return item?.type === "weapon" && (descriptor === "naturalwpn" || descriptor.includes("natural"));
+}
+
+function itemName(item) {
+  return String(item?.name ?? item?.system?.name ?? "");
+}
+
+function actorImage(actor, token = null) {
+  return actor?.img ?? "icons/svg/mystery-man.svg";
+}
+
+function skillTotal(actor, skill) {
+  const prepared = Number(skill?.system?.total);
+  if (Number.isFinite(prepared)) return prepared;
+  const raw = ["base", "xp", "home", "pers", "effects"]
+    .reduce((sum, field) => sum + numberOr(skill?.system?.[field], 0), 0);
+  if (raw <= 0) return raw;
+  return raw + numberOr(actor?.system?.[skill?.system?.category], 0);
+}
+
+function skillEncPenalty(actor, skill) {
+  return ["agi", "man", "ste", "cbt"].includes(String(skill?.system?.category ?? ""))
+    ? numberOr(actor?.system?.encPenalty, 0)
+    : 0;
+}
+
+function randomBatchId() {
+  return foundry.utils.randomID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+const CORE_COMBAT_CARD_WAIT_MS = 6000;
+const CORE_COMBAT_CARD_WAIT_STEP_MS = 100;
+
+/**
+ * Sleep for a short asynchronous polling interval.
+ *
+ * @param {number} ms Milliseconds to wait.
+ * @returns {Promise<void>}
+ */
+function sleep(ms) {
+  return new Promise(resolve => globalThis.setTimeout(resolve, ms));
+}
+
+/**
+ * Normalize a Foundry Collection or array-like source into an array.
+ *
+ * @param {Collection|Array|null|undefined} source Candidate collection.
+ * @returns {Array}
+ */
+function collectionArray(source) {
+  if (!source) return [];
+  if (typeof source.values === "function") return Array.from(source.values());
+  return Array.from(source ?? []);
+}
+
+/**
+ * Find an open unresolved core AoV combat card.
+ *
+ * @returns {ChatMessage|null}
+ */
+function findOpenCoreCombatCard() {
+  const messages = collectionArray(ui?.chat?.collection ?? game?.messages);
+  const openCards = messages.filter(message => (
+    message?.getFlag?.("aov", "cardType") === "CO"
+    && message?.getFlag?.("aov", "state") !== "closed"
+  ));
+  if (!openCards.length) return null;
+  return openCards[openCards.length - 1] ?? null;
+}
+
+/**
+ * Wait until a newly created core AoV combat card has replicated to this
+ * client. This prevents a remotely prompted defender from accidentally
+ * creating a second combat card because their chat collection has not yet
+ * received the attacker's card.
+ *
+ * @param {string|null|undefined} messageId ChatMessage id to wait for.
+ * @param {number} [timeoutMs=CORE_COMBAT_CARD_WAIT_MS] Maximum wait.
+ * @returns {Promise<ChatMessage|null>} Open combat card, if found.
+ */
+async function waitForOpenCoreCombatCard(messageId, timeoutMs = CORE_COMBAT_CARD_WAIT_MS) {
+  const targetId = String(messageId ?? "").trim();
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() <= deadline) {
+    const message = targetId ? (game.messages?.get?.(targetId) ?? null) : findOpenCoreCombatCard();
+    if (
+      message?.getFlag?.("aov", "cardType") === "CO"
+      && message?.getFlag?.("aov", "state") !== "closed"
+    ) {
+      return message;
+    }
+    await sleep(CORE_COMBAT_CARD_WAIT_STEP_MS);
+  }
+  return targetId ? null : findOpenCoreCombatCard();
+}
+
+/**
+ * Return the first active GM, preferring the current user when applicable.
+ *
+ * @returns {User|null}
+ */
+function activeGmUser() {
+  if (game.user?.active && game.user?.isGM) return game.user;
+  return game.users?.find?.(user => user.active && user.isGM) ?? null;
+}
+
+/**
+ * Test whether a non-GM user owns a concrete token participant or its actor.
+ * Token permission is checked first so unlinked token actors can be routed to
+ * the user who actually controls that battlefield participant.
+ *
+ * @param {User|null|undefined} user Candidate user.
+ * @param {Actor|null|undefined} actor Participant Actor.
+ * @param {TokenDocument|null|undefined} token Participant TokenDocument.
+ * @returns {boolean}
+ */
+function userOwnsParticipant(user, actor, token) {
+  if (!user || user.isGM) return false;
+  if (token?.testUserPermission?.(user, "OWNER")) return true;
+  return actor?.testUserPermission?.(user, "OWNER") ?? false;
+}
+
+/**
+ * Choose the active client that should be prompted for a defender reaction.
+ * Active non-GM owners of the token/actor take priority; otherwise the active
+ * GM keeps the current GM-controlled fallback behavior.
+ *
+ * @param {Actor|null|undefined} actor Defender actor.
+ * @param {TokenDocument|null|undefined} token Defender token.
+ * @returns {User|null}
+ */
+function defensePromptUser(actor, token) {
+  const owners = collectionArray(game.users)
+    .filter(user => user.active && !user.isGM)
+    .filter(user => userOwnsParticipant(user, actor, token));
+  return owners[0] ?? activeGmUser();
+}
+
+/**
+ * Resolve a UUID without surfacing Foundry lookup errors to users.
+ *
+ * @param {unknown} uuid Candidate UUID.
+ * @returns {Promise<Document|null>} Resolved document.
+ */
+async function resolveUuid(uuid) {
+  const value = String(uuid ?? "").trim();
+  if (!value || typeof fromUuid !== "function") return null;
+  try {
+    return await fromUuid(value);
+  } catch (_exception) {
+    return null;
+  }
+}
+
+function actorGrappleLocationStates(actor) {
+  const states = new Map();
+  for (const effect of actor?.effects ?? []) {
+    if (!effectIsActive(effect)) continue;
+    const data = moduleFlag(effect, "grapple") ?? null;
+    const locationId = String(data?.grappledHitLocationId ?? "");
+    if (!locationId) continue;
+    const statusIsImmobilized = effectHasStatus(effect, IMMOBILIZED_STATUS_ID) || data?.immobilized === true;
+    const statusIsGrappled = statusIsImmobilized || effectHasStatus(effect, GRAPPLED_STATUS_ID);
+    if (!statusIsGrappled) continue;
+    const existing = states.get(locationId) ?? { grappled: false, immobilized: false, sources: [] };
+    existing.grappled = true;
+    existing.immobilized = existing.immobilized || statusIsImmobilized;
+    const source = String(data.sourceActorName ?? data.sourceTokenName ?? "").trim();
+    if (source && !existing.sources.includes(source)) existing.sources.push(source);
+    states.set(locationId, existing);
+  }
+  return states;
+}
+
 let aovCheckApiPromise = null;
+let aovRollOptionsApiPromise = null;
+
+/**
+ * Import one installed AoV system module using Foundry's route resolver.
+ *
+ * @param {string} path AoV module path relative to the Foundry data root.
+ * @returns {Promise<object>}
+ */
+export function importAoVSystemModule(path) {
+  const route = foundry.utils.getRoute?.(path) ?? `/${path}`;
+  return import(route);
+}
 
 /**
  * Load the AoV system's awaited check API from the installed system package.
@@ -53,8 +279,7 @@ let aovCheckApiPromise = null;
 async function getAoVCheckApi() {
   if (!aovCheckApiPromise) {
     const path = "systems/aov/system/apps/checks.mjs";
-    const route = foundry.utils.getRoute?.(path) ?? `/${path}`;
-    aovCheckApiPromise = import(route)
+    aovCheckApiPromise = importAoVSystemModule(path)
       .then(module => {
         if (typeof module.AOVCheck?._trigger !== "function") {
           throw new Error("The Age of Vikings check workflow is unavailable.");
@@ -74,6 +299,40 @@ async function getAoVCheckApi() {
       });
   }
   return aovCheckApiPromise;
+}
+
+/**
+ * Load AoV's core roll-options dialog surface without using AOVCheck.RollDialog,
+ * whose combat option list depends on global open-card discovery.
+ *
+ * @returns {Promise<{AOVDialog: typeof foundry.applications.api.DialogV2, AOVSelectLists: Function}>}
+ */
+async function getAoVRollOptionsApi() {
+  if (!aovRollOptionsApiPromise) {
+    const dialogPath = "systems/aov/system/setup/aov-dialog.mjs";
+    const listsPath = "systems/aov/system/apps/select-lists.mjs";
+    aovRollOptionsApiPromise = Promise.all([
+      importAoVSystemModule(dialogPath),
+      importAoVSystemModule(listsPath)
+    ])
+      .then(([dialogModule, listsModule]) => {
+        if (typeof dialogModule.default?.input !== "function") {
+          throw new Error("The Age of Vikings roll options dialog is unavailable.");
+        }
+        if (!listsModule.AOVSelectLists) {
+          throw new Error("The Age of Vikings roll option lists are unavailable.");
+        }
+        return {
+          AOVDialog: dialogModule.default,
+          AOVSelectLists: listsModule.AOVSelectLists
+        };
+      })
+      .catch(exception => {
+        aovRollOptionsApiPromise = null;
+        throw exception;
+      });
+  }
+  return aovRollOptionsApiPromise;
 }
 
 /**
@@ -312,14 +571,29 @@ export class AoVAdapter {
    * @param {string} itemId Owned Item id.
    * @returns {Promise<Item>}
    */
-  static async toggleActorMagicPrepared(actor, itemId) {
+  /**
+   * @param {boolean} prepared Desired prepared state.
+   */
+  static async setActorMagicPrepared(actor, itemId, prepared) {
     if (!actor?.isOwner) throw new Error("The current user does not own this actor.");
     const item = actor.items?.get(itemId);
     if (!item || !["runescript", "seidur"].includes(item.type)) {
       throw new Error("The selected magic Item cannot be prepared.");
     }
-    await item.update({ "system.prepared": !item.system?.prepared });
+    if (item.system?.prepared !== prepared) await item.update({ "system.prepared": prepared === true });
     return item;
+  }
+
+  /**
+   * Set an owned Rune Script or SeiГ°r Spell preparation state.
+   *
+   * @param {Actor} actor Owning character Actor.
+   * @param {string} itemId Owned Item id.
+   * @returns {Promise<Item>}
+   */
+  static async toggleActorMagicPrepared(actor, itemId) {
+    const item = actor?.items?.get?.(itemId);
+    return this.setActorMagicPrepared(actor, itemId, !item?.system?.prepared);
   }
 
   /**
@@ -351,6 +625,1246 @@ export class AoVAdapter {
       characteristic: false,
       skillId: weapon.id,
       itemId: weapon.id,
+      origID: game.user?.id ?? game.user?._id
+    });
+  }
+
+  static #actorSkillByIdOrCid(actor, skillIdOrCid) {
+    const requested = String(skillIdOrCid ?? "").trim();
+    if (!requested) return null;
+    const direct = actor?.items?.get?.(requested);
+    if (direct?.type === "skill") return direct;
+    const normalized = requested
+      .normalize("NFKD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+    return itemArray(actor?.items).find(item => {
+      if (item?.type !== "skill") return false;
+      const cid = String(item.flags?.aov?.cidFlag?.id ?? "").toLowerCase();
+      const name = String(item.name ?? "")
+        .normalize("NFKD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase();
+      return cid === normalized || name === normalized;
+    }) ?? null;
+  }
+
+  static #cardTypeValue(CardType, cardType) {
+    switch (String(cardType ?? "").toLowerCase()) {
+      case "combat": return CardType.COMBAT;
+      case "opposed": return CardType.OPPOSED;
+      case "resistance": return CardType.RESISTANCE;
+      case "fixed": return CardType.FIXED;
+      case "augment": return CardType.AUGMENT;
+      case "unopposed":
+      default: return CardType.UNOPPOSED;
+    }
+  }
+
+  static #rollResult(messageId) {
+    const message = game.messages?.get?.(String(messageId ?? "")) ?? null;
+    const flags = message?.flags?.aov ?? {};
+    const cards = Array.isArray(flags.chatCard) ? flags.chatCard : [];
+    const primary = cards[0] ?? {};
+    const resultLevel = Number(primary.resultLevel ?? flags.resultLevel);
+    const successLevel = Number(primary.successLevel ?? flags.successLevel);
+    return {
+      messageId: message?.id ?? (messageId ? String(messageId) : null),
+      resultLevel: Number.isFinite(resultLevel) ? resultLevel : null,
+      successLevel: Number.isFinite(successLevel) ? successLevel : null,
+      message
+    };
+  }
+
+  /**
+   * Run an AoV skill check through the core system router.
+   *
+   * @param {Actor} actor Owning actor.
+   * @param {string} skillIdOrCid Owned skill id or AoV CID.
+   * @param {Event|null} event Originating interaction event.
+   * @param {{cardType?: string, flatMod?: number, shiftKey?: boolean}} [options={}] Roll options.
+   * @returns {Promise<{messageId: string|null, resultLevel: number|null, successLevel: number|null, message: ChatMessage|null}>}
+   */
+  static async rollActorSkill(actor, skillIdOrCid, event = null, options = {}) {
+    if (!actor?.isOwner && !game.user?.isGM) throw new Error("The current user does not own this actor.");
+    const skill = this.#actorSkillByIdOrCid(actor, skillIdOrCid);
+    if (!skill) throw new Error("The selected skill is unavailable.");
+
+    const { AOVCheck, RollType, CardType } = await getAoVCheckApi();
+    const messageId = await AOVCheck._trigger({
+      rollType: RollType.SKILL,
+      cardType: this.#cardTypeValue(CardType, options.cardType),
+      shiftKey: options.shiftKey ?? Boolean(event?.shiftKey),
+      actor,
+      token: this.resolveActorTokenDocument(actor, null),
+      characteristic: false,
+      skillId: skill.id,
+      itemId: skill.id,
+      flatMod: numberOr(options.flatMod, 0),
+      origID: game.user?.id ?? game.user?._id
+    });
+    return this.#rollResult(messageId);
+  }
+
+  /**
+   * Run an AoV characteristic check through the core system router.
+   *
+   * @param {Actor} actor Owning actor.
+   * @param {string} characteristic AoV ability key.
+   * @param {Event|null} event Originating interaction event.
+   * @param {{cardType?: string, flatMod?: number, shiftKey?: boolean}} [options={}] Roll options.
+   * @returns {Promise<{messageId: string|null, resultLevel: number|null, successLevel: number|null, message: ChatMessage|null}>}
+   */
+  static async rollActorCharacteristic(actor, characteristic, event = null, options = {}) {
+    if (!actor?.isOwner && !game.user?.isGM) throw new Error("The current user does not own this actor.");
+    const ability = String(characteristic ?? "").trim().toLowerCase();
+    if (!actor?.system?.abilities?.[ability]) throw new Error("The selected characteristic is unavailable.");
+
+    const { AOVCheck, RollType, CardType } = await getAoVCheckApi();
+    const messageId = await AOVCheck._trigger({
+      rollType: RollType.CHARACTERISTIC,
+      cardType: this.#cardTypeValue(CardType, options.cardType),
+      shiftKey: options.shiftKey ?? Boolean(event?.shiftKey),
+      actor,
+      token: this.resolveActorTokenDocument(actor, null),
+      characteristic: ability,
+      skillId: false,
+      itemId: false,
+      flatMod: numberOr(options.flatMod, 0),
+      origID: game.user?.id ?? game.user?._id
+    });
+    return this.#rollResult(messageId);
+  }
+
+
+  /**
+   * Resolve the best TokenDocument to pass into the core AoV check workflow.
+   * Passing the token document is important for unlinked combatants because the
+   * AoV system distinguishes token participants from base Actor participants.
+   *
+   * @param {Actor|null|undefined} actor Actor represented by the token.
+   * @param {Token|TokenDocument|null|undefined} [preferredToken=null] Token already selected by the HUD workflow.
+   * @returns {TokenDocument|null}
+   */
+  static resolveActorTokenDocument(actor, preferredToken = null) {
+    const preferredDocument = preferredToken?.document ?? preferredToken ?? null;
+    if (preferredDocument?.uuid && preferredDocument?.actor) return preferredDocument;
+    if (actor?.token?.uuid) return actor.token;
+
+    const controlled = canvas?.tokens?.controlled?.find(token => token?.actor === actor || token?.actor?.id === actor?.id) ?? null;
+    if (controlled?.document?.uuid) return controlled.document;
+
+    const activeTokens = actor?.getActiveTokens?.(true, true) ?? actor?.getActiveTokens?.() ?? [];
+    const active = activeTokens.find(token => token?.document?.uuid) ?? activeTokens[0] ?? null;
+    return active?.document ?? null;
+  }
+
+  /**
+   * Select the user who should receive the defender's core AoV roll dialog.
+   * Active non-GM owners of the exact token/actor are preferred; if no such
+   * player is active, the active GM handles the dialog as the fallback.
+   *
+   * @param {Actor|null|undefined} actor Defender Actor.
+   * @param {TokenDocument|null|undefined} [token=null] Defender TokenDocument.
+   * @returns {User|null}
+   */
+  static getDefensePromptUser(actor, token = null) {
+    return defensePromptUser(actor, token);
+  }
+
+  /**
+   * Test whether the current user may locally prompt a defense roll for the
+   * supplied participant.
+   *
+   * @param {Actor|null|undefined} actor Defender Actor.
+   * @param {TokenDocument|null|undefined} [token=null] Defender TokenDocument.
+   * @returns {boolean}
+   */
+  static currentUserCanDefend(actor, token = null) {
+    if (game.user?.isGM) return true;
+    return userOwnsParticipant(game.user, actor, token);
+  }
+
+  /**
+   * Resolve participant documents from a socket-safe defense workflow payload.
+   * Token UUID is authoritative for unlinked actors; actor UUID is only a
+   * fallback when a token was not available.
+   *
+   * @param {object} payload Defense workflow payload.
+   * @returns {Promise<{actor: Actor|null, token: TokenDocument|null}>}
+   */
+  static async resolveDefenseParticipant(payload = {}) {
+    const suppliedToken = payload.targetToken?.document ?? payload.targetToken ?? payload.token?.document ?? payload.token ?? null;
+    let token = suppliedToken?.uuid && suppliedToken?.actor ? suppliedToken : null;
+    if (!token) {
+      const resolvedToken = await resolveUuid(payload.tokenUuid ?? payload.targetTokenUuid);
+      token = resolvedToken?.actor ? resolvedToken : null;
+    }
+
+    const suppliedActor = payload.targetActor ?? payload.actor ?? null;
+    let actor = suppliedActor ?? token?.actor ?? null;
+    if (!actor) {
+      const resolvedActor = await resolveUuid(payload.actorUuid ?? payload.targetActorUuid);
+      actor = resolvedActor?.items ? resolvedActor : null;
+    }
+
+    if (!token && actor) token = this.resolveActorTokenDocument(actor, null);
+    return { actor, token };
+  }
+
+  /**
+   * Build a socket-safe defender prompt payload. Do not serialize Foundry
+   * Documents across the socket; use UUIDs and re-resolve locally on the target
+   * user's client.
+   *
+   * @param {{targetActor: Actor, targetToken: TokenDocument|null, attackMessageId: string|null}} request Request data.
+   * @returns {object}
+   */
+  static buildDefenseWorkflowPayload(request) {
+    const token = request.targetToken?.document ?? request.targetToken ?? null;
+    const actor = request.targetActor ?? token?.actor ?? null;
+    return {
+      attackMessageId: request.attackMessageId ?? null,
+      tokenUuid: token?.uuid ?? "",
+      actorUuid: token?.actor?.uuid ?? actor?.uuid ?? ""
+    };
+  }
+
+  /**
+   * Find the defender's preferred parrying weapon for the core AoV combat card.
+   *
+   * @param {Actor|null|undefined} actor Defender Actor.
+   * @returns {Item|null}
+   */
+  static getDefenseWeapon(actor) {
+    if (!actor?.items) return null;
+    const readiedId = String(actor.getFlag?.(MODULE_ID, "readiedWeaponId") ?? "");
+    const readied = readiedId ? actor.items.get(readiedId) : null;
+    if (readied?.type === "weapon") return readied;
+
+    const weapons = itemArray(actor.items).filter(item => item?.type === "weapon");
+    return weapons.find(item => isCarriedWeapon(item))
+      ?? weapons.find(item => isNaturalWeapon(item))
+      ?? weapons[0]
+      ?? null;
+  }
+
+  /**
+   * Find the AoV Dodge skill on an actor for an unarmed defensive fallback.
+   *
+   * @param {Actor|null|undefined} actor Defender Actor.
+   * @returns {Item|null}
+   */
+  static getDodgeSkill(actor) {
+    const skills = itemArray(actor?.items).filter(item => item?.type === "skill");
+    return skills.find(item => item.flags?.aov?.cidFlag?.id === "i.skill.dodge")
+      ?? skills.find(item => String(item.name ?? "").trim().toLowerCase() === "dodge")
+      ?? null;
+  }
+
+  static #participantCardData(actor, token = null) {
+    const participant = this.#aovParticipantReference(actor, token);
+    return {
+      particId: participant.id ?? "",
+      particType: participant.type ?? "actor",
+      particName: token?.name ?? actor?.name ?? "",
+      particImg: actorImage(actor, token),
+      actorType: actor?.type ?? ""
+    };
+  }
+
+  static #combatCardEntry({
+    actor,
+    token = null,
+    item,
+    label = null,
+    rollType = "WP",
+    targetScore,
+    rawScore,
+    flatMod = 0,
+    encPenalty = 0,
+    combatAction = "attack",
+    targetId = "",
+    targetType = "",
+    targetWpnId = ""
+  }) {
+    const { critChance, fumbleChance } = item?.type === "weapon"
+      ? getWeaponCritFumbleChances(actor, item)
+      : getItemCritFumbleChances(item);
+    return {
+      rollType,
+      ...this.#participantCardData(actor, token),
+      targetId,
+      targetType,
+      targetLoc: "",
+      targetWpnId,
+      characteristic: false,
+      label: label ?? itemName(item),
+      critChance,
+      fumbleChance,
+      targetScore: numberOr(targetScore, 0),
+      rawScore: numberOr(rawScore, 0),
+      difficulty: "simple",
+      diffLabel: game.i18n.localize("AOV.rolls.simple"),
+      rollFormula: "1D100",
+      flatMod: numberOr(flatMod, 0),
+      encPenalty: numberOr(encPenalty, 0),
+      mqPenalty: 0,
+      targetAdj: 0,
+      rollResult: undefined,
+      rollVal: undefined,
+      roll: undefined,
+      weaponAbsorb: 0,
+      armourAbsorb: 0,
+      oppRes: 0,
+      damTypeLabel: "",
+      damBonus: 0,
+      successLevel: "99",
+      successLevelLabel: "",
+      augAdj: 0,
+      diceRolled: "",
+      skillId: item?.id ?? false,
+      combatAction,
+      combatActionLabel: game.i18n.localize(`AOV.Combat.action.${combatAction}`),
+      wpnBlock: false,
+      wpnDam: 1,
+      armourBlock: false,
+      damageCF: false,
+      resultLevel: 0,
+      resultLabel: "",
+      userID: game.user?.id ?? "",
+      origID: game.user?.id ?? ""
+    };
+  }
+
+  static __testCombatCardEntry(options = {}) {
+    return this.#combatCardEntry(options);
+  }
+
+  static async #aovSelectList(name, ...args) {
+    const { AOVSelectLists } = await getAoVRollOptionsApi();
+    const fn = AOVSelectLists?.[name];
+    return typeof fn === "function" ? (await fn.call(AOVSelectLists, ...args)) : {};
+  }
+
+  static #coreActionOptions(source, actionOptions = null) {
+    const options = actionOptions && typeof actionOptions === "object" ? actionOptions : {};
+    if (Object.keys(options).length) return options;
+    return source === "defense" ? { none: game.i18n.localize("AOV.Combat.action.none") } : { attack: game.i18n.localize("AOV.Combat.action.attack") };
+  }
+
+  static async #promptCoreRollOptions({
+    source,
+    actionOptions,
+    combatAction = "",
+    flatMod = 0,
+    label = ""
+  }) {
+    const { AOVDialog } = await getAoVRollOptionsApi();
+    const options = this.#coreActionOptions(source, actionOptions);
+    const defaultAction = Object.hasOwn(options, combatAction)
+      ? combatAction
+      : (Object.keys(options)[0] ?? "");
+    const data = {
+      cardType: "CO",
+      cardLabel: game.i18n.localize("AOV.card.CO"),
+      label,
+      rollType: "WP",
+      flatMod: numberOr(flatMod, 0),
+      damBonus: 0,
+      damType: "",
+      dmgLevels: await this.#aovSelectList("dmgLevels"),
+      askFixed: false,
+      askDiff: false,
+      askSuccess: false,
+      askDamType: false,
+      askDamBonus: false,
+      askBonus: true,
+      askDodge: false,
+      askAction: true,
+      actionOptions: options,
+      combatAction: defaultAction,
+      diffOptions: await this.#aovSelectList("difficultyOptions"),
+      ctOptions: await this.#aovSelectList("cutThrust"),
+      successLevel: "99"
+    };
+    const html = await foundry.applications.handlebars.renderTemplate("systems/aov/templates/dialog/rollOptions.hbs", data);
+    const result = await AOVDialog.input({
+      window: { title: game.i18n.localize("AOV.card.rollMods") },
+      content: html,
+      ok: { label: game.i18n.localize("AOV.rollDice") }
+    });
+    if (!result) {
+      return {
+        cancelled: true,
+        actionOption: defaultAction,
+        checkBonus: numberOr(flatMod, 0),
+        raw: null
+      };
+    }
+    const actionOption = Object.hasOwn(options, String(result.actionOption ?? ""))
+      ? String(result.actionOption)
+      : defaultAction;
+    return {
+      cancelled: false,
+      actionOption,
+      checkBonus: numberOr(result.checkBonus, 0),
+      raw: result
+    };
+  }
+
+  static async #attackActionOptions() {
+    return this.#aovSelectList("attackOptions");
+  }
+
+  static async #defenseActionOptions(actor, { incomingWeaponType = "" } = {}) {
+    const options = { ...(await this.#aovSelectList("defendOptions", incomingWeaponType)) };
+    if (!this.getDefenseWeapon(actor)) delete options.parry;
+    if (!this.getDodgeSkill(actor)) delete options.dodge;
+    if (!Object.hasOwn(options, "none")) options.none = game.i18n.localize("AOV.Combat.action.none");
+    return options;
+  }
+
+  static #nativeAimedModifier(action, payload) {
+    if (payload.aimedBlow?.enabled === true) return 0;
+    if (action === "aimedLimb") return -20;
+    if (action === "aimedTorso") return -40;
+    return 0;
+  }
+
+  static #attackCombatAction(payload) {
+    if (payload.aimedBlow?.enabled === true) return "attack";
+    const action = String(payload.coreOptions?.actionOption ?? payload.combatAction ?? "attack");
+    return ["aimedLimb", "aimedTorso", "attack"].includes(action) ? action : "attack";
+  }
+
+  static async #withCoreAttackOptions(payload = {}) {
+    const coreOptions = await this.#promptCoreRollOptions({
+      source: "attack",
+      actionOptions: await this.#attackActionOptions(),
+      combatAction: this.#attackCombatAction(payload),
+      flatMod: 0,
+      label: itemName(payload.weapon)
+    });
+    if (coreOptions.cancelled) return null;
+    const combatAction = payload.aimedBlow?.enabled === true ? "attack" : coreOptions.actionOption;
+    return {
+      ...payload,
+      coreOptions,
+      coreDialogSource: "attack",
+      combatAction
+    };
+  }
+
+  static async #renderCombatMessage(aovFlags) {
+    return foundry.applications.handlebars.renderTemplate(
+      aovFlags.chatTemplate ?? "systems/aov/templates/chat/roll-combat.hbs",
+      aovFlags
+    );
+  }
+
+  static async #createCombatMessage({ actor, chatCard, batchId = "", batchIndex = 0, batchSize = 1 }) {
+    const aovFlags = {
+      rollType: "WP",
+      cardType: "CO",
+      chatTemplate: "systems/aov/templates/chat/roll-combat.hbs",
+      state: "open",
+      wait: true,
+      resultLevel: 0,
+      rollResult: undefined,
+      successLevelLabel: "",
+      successLevelLabelVisible: false,
+      initiator: chatCard.particId,
+      initiatorType: chatCard.particType,
+      chatCard: [chatCard]
+    };
+    const content = await this.#renderCombatMessage(aovFlags);
+    const message = await ChatMessage.create({
+      user: game.user.id,
+      style: CONST.CHAT_MESSAGE_STYLES.OTHER,
+      content,
+      speaker: {
+        actor: actor?.id ?? null,
+        alias: game.i18n.localize("AOV.card.CO")
+      },
+      flags: {
+        aov: aovFlags,
+        [MODULE_ID]: {
+          combatCardBatch: {
+            batchId,
+            batchIndex,
+            batchSize,
+            createdAt: Date.now()
+          }
+        }
+      }
+    });
+    return message ?? null;
+  }
+
+  static async #appendDefenseCard(messageId, card) {
+    const message = game.messages?.get?.(String(messageId ?? "")) ?? null;
+    if (!message?.update) return null;
+    const aovFlags = foundry.utils.deepClone(message.flags?.aov ?? {});
+    const chatCards = Array.isArray(aovFlags.chatCard) ? aovFlags.chatCard : [];
+    if (String(aovFlags.cardType ?? "") !== "CO" || String(aovFlags.state ?? "") === "closed") return null;
+    if (chatCards.length >= 2) {
+      return { messageId: message.id, alreadyDefended: true };
+    }
+    const nextFlags = {
+      ...aovFlags,
+      chatCard: [...chatCards, card]
+    };
+    const content = await this.#renderCombatMessage(nextFlags);
+    await message.update({
+      content,
+      "flags.aov.chatCard": nextFlags.chatCard
+    });
+    return { messageId: message.id, alreadyDefended: false };
+  }
+
+  static #attackFlatModifier(payload, weapon) {
+    const combatAction = this.#attackCombatAction(payload);
+    const aimedModifier = payload.aimedBlow?.enabled ? numberOr(payload.aimedBlow?.penalty, 0) : 0;
+    const disarmModifier = payload.disarm?.enabled ? numberOr(payload.disarm?.penalty, 0) : 0;
+    const stunModifier = payload.stun?.enabled ? numberOr(payload.stun?.penalty, 0) : 0;
+    const coreModifier = numberOr(payload.coreOptions?.checkBonus, 0) + this.#nativeAimedModifier(combatAction, payload);
+    const isMissileWorkflow = String(payload.workflowType ?? "") === "missile";
+    if (isMissileWorkflow && Number.isFinite(Number(payload.targetNumber))) {
+      return numberOr(payload.targetNumber, 0) - numberOr(payload.baseChance ?? weapon?.system?.total, 0) + coreModifier;
+    }
+    return numberOr(payload.situationalModifier, 0)
+      + aimedModifier
+      + disarmModifier
+      + stunModifier
+      + numberOr(payload.augmentModifier, 0)
+      + coreModifier;
+  }
+
+  static async #createDialogCombatAttack(payload = {}, { batchId = "", batchIndex = 0, batchSize = 1 } = {}) {
+    const actor = payload.actor ?? null;
+    const weapon = payload.weapon ?? null;
+    if (!actor || !weapon) throw new Error("The attack workflow is missing an actor or weapon.");
+    const sourceToken = this.resolveActorTokenDocument(actor, payload.sourceToken ?? payload.token ?? null);
+    const targetActor = payload.targetActor ?? payload.targetToken?.actor ?? null;
+    const targetToken = this.resolveActorTokenDocument(targetActor, payload.targetToken ?? null);
+    const flatMod = this.#attackFlatModifier(payload, weapon);
+    const encPenalty = numberOr(actor?.system?.encPenalty, 0);
+    const baseChance = numberOr(payload.baseChance ?? weapon?.system?.total, 0);
+    const targetNumber = baseChance + flatMod;
+    const card = this.#combatCardEntry({
+      actor,
+      token: sourceToken,
+      item: weapon,
+      rollType: "WP",
+      rawScore: baseChance,
+      targetScore: targetNumber + encPenalty,
+      flatMod,
+      encPenalty,
+      combatAction: this.#attackCombatAction(payload)
+    });
+    const message = await this.#createCombatMessage({ actor, chatCard: card, batchId, batchIndex, batchSize });
+    const attackMessageId = message?.id ?? null;
+    if (!attackMessageId) return null;
+    await this.#attachAimedBlowFlag(attackMessageId, payload, { actor, sourceToken, weapon, targetActor, targetToken });
+    await this.#attachDisarmFlag(attackMessageId, payload, { actor, sourceToken, weapon, targetActor, targetToken });
+    await this.#attachStunFlag(attackMessageId, payload, { actor, sourceToken, weapon, targetActor, targetToken });
+    await this.#attachMissileFlags(attackMessageId, payload, { actor, sourceToken, weapon, targetActor, targetToken });
+    await this.#attachDamageEffectSourceFlag(attackMessageId, payload, { actor, sourceToken, weapon, targetActor, targetToken });
+    return { actor, weapon, sourceToken, targetActor, targetToken, attackMessageId };
+  }
+
+  static #actorFromCombatCard(card) {
+    const type = String(card?.particType ?? "");
+    const id = String(card?.particId ?? "");
+    if (!id) return null;
+    if (type === "actor") return game.actors?.get?.(id) ?? null;
+    if (type === "token") {
+      return game.actors?.tokens?.[id]
+        ?? canvas?.tokens?.placeables?.find?.(token => token?.document?.id === id)?.actor
+        ?? canvas?.scene?.tokens?.get?.(id)?.actor
+        ?? null;
+    }
+    return null;
+  }
+
+  static #incomingWeaponType(message) {
+    const card = message?.getFlag?.("aov", "chatCard")?.[0] ?? null;
+    const actor = this.#actorFromCombatCard(card);
+    const item = actor?.items?.get?.(String(card?.skillId ?? "")) ?? null;
+    return String(item?.system?.weaponType ?? "");
+  }
+
+  static async #appendNoDefenseCard({ attackMessageId, actor, token, coreOptions }) {
+    const card = this.#combatCardEntry({
+      actor,
+      token,
+      item: null,
+      label: game.i18n.localize("AOV.Combat.action.none"),
+      rollType: "SK",
+      rawScore: 0,
+      targetScore: 0,
+      flatMod: 0,
+      encPenalty: 0,
+      combatAction: "none"
+    });
+    const update = await this.#appendDefenseCard(attackMessageId, card);
+    if (!update || update.alreadyDefended) throw new Error(game.i18n.localize("AOV_SKJALDBORG.Warnings.DefenseCombatCardUnavailable"));
+    return {
+      defenseMode: "none",
+      defenseMessageId: update.messageId ?? attackMessageId ?? null,
+      coreOptions,
+      combatAction: "none",
+      coreDialogSource: "defense",
+      cancelled: false
+    };
+  }
+
+  static async #addDefenseToAttackMessage({ attackMessageId, actor, token, item, mode, coreOptions }) {
+    const isDodge = mode === "dodge";
+    const rawScore = isDodge ? skillTotal(actor, item) : numberOr(item?.system?.total, 0);
+    const encPenalty = isDodge ? skillEncPenalty(actor, item) : numberOr(actor?.system?.encPenalty, 0);
+    const parryBonus = isDodge ? 0 : numberOr(actor?.system?.parryBonus, 0);
+    const flatMod = numberOr(coreOptions?.checkBonus, 0) + parryBonus;
+    const card = this.#combatCardEntry({
+      actor,
+      token,
+      item,
+      rollType: isDodge ? "SK" : "WP",
+      rawScore,
+      targetScore: rawScore + flatMod + encPenalty,
+      flatMod,
+      encPenalty,
+      combatAction: mode
+    });
+    const update = await this.#appendDefenseCard(attackMessageId, card);
+    if (!update || update.alreadyDefended) throw new Error(game.i18n.localize("AOV_SKJALDBORG.Warnings.DefenseCombatCardUnavailable"));
+    return {
+      defenseMode: isDodge ? "dodge" : "weapon",
+      defenseMessageId: update?.messageId ?? attackMessageId ?? null,
+      coreOptions,
+      combatAction: mode,
+      coreDialogSource: "defense",
+      cancelled: false
+    };
+  }
+
+  /**
+   * Start the core AoV opposed combat workflow from a Skjaldborg Attack or
+   * Missile dialog payload. The attacker's core dialog runs on the initiating
+   * client. The defender's core dialog is then routed to the active owning
+   * player for the defender token/actor, falling back to the active GM when no
+   * active player owner exists.
+   *
+   * @param {object} payload AttackRollDialog or MissileRollDialog submit payload.
+   * @param {{promptDefender?: Function}} [options={}] Optional remote prompt callback.
+   * @returns {Promise<{started: boolean, attackMessageId: string|null, defenseMode: string|null, defenseMessageId: string|null, defenseUserId?: string|null, defenseRouted?: boolean, cardCreated?: boolean}>}
+   */
+  static async rollDialogCombatWorkflow(payload = {}, options = {}) {
+    const batchId = String(payload.batchId ?? "") || randomBatchId();
+    const promptedPayload = await this.#withCoreAttackOptions(payload);
+    if (!promptedPayload) {
+      return {
+        started: false,
+        attackMessageId: null,
+        defenseMode: null,
+        defenseMessageId: null,
+        coreOptions: { cancelled: true },
+        coreDialogSource: "attack",
+        cardCreated: false
+      };
+    }
+    const created = await this.#createDialogCombatAttack(promptedPayload, {
+      batchId,
+      batchIndex: numberOr(promptedPayload.batchIndex, 0),
+      batchSize: numberOr(promptedPayload.batchSize, 1)
+    });
+    if (!created) {
+      return {
+        started: false,
+        attackMessageId: null,
+        defenseMode: null,
+        defenseMessageId: null,
+        coreOptions: promptedPayload.coreOptions,
+        combatAction: promptedPayload.combatAction,
+        coreDialogSource: "attack",
+        cardCreated: false
+      };
+    }
+    const { targetActor, targetToken, attackMessageId } = created;
+
+    if (!targetActor) {
+      return {
+        started: true,
+        attackMessageId,
+        defenseMode: null,
+        defenseMessageId: null,
+        coreOptions: promptedPayload.coreOptions,
+        combatAction: promptedPayload.combatAction,
+        coreDialogSource: "attack",
+        cardCreated: true
+      };
+    }
+
+    const defenseUser = this.getDefensePromptUser(targetActor, targetToken);
+    if (!defenseUser) {
+      ui.notifications.warn(game.i18n.localize("AOV_SKJALDBORG.Warnings.NoDefensePromptUser"));
+      return { started: true, attackMessageId, defenseMode: null, defenseMessageId: null, defenseUserId: null, coreOptions: promptedPayload.coreOptions, combatAction: promptedPayload.combatAction, coreDialogSource: "attack", cardCreated: true };
+    }
+
+    const defensePayload = this.buildDefenseWorkflowPayload({ targetActor, targetToken, attackMessageId });
+    if (defenseUser.id !== game.user?.id) {
+      if (typeof options.promptDefender !== "function") {
+        ui.notifications.warn(game.i18n.localize("AOV_SKJALDBORG.Warnings.NoDefensePromptRoute"));
+        return { started: true, attackMessageId, defenseMode: null, defenseMessageId: null, defenseUserId: defenseUser.id, coreOptions: promptedPayload.coreOptions, combatAction: promptedPayload.combatAction, coreDialogSource: "attack", cardCreated: true };
+      }
+      const defenseResult = await options.promptDefender(defenseUser, defensePayload);
+      return {
+        started: true,
+        attackMessageId,
+        defenseMode: defenseResult?.defenseMode ?? null,
+        defenseMessageId: defenseResult?.defenseMessageId ?? null,
+        defenseUserId: defenseUser.id,
+        coreOptions: promptedPayload.coreOptions,
+        combatAction: promptedPayload.combatAction,
+        coreDialogSource: "attack",
+        defenseCoreOptions: defenseResult?.coreOptions ?? null,
+        defenseCombatAction: defenseResult?.combatAction ?? null,
+        defenseRouted: true,
+        cardCreated: true
+      };
+    }
+
+    const defenseResult = await this.rollDialogDefenseWorkflow({
+      ...defensePayload,
+      targetActor,
+      targetToken
+    });
+    return {
+      started: true,
+      attackMessageId,
+      defenseMode: defenseResult?.defenseMode ?? null,
+      defenseMessageId: defenseResult?.defenseMessageId ?? null,
+      defenseUserId: defenseUser.id,
+      coreOptions: promptedPayload.coreOptions,
+      combatAction: promptedPayload.combatAction,
+      coreDialogSource: "attack",
+      defenseCoreOptions: defenseResult?.coreOptions ?? null,
+      defenseCombatAction: defenseResult?.combatAction ?? null,
+      defenseRouted: false,
+      cardCreated: true
+    };
+  }
+
+  static async rollDialogCombatWorkflowBatch(payloads = [], options = {}) {
+    const entries = Array.isArray(payloads) ? payloads.filter(Boolean) : [];
+    if (!entries.length) return [];
+    const batchId = randomBatchId();
+    const promptedPayloads = [];
+    for (const entry of entries) {
+      const prompted = await this.#withCoreAttackOptions(entry);
+      if (!prompted) {
+        return entries.map(() => ({
+          started: false,
+          attackMessageId: null,
+          defenseMessageId: null,
+          defenseUserId: null,
+          defenseRouted: false,
+          coreOptions: { cancelled: true },
+          coreDialogSource: "attack",
+          cardCreated: false
+        }));
+      }
+      promptedPayloads.push(prompted);
+    }
+    if (typeof options.beforeCreate === "function") {
+      const beforeCreateResult = await options.beforeCreate(promptedPayloads);
+      if (beforeCreateResult === false) {
+        return entries.map(() => ({
+          started: false,
+          attackMessageId: null,
+          defenseMessageId: null,
+          defenseUserId: null,
+          defenseRouted: false,
+          coreOptions: { cancelled: true },
+          coreDialogSource: "attack",
+          cardCreated: false
+        }));
+      }
+    }
+    const created = [];
+    for (let index = 0; index < promptedPayloads.length; index += 1) {
+      const payload = {
+        ...promptedPayloads[index],
+        batchId,
+        batchIndex: index,
+        batchSize: promptedPayloads.length
+      };
+      const attack = await this.#createDialogCombatAttack(payload, {
+        batchId,
+        batchIndex: index,
+        batchSize: promptedPayloads.length
+      });
+      if (!attack) {
+        created.push({ payload, attack: null, result: { started: false, attackMessageId: null, defenseMessageId: null, defenseUserId: null, defenseRouted: false, coreOptions: payload.coreOptions ?? null, combatAction: payload.combatAction ?? null, coreDialogSource: "attack", cardCreated: false } });
+      } else {
+        created.push({ payload, attack, result: { started: true, attackMessageId: attack.attackMessageId, defenseMessageId: null, defenseUserId: null, defenseRouted: false, coreOptions: payload.coreOptions ?? null, combatAction: payload.combatAction ?? null, coreDialogSource: "attack", cardCreated: true } });
+      }
+    }
+
+    const byUser = new Map();
+    for (const entry of created) {
+      const targetActor = entry.attack?.targetActor ?? null;
+      if (!targetActor) continue;
+      const defenseUser = this.getDefensePromptUser(targetActor, entry.attack?.targetToken ?? null);
+      entry.result.defenseUserId = defenseUser?.id ?? null;
+      if (!defenseUser) {
+        ui.notifications.warn(game.i18n.localize("AOV_SKJALDBORG.Warnings.NoDefensePromptUser"));
+        continue;
+      }
+      if (!byUser.has(defenseUser.id)) byUser.set(defenseUser.id, { user: defenseUser, entries: [] });
+      byUser.get(defenseUser.id).entries.push(entry);
+    }
+
+    await Promise.all(Array.from(byUser.values(), async group => {
+      for (const entry of group.entries) {
+        const defensePayload = this.buildDefenseWorkflowPayload({
+          targetActor: entry.attack.targetActor,
+          targetToken: entry.attack.targetToken,
+          attackMessageId: entry.attack.attackMessageId
+        });
+        try {
+          let defenseResult = null;
+          if (group.user.id !== game.user?.id) {
+            if (typeof options.promptDefender === "function") {
+              defenseResult = await options.promptDefender(group.user, defensePayload);
+            } else {
+              ui.notifications.warn(game.i18n.localize("AOV_SKJALDBORG.Warnings.NoDefensePromptRoute"));
+            }
+          } else {
+            defenseResult = await this.rollDialogDefenseWorkflow({
+              ...defensePayload,
+              targetActor: entry.attack.targetActor,
+              targetToken: entry.attack.targetToken
+            });
+          }
+          entry.result.defenseMode = defenseResult?.defenseMode ?? null;
+          entry.result.defenseMessageId = defenseResult?.defenseMessageId ?? null;
+          entry.result.defenseCoreOptions = defenseResult?.coreOptions ?? null;
+          entry.result.defenseCombatAction = defenseResult?.combatAction ?? null;
+          entry.result.defenseRouted = group.user.id !== game.user?.id;
+        } catch (exception) {
+          ui.notifications.warn(exception?.message ?? game.i18n.localize("AOV_SKJALDBORG.Warnings.ActionFailed"));
+        }
+      }
+    }));
+
+    return created.map(entry => entry.result);
+  }
+
+  /**
+   * Persist a module-owned aimed-blow selection on the core AoV combat card.
+   *
+   * @param {string} messageId Core AoV combat ChatMessage id.
+   * @param {object} payload Attack dialog payload.
+   * @param {{actor: Actor|null, sourceToken: TokenDocument|null, weapon: Item|null, targetActor: Actor|null, targetToken: TokenDocument|null}} context Resolved documents.
+   * @returns {Promise<void>}
+   */
+  static async #attachAimedBlowFlag(messageId, payload, context) {
+    if (payload.aimedBlow?.enabled !== true) return;
+    const message = game.messages?.get?.(messageId) ?? null;
+    if (!message?.setFlag) return;
+
+    const attackerParticipant = this.#aovParticipantReference(context.actor, context.sourceToken);
+    const targetParticipant = this.#aovParticipantReference(context.targetActor, context.targetToken);
+
+    await message.setFlag(MODULE_ID, "aimedBlow", {
+      resolved: false,
+      createdAt: Date.now(),
+      sourceMessageId: messageId,
+      attackerActorUuid: context.actor?.uuid ?? payload.actorUuid ?? null,
+      attackerActorId: context.actor?.id ?? null,
+      attackerTokenUuid: context.sourceToken?.uuid ?? payload.sourceTokenUuid ?? null,
+      attackerTokenId: context.sourceToken?.id ?? null,
+      attackerParticipantId: attackerParticipant.id,
+      attackerParticipantType: attackerParticipant.type,
+      weaponUuid: context.weapon?.uuid ?? payload.weaponUuid ?? null,
+      weaponId: context.weapon?.id ?? null,
+      targetActorUuid: context.targetActor?.uuid ?? payload.targetActorUuid ?? null,
+      targetActorId: context.targetActor?.id ?? null,
+      targetTokenUuid: context.targetToken?.uuid ?? payload.targetTokenUuid ?? null,
+      targetTokenId: context.targetToken?.id ?? null,
+      targetParticipantId: targetParticipant.id,
+      targetParticipantType: targetParticipant.type,
+      targetKind: String(payload.aimedBlow.targetKind ?? "hitLocation"),
+      hitLocationId: String(payload.aimedBlow.hitLocationId ?? ""),
+      hitLocationName: String(payload.aimedBlow.hitLocationName ?? ""),
+      hitLocationRange: String(payload.aimedBlow.rollLabel ?? ""),
+      rollLabel: String(payload.aimedBlow.rollLabel ?? ""),
+      targetWeaponUuid: payload.aimedBlow.targetWeaponUuid ?? null,
+      targetWeaponId: String(payload.aimedBlow.targetWeaponId ?? ""),
+      targetWeaponName: String(payload.aimedBlow.targetWeaponName ?? ""),
+      targetWeaponCurrentHp: numberOr(payload.aimedBlow.targetWeaponCurrentHp, 0),
+      targetWeaponMaximumHp: numberOr(payload.aimedBlow.targetWeaponMaximumHp, 0),
+      penalty: numberOr(payload.aimedBlow.penalty, 0)
+    });
+  }
+
+  /**
+   * Persist a module-owned Disarm selection on the core AoV combat card.
+   *
+   * @param {string} messageId Core AoV combat ChatMessage id.
+   * @param {object} payload Attack dialog payload.
+   * @param {{actor: Actor|null, sourceToken: TokenDocument|null, weapon: Item|null, targetActor: Actor|null, targetToken: TokenDocument|null}} context Resolved documents.
+   * @returns {Promise<void>}
+   */
+  static async #attachDisarmFlag(messageId, payload, context) {
+    if (payload.disarm?.enabled !== true) return;
+    const message = game.messages?.get?.(messageId) ?? null;
+    if (!message?.setFlag) return;
+
+    const attackerParticipant = this.#aovParticipantReference(context.actor, context.sourceToken);
+    const targetParticipant = this.#aovParticipantReference(context.targetActor, context.targetToken);
+    const targetWeapon = context.targetActor?.items?.get?.(String(payload.disarm.targetWeaponId ?? "")) ?? null;
+
+    await message.setFlag(MODULE_ID, "disarm", {
+      resolved: false,
+      stage: "attack",
+      createdAt: Date.now(),
+      sourceMessageId: messageId,
+      attackerActorUuid: context.actor?.uuid ?? payload.actorUuid ?? null,
+      attackerActorId: context.actor?.id ?? null,
+      attackerTokenUuid: context.sourceToken?.uuid ?? payload.sourceTokenUuid ?? null,
+      attackerTokenId: context.sourceToken?.id ?? null,
+      attackerParticipantId: attackerParticipant.id,
+      attackerParticipantType: attackerParticipant.type,
+      weaponUuid: context.weapon?.uuid ?? payload.weaponUuid ?? null,
+      weaponId: context.weapon?.id ?? null,
+      weaponName: context.weapon?.name ?? "",
+      targetActorUuid: context.targetActor?.uuid ?? payload.targetActorUuid ?? null,
+      targetActorId: context.targetActor?.id ?? null,
+      targetTokenUuid: context.targetToken?.uuid ?? payload.targetTokenUuid ?? null,
+      targetTokenId: context.targetToken?.id ?? null,
+      targetParticipantId: targetParticipant.id,
+      targetParticipantType: targetParticipant.type,
+      targetWeaponUuid: targetWeapon?.uuid ?? payload.disarm.targetWeaponUuid ?? null,
+      targetWeaponId: String(payload.disarm.targetWeaponId ?? ""),
+      targetWeaponName: targetWeapon?.name ?? String(payload.disarm.targetWeaponName ?? ""),
+      targetWeaponCurrentHp: numberOr(targetWeapon?.system?.currHP, 0),
+      targetWeaponMaximumHp: numberOr(targetWeapon?.system?.maxHP, 0),
+      mode: String(payload.disarm.mode ?? "strikeWeapon"),
+      targetTwoHanded: payload.disarm.targetTwoHanded === true,
+      penalty: numberOr(payload.disarm.penalty, 0)
+    });
+  }
+
+  /**
+   * Persist a module-owned Stun selection on the core AoV combat card.
+   *
+   * @param {string} messageId Core AoV combat ChatMessage id.
+   * @param {object} payload Attack dialog payload.
+   * @param {{actor: Actor|null, sourceToken: TokenDocument|null, weapon: Item|null, targetActor: Actor|null, targetToken: TokenDocument|null}} context Resolved documents.
+   * @returns {Promise<void>}
+   */
+  static async #attachStunFlag(messageId, payload, context) {
+    if (payload.stun?.enabled !== true) return;
+    const message = game.messages?.get?.(messageId) ?? null;
+    if (!message?.setFlag) return;
+
+    const attackerParticipant = this.#aovParticipantReference(context.actor, context.sourceToken);
+    const targetParticipant = this.#aovParticipantReference(context.targetActor, context.targetToken);
+
+    await message.setFlag(MODULE_ID, "stun", {
+      resolved: false,
+      stage: "attack",
+      createdAt: Date.now(),
+      sourceMessageId: messageId,
+      attackerActorUuid: context.actor?.uuid ?? payload.actorUuid ?? null,
+      attackerActorId: context.actor?.id ?? null,
+      attackerTokenUuid: context.sourceToken?.uuid ?? payload.sourceTokenUuid ?? null,
+      attackerTokenId: context.sourceToken?.id ?? null,
+      attackerParticipantId: attackerParticipant.id,
+      attackerParticipantType: attackerParticipant.type,
+      weaponUuid: context.weapon?.uuid ?? payload.weaponUuid ?? null,
+      weaponId: context.weapon?.id ?? null,
+      weaponName: context.weapon?.name ?? "",
+      weaponDamageFormula: String(context.weapon?.system?.damage ?? payload.damage ?? ""),
+      weaponDamageBonusFormula: String(context.actor?.system?.dmgBonus ?? ""),
+      weaponDamageModifierMode: String(context.weapon?.system?.damMod ?? ""),
+      targetActorUuid: context.targetActor?.uuid ?? payload.targetActorUuid ?? null,
+      targetActorId: context.targetActor?.id ?? null,
+      targetTokenUuid: context.targetToken?.uuid ?? payload.targetTokenUuid ?? null,
+      targetTokenId: context.targetToken?.id ?? null,
+      targetParticipantId: targetParticipant.id,
+      targetParticipantType: targetParticipant.type,
+      hitLocationId: String(payload.stun.hitLocationId ?? ""),
+      hitLocationName: String(payload.stun.hitLocationName ?? ""),
+      hitLocationRange: String(payload.stun.rollLabel ?? ""),
+      rollLabel: String(payload.stun.rollLabel ?? ""),
+      penalty: numberOr(payload.stun.penalty, 0)
+    });
+  }
+
+  /**
+   * Persist module-owned missile metadata on the core AoV combat card.
+   *
+   * @param {string} messageId Core AoV combat ChatMessage id.
+   * @param {object} payload Missile dialog payload.
+   * @param {{actor: Actor|null, sourceToken: TokenDocument|null, weapon: Item|null, targetActor: Actor|null, targetToken: TokenDocument|null}} context Resolved documents.
+   * @returns {Promise<void>}
+   */
+  static async #attachMissileFlags(messageId, payload, context) {
+    if (String(payload.workflowType ?? "") !== "missile") return;
+    const message = game.messages?.get?.(messageId) ?? null;
+    if (!message?.setFlag) return;
+
+    const attackerParticipant = this.#aovParticipantReference(context.actor, context.sourceToken);
+    const targetParticipant = this.#aovParticipantReference(context.targetActor, context.targetToken);
+    const common = {
+      createdAt: Date.now(),
+      sourceMessageId: messageId,
+      attackerActorUuid: context.actor?.uuid ?? payload.actorUuid ?? null,
+      attackerActorId: context.actor?.id ?? null,
+      attackerTokenUuid: context.sourceToken?.uuid ?? payload.sourceTokenUuid ?? null,
+      attackerTokenId: context.sourceToken?.id ?? null,
+      attackerParticipantId: attackerParticipant.id,
+      attackerParticipantType: attackerParticipant.type,
+      weaponUuid: context.weapon?.uuid ?? payload.weaponUuid ?? null,
+      weaponId: context.weapon?.id ?? null,
+      weaponName: context.weapon?.name ?? "",
+      ammunitionUuid: payload.ammunitionUuid ?? payload.ammunition?.uuid ?? null,
+      ammunitionId: payload.ammunition?.id ?? null,
+      targetActorUuid: context.targetActor?.uuid ?? payload.targetActorUuid ?? null,
+      targetActorId: context.targetActor?.id ?? null,
+      targetTokenUuid: context.targetToken?.uuid ?? payload.targetTokenUuid ?? null,
+      targetTokenId: context.targetToken?.id ?? null,
+      targetParticipantId: targetParticipant.id,
+      targetParticipantType: targetParticipant.type,
+      baseChance: numberOr(payload.baseChance, 0),
+      targetNumber: numberOr(payload.targetNumber, 0),
+      aimedTargetKind: String(payload.aimedBlow?.targetKind ?? "hitLocation"),
+      aimedLocationId: String(payload.aimedBlow?.hitLocationId ?? ""),
+      aimedLocationName: String(payload.aimedBlow?.hitLocationName ?? ""),
+      aimedLocationRange: String(payload.aimedBlow?.rollLabel ?? ""),
+      aimedTargetWeaponId: String(payload.aimedBlow?.targetWeaponId ?? ""),
+      aimedTargetWeaponName: String(payload.aimedBlow?.targetWeaponName ?? ""),
+      aimedTargetWeaponUuid: payload.aimedBlow?.targetWeaponUuid ?? null
+    };
+
+    await message.setFlag(MODULE_ID, "missileShot", {
+      ...common,
+      resolved: false,
+      range: payload.missileRange?.enabled === true ? foundry.utils.deepClone(payload.missileRange) : null,
+      intoMelee: payload.missileIntoMelee?.enabled === true ? foundry.utils.deepClone(payload.missileIntoMelee) : null
+    });
+
+    if (payload.missileIntoMelee?.enabled === true) {
+      await message.setFlag(MODULE_ID, "missileIntoMelee", {
+        ...common,
+        resolved: false,
+        combatantCount: Math.max(2, Math.trunc(numberOr(payload.missileIntoMelee.combatantCount, 2))),
+        normalChance: numberOr(payload.missileIntoMelee.normalChance, payload.baseChance),
+        adjustedChance: numberOr(payload.missileIntoMelee.adjustedChance, payload.targetNumber)
+      });
+    }
+  }
+
+  /**
+   * Persist the exact per-dialog damage type for downstream damage effect
+   * tracking. AoV damage cards do not retain the submitted CT mode, so this
+   * flag lets the tracker distinguish thrusting impales from selected slashes.
+   *
+   * @param {string} messageId Core AoV combat ChatMessage id.
+   * @param {object} payload Attack or Missile dialog payload.
+   * @param {{actor: Actor|null, sourceToken: TokenDocument|null, weapon: Item|null, targetActor: Actor|null, targetToken: TokenDocument|null}} context Resolved documents.
+   * @returns {Promise<void>}
+   */
+  static async #attachDamageEffectSourceFlag(messageId, payload, context) {
+    const message = game.messages?.get?.(messageId) ?? null;
+    if (!message?.setFlag) return;
+
+    const attackerParticipant = this.#aovParticipantReference(context.actor, context.sourceToken);
+    const targetParticipant = this.#aovParticipantReference(context.targetActor, context.targetToken);
+    const damageType = String(
+      payload.damageType?.key
+        ?? payload.damageProfile?.core?.damageType
+        ?? payload.damageSelection?.effective?.key
+        ?? context.weapon?.system?.damType
+        ?? ""
+    ).trim().toLowerCase();
+
+    await message.setFlag(MODULE_ID, DAMAGE_EFFECT_SOURCE_FLAG, {
+      resolved: false,
+      createdAt: Date.now(),
+      sourceMessageId: messageId,
+      attackerActorUuid: context.actor?.uuid ?? payload.actorUuid ?? null,
+      attackerActorId: context.actor?.id ?? null,
+      attackerTokenUuid: context.sourceToken?.uuid ?? payload.sourceTokenUuid ?? null,
+      attackerTokenId: context.sourceToken?.id ?? null,
+      attackerParticipantId: attackerParticipant.id,
+      attackerParticipantType: attackerParticipant.type,
+      weaponUuid: context.weapon?.uuid ?? payload.weaponUuid ?? null,
+      weaponId: context.weapon?.id ?? null,
+      weaponName: context.weapon?.name ?? "",
+      damageType,
+      targetActorUuid: context.targetActor?.uuid ?? payload.targetActorUuid ?? null,
+      targetActorId: context.targetActor?.id ?? null,
+      targetTokenUuid: context.targetToken?.uuid ?? payload.targetTokenUuid ?? null,
+      targetTokenId: context.targetToken?.id ?? null,
+      targetParticipantId: targetParticipant.id,
+      targetParticipantType: targetParticipant.type
+    });
+  }
+
+  /**
+   * Reproduce AoV's participant id/type distinction for actor versus token
+   * combat cards without importing the system helper into the adapter surface.
+   *
+   * @param {Actor|null|undefined} actor Participant Actor.
+   * @param {TokenDocument|null|undefined} token Participant TokenDocument.
+   * @returns {{id: string|null, type: "actor"|"token"|null}}
+   */
+  static #aovParticipantReference(actor, token) {
+    if (token?.id && game.actors?.tokens?.[token.id]) {
+      return { id: token.id, type: "token" };
+    }
+    if (actor?.id) return { id: actor.id, type: "actor" };
+    return { id: null, type: null };
+  }
+
+  /**
+   * Prompt and add the defender's response to the exact AoV combat card. This
+   * method intentionally runs on the defender-controlling client so a single
+   * defender prompt appears for that user.
+   *
+   * @param {object} payload Socket-safe defense workflow payload.
+   * @returns {Promise<{defenseMode: string|null, defenseMessageId: string|null}>}
+   */
+  static async rollDialogDefenseWorkflow(payload = {}) {
+    const { actor, token } = await this.resolveDefenseParticipant(payload);
+    if (!actor) throw new Error(game.i18n.localize("AOV_SKJALDBORG.Warnings.DefenseActorUnavailable"));
+    if (!this.currentUserCanDefend(actor, token)) {
+      throw new Error(game.i18n.localize("AOV_SKJALDBORG.Warnings.DefenseActorNotOwned"));
+    }
+
+    const combatCard = await waitForOpenCoreCombatCard(payload.attackMessageId);
+    if (!combatCard) {
+      throw new Error(game.i18n.localize("AOV_SKJALDBORG.Warnings.DefenseCombatCardUnavailable"));
+    }
+
+    const incomingWeaponType = this.#incomingWeaponType(combatCard);
+    const defenseWeapon = this.getDefenseWeapon(actor);
+    const dodgeSkill = this.getDodgeSkill(actor);
+    const actionOptions = await this.#defenseActionOptions(actor, { incomingWeaponType });
+    const defaultAction = Object.hasOwn(actionOptions, "parry")
+      ? "parry"
+      : (Object.hasOwn(actionOptions, "dodge") ? "dodge" : "none");
+    const coreOptions = await this.#promptCoreRollOptions({
+      source: "defense",
+      actionOptions,
+      combatAction: defaultAction,
+      flatMod: 0,
+      label: actor?.name ?? ""
+    });
+    if (coreOptions.cancelled) {
+      ui.notifications.warn(game.i18n.localize("AOV_SKJALDBORG.Warnings.DefensePromptCancelled"));
+      return {
+        defenseMode: null,
+        defenseMessageId: null,
+        coreOptions,
+        combatAction: coreOptions.actionOption ?? null,
+        coreDialogSource: "defense",
+        cancelled: true
+      };
+    }
+
+    if (coreOptions.actionOption === "none") {
+      return this.#appendNoDefenseCard({
+        attackMessageId: combatCard.id,
+        actor,
+        token,
+        coreOptions
+      });
+    }
+
+    if (coreOptions.actionOption === "dodge" && dodgeSkill) {
+      return this.#addDefenseToAttackMessage({
+        attackMessageId: combatCard.id,
+        actor,
+        token,
+        item: dodgeSkill,
+        mode: "dodge",
+        coreOptions
+      });
+    }
+
+    if (coreOptions.actionOption === "parry" && defenseWeapon) {
+      return this.#addDefenseToAttackMessage({
+        attackMessageId: combatCard.id,
+        actor,
+        token,
+        item: defenseWeapon,
+        mode: "parry",
+        coreOptions
+      });
+    }
+
+    ui.notifications.warn(game.i18n.format("AOV_SKJALDBORG.Warnings.NoDefenderDefense", {
+      actor: actor.name ?? game.i18n.localize("AOV_SKJALDBORG.ActionHud.UnknownActor")
+    }));
+    return this.#appendNoDefenseCard({
+      attackMessageId: combatCard.id,
+      actor,
+      token,
+      coreOptions: {
+        ...coreOptions,
+        actionOption: "none"
+      }
+    });
+  }
+
+  /**
+   * Trigger a core AoV weapon roll as a combat-card participant.
+   *
+   * @param {{actor: Actor, token: TokenDocument|null, weapon: Item, flatMod: number, combatAction: string}} request Roll request.
+   * @returns {Promise<string|undefined|false>}
+   */
+  static async #triggerCoreCombatWeaponRoll(request) {
+    const { AOVCheck, RollType, CardType } = await getAoVCheckApi();
+    return AOVCheck._trigger({
+      rollType: RollType.WEAPON,
+      cardType: CardType.COMBAT,
+      shiftKey: false,
+      actor: request.actor,
+      token: request.token ?? null,
+      characteristic: false,
+      skillId: request.weapon.id,
+      itemId: request.weapon.id,
+      flatMod: numberOr(request.flatMod, 0),
+      combatAction: request.combatAction,
+      origID: game.user?.id ?? game.user?._id
+    });
+  }
+
+  /**
+   * Trigger a core AoV Dodge fallback roll as a combat-card participant.
+   *
+   * @param {{actor: Actor, token: TokenDocument|null, skill: Item, flatMod: number, combatAction: string}} request Roll request.
+   * @returns {Promise<string|undefined|false>}
+   */
+  static async #triggerCoreCombatSkillRoll(request) {
+    const { AOVCheck, RollType, CardType } = await getAoVCheckApi();
+    return AOVCheck._trigger({
+      rollType: RollType.SKILL,
+      cardType: CardType.COMBAT,
+      shiftKey: false,
+      actor: request.actor,
+      token: request.token ?? null,
+      characteristic: false,
+      skillId: request.skill.id,
+      itemId: request.skill.id,
+      flatMod: numberOr(request.flatMod, 0),
+      combatAction: request.combatAction,
       origID: game.user?.id ?? game.user?._id
     });
   }
@@ -389,6 +1903,7 @@ export class AoVAdapter {
       : [];
     const locationById = new Map(allLocations.map(item => [item.id, item]));
     const damageByLocation = new Map();
+    const grappleLocationStates = actorGrappleLocationStates(actor);
 
     for (const wound of characterWounds) {
       const locationId = String(wound.system?.hitLocId ?? "");
@@ -410,7 +1925,15 @@ export class AoVAdapter {
       const ap = actor.type === "npc"
         ? numberOr(item.system?.npcAP, 0)
         : numberOr(item.system?.map, 0);
+      const injurySeverity = injuryThresholdSeverityFromEffects(item.effects);
       const position = Number.isInteger(gridPosition) ? gridPosition : null;
+      const grappleState = grappleLocationStates.get(item.id) ?? null;
+      const grappled = !!grappleState?.grappled;
+      const immobilized = !!grappleState?.immobilized;
+      const grappleSource = Array.isArray(grappleState?.sources) ? grappleState.sources.join(", ") : "";
+      const grappleTooltipKey = immobilized
+        ? "AOV_SKJALDBORG.ActorHotbar.HitLocationImmobilizedTooltip"
+        : "AOV_SKJALDBORG.ActorHotbar.HitLocationGrappledTooltip";
       return {
         id: item.id,
         name: item.name,
@@ -421,6 +1944,14 @@ export class AoVAdapter {
         damage,
         wounded: damage > 0,
         critical: hpMax > 0 && hpCurrent <= 0,
+        injurySeverity,
+        injurySeverityClass: injurySeverity ? `aov-skjaldborg-hitloc-injury-${injurySeverity}` : "",
+        grappled,
+        immobilized,
+        grappleSource,
+        grappleTooltip: grappled
+          ? game.i18n.format(grappleTooltipKey, { location: item.name, source: grappleSource || game.i18n.localize("AOV_SKJALDBORG.ActorHotbar.UnknownGrappler") })
+          : "",
         gridPosition: position,
         gridStyle: position === null
           ? ""
@@ -960,3 +2491,7 @@ export class AoVAdapter {
     return Number(total.toFixed(2));
   }
 }
+
+export const __test = {
+  combatCardEntry: options => AoVAdapter.__testCombatCardEntry(options)
+};

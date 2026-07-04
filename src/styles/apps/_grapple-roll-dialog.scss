@@ -1,0 +1,193 @@
+/* ------------------------------------------------------------------------- */
+/* Grapple workflow                                                           */
+/* ------------------------------------------------------------------------- */
+
+.skj-grapple-roll-window .skj-roll-dialog {
+  width: min(390px, 92vw);
+}
+
+.skj-roll-dialog--grapple .skj-roll-dialog__footer {
+  grid-template-columns: minmax(0, 1fr) 104px;
+}
+
+.skj-roll-dialog--grapple .skj-roll-dialog__action {
+  width: 104px;
+}
+
+.skj-roll-dialog__row--grapple-mode {
+  grid-template-columns: 68px minmax(0, 1fr);
+}
+
+.skj-roll-dialog__row--grapple-modifier {
+  grid-template-columns: 68px minmax(0, 1fr) 128px;
+}
+
+.skj-roll-dialog__row--grapple-mode > select,
+.skj-roll-dialog__row--grapple-modifier > select {
+  min-width: 0;
+  width: 100%;
+}
+
+.skj-grapple-location-fieldset {
+  display: grid;
+  gap: 0.42rem;
+  padding: 0.5rem;
+}
+
+.skj-grapple-location-fieldset[hidden] {
+  display: none;
+}
+
+.skj-grapple-location-fieldset legend {
+  color: var(--skj-roll-muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 0 0.22rem;
+}
+
+.skj-grapple-location-segments {
+  grid-template-columns: repeat(2, minmax(0, 140px));
+  max-width: 288px;
+}
+
+.skj-grapple-manual-location {
+  grid-template-columns: 80px minmax(0, 1fr);
+  margin-top: 0.02rem;
+}
+
+.skj-grapple-manual-location > select {
+  min-width: 0;
+  width: 100%;
+}
+
+.skj-grapple-raw-note {
+  align-items: center;
+  align-self: stretch;
+  background: var(--skj-roll-surface-soft);
+  border: 1px solid var(--skj-roll-frame-soft);
+  border-radius: 999px;
+  box-sizing: border-box;
+  color: var(--skj-roll-accent);
+  display: inline-flex;
+  gap: 0.36rem;
+  justify-content: center;
+  justify-self: stretch;
+  min-height: 1.92rem;
+  min-width: 0;
+  padding: 0.2rem 0.52rem;
+  text-align: center;
+}
+
+.skj-grapple-raw-note i {
+  color: var(--skj-roll-warning);
+  flex: 0 0 auto;
+  font-size: 0.72rem;
+}
+
+.skj-grapple-raw-note span {
+  color: var(--skj-roll-text);
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-message .aov.aov-skjaldborg-grapple-chat .actor-roll {
+  align-items: center;
+}
+
+.chat-message .aov.aov-skjaldborg-grapple-chat .roll-details,
+.chat-message .aov.aov-skjaldborg-grapple-chat .roll-details .header {
+  min-width: 0;
+}
+
+.chat-message .aov.aov-skjaldborg-grapple-chat .tag {
+  line-height: 1.14;
+  white-space: normal;
+}
+
+.chat-message .aov.aov-skjaldborg-grapple-chat .skj-grapple-chat-result {
+  display: grid;
+  gap: 0.22rem;
+  line-height: 1.22;
+  margin-top: 0.32rem;
+  min-height: auto;
+  overflow: visible;
+  padding: 0.4rem 0.46rem;
+  text-align: center;
+  white-space: normal;
+}
+
+.chat-message .aov.aov-skjaldborg-grapple-chat .skj-grapple-chat-result.is-compact {
+  display: block;
+}
+
+.chat-message .aov.aov-skjaldborg-grapple-chat .skj-grapple-chat-result.is-compact > span {
+  align-items: center;
+  display: flex;
+  gap: 0.32rem;
+  justify-content: center;
+  line-height: 1.15;
+}
+
+.skj-grapple-location-choice-dialog {
+  display: grid;
+  gap: 0.65rem;
+  padding: 0.8rem;
+}
+
+.skj-grapple-location-choice-dialog select {
+  width: 100%;
+}
+
+@media (max-width: 460px) {
+  .skj-roll-dialog__row--grapple-modifier,
+  .skj-roll-dialog__row--grapple-mode {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .skj-grapple-raw-note {
+    justify-self: stretch;
+    width: 100%;
+  }
+}
+
+/* Grapple cards must fit inside the narrow AoV chat column. */
+.chat-message .aov.aov-skjaldborg-grapple-chat {
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.chat-message .aov.aov-skjaldborg-grapple-chat .op-list,
+.chat-message .aov.aov-skjaldborg-grapple-chat .actor-roll,
+.chat-message .aov.aov-skjaldborg-grapple-chat .roll-details,
+.chat-message .aov.aov-skjaldborg-grapple-chat .header,
+.chat-message .aov.aov-skjaldborg-grapple-chat .name {
+  box-sizing: border-box;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.chat-message .aov.aov-skjaldborg-grapple-chat .name,
+.chat-message .aov.aov-skjaldborg-grapple-chat .tag,
+.chat-message .aov.aov-skjaldborg-grapple-chat .skj-grapple-chat-result,
+.chat-message .aov.aov-skjaldborg-grapple-chat .skj-grapple-chat-result span,
+.chat-message .aov.aov-skjaldborg-grapple-chat .skj-knockback-chat-line {
+  overflow-wrap: anywhere;
+  white-space: normal;
+  word-break: normal;
+}
+
+.chat-message .aov.aov-skjaldborg-grapple-chat .skj-grapple-chat-row {
+  line-height: 1.1;
+}
+
+.chat-message .aov.aov-skjaldborg-grapple-chat .skj-grapple-chat-result.is-compact > span {
+  flex-wrap: wrap;
+  max-width: 100%;
+}

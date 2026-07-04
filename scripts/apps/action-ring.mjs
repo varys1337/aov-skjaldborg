@@ -2,24 +2,78 @@ import { ACTION_CATEGORIES, MODULE_ID } from "../constants.mjs";
 import { AoVAdapter } from "../adapter/aov-adapter.mjs";
 import { error } from "../logger.mjs";
 import { getCombatantState } from "../combat/state.mjs";
+import { isPriorityStatusId } from "../compat/active-effects.mjs";
 import {
   commitIntentCategory,
   executeActorItem,
   executeActorStat,
+  executeEvadeIntent,
   executeMacro,
   getActorPreparedIntent,
   isSkjaldborgCombatActive,
   openActorItem,
   prepareActorQuickAccess,
-  promptOtherIntentText
+  promptOtherIntentText,
+  toggleIntentCategory
 } from "../ui/action-catalog.mjs";
 
 const { ApplicationV2, HandlebarsApplicationMixin } = foundry.applications.api;
 
 let hooksRegistered = false;
 
+function statusButtonId(element) {
+  const candidates = [
+    element?.dataset?.statusId,
+    element?.dataset?.status,
+    element?.dataset?.effectId,
+    element?.getAttribute?.("data-status-id"),
+    element?.getAttribute?.("data-status"),
+    element?.getAttribute?.("data-effect-id")
+  ];
+  for (const candidate of candidates) {
+    const value = String(candidate ?? "").trim();
+    if (value && isPriorityStatusId(value)) return value;
+  }
+  return "";
+}
+
+function markPriorityStatusPalette(element) {
+  for (const control of element.querySelectorAll("[data-status-id], [data-status], [data-effect-id], .status-effect")) {
+    if (!(control instanceof HTMLElement)) continue;
+    const statusId = statusButtonId(control);
+    if (!statusId) continue;
+    control.classList.add("skj-priority-status-effect");
+    control.dataset.skjPriorityStatus = statusId;
+  }
+}
+
+async function openDisengageDialog(context) {
+  const { DisengageDialog } = await import("./disengage-dialog.mjs");
+  return DisengageDialog.show(context);
+}
+
+async function openKnockbackRollDialog(context) {
+  const { KnockbackRollDialog } = await import("./knockback-roll-dialog.mjs");
+  return KnockbackRollDialog.show(context);
+}
+
+async function openGrappleRollDialog(context) {
+  const { GrappleRollDialog } = await import("./grapple-roll-dialog.mjs");
+  return GrappleRollDialog.show(context);
+}
+
+async function openDelayDialog(context) {
+  const { DelayDialog } = await import("./delay-dialog.mjs");
+  return DelayDialog.show(context);
+}
+
+async function openRunicMagicDialog(context) {
+  const { RunicMagicDialog } = await import("./runic-magic-dialog.mjs");
+  return RunicMagicDialog.show(context);
+}
+
 /**
- * Token-centered action ring inspired by Crucible Tongs.
+ * Token-centered action ring for quick actor actions.
  *
  * The ring always mirrors the actor's configured quick-access circles.
  * Intent assignments remain executable during an enabled Skjaldborg combat,
@@ -285,15 +339,19 @@ export class ActionRing extends HandlebarsApplicationMixin(ApplicationV2) {
     this.element.classList.toggle("skj-theme-classic", theme !== "aov");
     this.setPosition();
 
-    this.element.addEventListener("contextmenu", event => {
-      const target = event.target.closest("[data-action-id]");
-      if (!(target instanceof HTMLElement)) return;
-      event.preventDefault();
-      event.stopPropagation();
-      void this._openDetails(target.dataset.actionKind, target.dataset.actionId);
-    });
+    this.element.addEventListener("contextmenu", event => this._onActionContextMenu(event), { capture: true });
+    this.element.addEventListener("auxclick", event => this._onActionAuxClick(event), { capture: true });
+    this.element.addEventListener("pointerdown", event => this._onActionCapturePointerDown(event), { capture: true });
 
     this.element.addEventListener("pointerdown", event => {
+      if (event.button === 2) {
+        const target = event.target instanceof Element ? event.target.closest("[data-action-id]") : null;
+        if (target instanceof HTMLElement) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+        }
+        return;
+      }
       if (event.target.closest("[data-action]")) return;
       void ActionRing.closeAll();
     });
@@ -326,6 +384,65 @@ export class ActionRing extends HandlebarsApplicationMixin(ApplicationV2) {
   }
 
   /**
+   * Resolve one rendered ring action from a delegated event.
+   *
+   * @param {Event} event Delegated DOM event.
+   * @returns {HTMLElement|null}
+   */
+  _actionTargetFromEvent(event) {
+    const target = event.target instanceof Element ? event.target.closest("[data-action-id]") : null;
+    return target instanceof HTMLElement ? target : null;
+  }
+
+  /**
+   * Stop secondary presses before AppV2 activation can process them.
+   *
+   * @param {PointerEvent} event Delegated pointer event.
+   * @returns {void}
+   */
+  _onActionCapturePointerDown(event) {
+    if (event.button !== 2) return;
+    const target = this._actionTargetFromEvent(event);
+    if (!target) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }
+
+  /**
+   * Suppress secondary auxclick events after the context action runs.
+   *
+   * @param {MouseEvent} event Delegated auxclick event.
+   * @returns {void}
+   */
+  _onActionAuxClick(event) {
+    if (event.button !== 2) return;
+    const target = this._actionTargetFromEvent(event);
+    if (!target) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }
+
+  /**
+   * Run only right-click behavior for ring actions.
+   *
+   * @param {MouseEvent} event Delegated context menu event.
+   * @returns {void}
+   */
+  _onActionContextMenu(event) {
+    const target = this._actionTargetFromEvent(event);
+    if (!target) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    void (async () => {
+      if (target.dataset.actionKind === "intent") {
+        await ActionRing.closeAll();
+        return toggleIntentCategory(this.actor, this.combatant, this.combat, target.dataset.actionId, { promptOther: true });
+      }
+      return this._openDetails(target.dataset.actionKind, target.dataset.actionId);
+    })();
+  }
+
+  /**
    * Execute a ring action.
    *
    * @param {PointerEvent} event Interaction event.
@@ -334,6 +451,10 @@ export class ActionRing extends HandlebarsApplicationMixin(ApplicationV2) {
    */
   static async onActivate(event, target) {
     event.preventDefault();
+    if (event instanceof MouseEvent && event.button !== 0) {
+      event.stopImmediatePropagation();
+      return null;
+    }
     event.stopPropagation();
     const kind = target.dataset.actionKind;
     const actionId = target.dataset.actionId;
@@ -349,6 +470,25 @@ export class ActionRing extends HandlebarsApplicationMixin(ApplicationV2) {
         publicText = entered;
       }
       await ActionRing.closeAll();
+      if (actionId === ACTION_CATEGORIES.RETREAT) {
+        return openDisengageDialog({ actor: this.actor, combatant: this.combatant, combat: this.combat, originEvent: event });
+      }
+      if (actionId === ACTION_CATEGORIES.KNOCKBACK) {
+        return openKnockbackRollDialog({ actor: this.actor, originEvent: event });
+      }
+      if (actionId === ACTION_CATEGORIES.GRAPPLE) {
+        return openGrappleRollDialog({ actor: this.actor, originEvent: event });
+      }
+      if (actionId === ACTION_CATEGORIES.DELAY) {
+        return openDelayDialog({ actor: this.actor, combatant: this.combatant, combat: this.combat, originEvent: event });
+      }
+      if (actionId === ACTION_CATEGORIES.MAGIC) {
+        await ActionRing.closeAll();
+        return openRunicMagicDialog({ actor: this.actor, combatant: this.combatant, combat: this.combat, originEvent: event });
+      }
+      if (actionId === ACTION_CATEGORIES.DEFEND) {
+        return executeEvadeIntent(this.actor, this.combatant, this.combat, { publicText });
+      }
       return commitIntentCategory(this.actor, this.combatant, this.combat, actionId, { publicText });
     }
 
@@ -386,9 +526,10 @@ export function registerActionRingHooks() {
   hooksRegistered = true;
 
   Hooks.on("renderTokenHUD", (app, html) => {
+    const element = html instanceof HTMLElement ? html : app?.element;
+    if (element) markPriorityStatusPalette(element);
     if (!game.settings.get(MODULE_ID, "enableActionRing")) return;
 
-    const element = html instanceof HTMLElement ? html : app?.element;
     const token = app?.object ?? null;
     const actor = token?.actor ?? null;
     if (!element || !actor?.isOwner) return;
@@ -430,8 +571,7 @@ export function registerActionRingHooks() {
       event.stopPropagation();
       void (async () => {
         try {
-          if (inWorkflow) await CombatHUD.showForCombatant(combatant, combat);
-          else await actor.sheet?.render?.(true);
+          await actor.sheet?.render?.(true);
           await app.close({ animate: false });
         } catch (exception) {
           error("Failed to open action-ring details from the Token HUD.", exception);

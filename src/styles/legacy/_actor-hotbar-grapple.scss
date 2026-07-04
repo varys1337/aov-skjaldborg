@@ -1,0 +1,65 @@
+/* ------------------------------------------------------------------------- */
+/* Grapple/immobilize hit-location state highlighting                         */
+/* ------------------------------------------------------------------------- */
+
+.skj-hit-location-card.is-grappled {
+  border-color: #4db6ff;
+  box-shadow:
+    inset 0 0 8px rgba(77, 182, 255, 0.42),
+    0 0 0 1px rgba(77, 182, 255, 0.36);
+}
+
+.skj-hit-location-card.is-immobilized {
+  border-color: #b388ff;
+  box-shadow:
+    inset 0 0 8px rgba(179, 136, 255, 0.48),
+    0 0 0 1px rgba(179, 136, 255, 0.42);
+}
+
+.skj-hit-location-state {
+  align-items: center;
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 9px;
+  height: 15px;
+  justify-content: center;
+  position: absolute;
+  right: 2px;
+  top: 2px;
+  width: 15px;
+  z-index: 2;
+}
+
+.skj-hit-location-state.is-grappled {
+  background: rgba(77, 182, 255, 0.22);
+  color: #b8e4ff;
+}
+
+.skj-hit-location-state.is-immobilized {
+  background: rgba(179, 136, 255, 0.24);
+  color: #dec8ff;
+}
+
+.skj-hit-location-list-row.is-grappled {
+  border-color: #4db6ff;
+  box-shadow: inset 0 0 7px rgba(77, 182, 255, 0.24);
+}
+
+.skj-hit-location-list-row.is-immobilized {
+  border-color: #b388ff;
+  box-shadow: inset 0 0 7px rgba(179, 136, 255, 0.28);
+}
+
+.skj-hit-location-list-state {
+  align-items: center;
+  display: inline-flex;
+  justify-content: center;
+}
+
+.skj-hit-location-list-state.is-grappled {
+  color: #b8e4ff;
+}
+
+.skj-hit-location-list-state.is-immobilized {
+  color: #dec8ff;
+}

@@ -1,0 +1,91 @@
+/* Phase structure settings */
+.skj-phase-structure-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.6rem;
+}
+
+.skj-phase-structure-option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 0.55rem;
+  padding: 0.65rem;
+  border: 1px solid var(--color-border-light-primary, rgba(0, 0, 0, 0.25));
+  border-radius: 4px;
+}
+
+.skj-phase-structure-option span,
+.skj-phase-structure-option small {
+  display: block;
+  min-width: 0;
+}
+
+.skj-phase-structure-option small {
+  margin-top: 0.2rem;
+  line-height: 1.25;
+  opacity: 0.8;
+}
+
+@media (max-width: 560px) {
+  .skj-phase-structure-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* 0.2.35 unified combat-tracking settings submenu. */
+.skj-combat-tracking-settings-content {
+  overflow-y: auto;
+  padding: 0.75rem;
+}
+
+.skj-combat-tracking-settings-form {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.skj-combat-tracking-settings-form fieldset {
+  display: grid;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.skj-reach-visualizer-settings-content {
+  overflow-y: auto;
+  padding: 0.75rem;
+}
+
+.skj-reach-visualizer-settings-form {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.skj-reach-visualizer-settings-form fieldset {
+  display: grid;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+/* NPC wound entry uses AoV's native per-location damage model while matching
+   the compact interaction pattern of the character Wounds section. */
+.skj-npc-wound-dialog-window .skj-npc-wound-dialog {
+  display: grid;
+  gap: 10px;
+  min-width: 280px;
+}
+
+.skj-npc-wound-dialog-window .skj-npc-wound-dialog label {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(105px, auto) minmax(0, 1fr);
+  margin: 0;
+}
+
+.skj-npc-wound-dialog-window .skj-npc-wound-dialog select,
+.skj-npc-wound-dialog-window .skj-npc-wound-dialog input {
+  box-sizing: border-box;
+  margin: 0;
+  min-width: 0;
+  width: 100%;
+}

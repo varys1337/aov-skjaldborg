@@ -21,6 +21,8 @@
  * @property {SkjaldborgIntent} intent Current declaration made by the combatant owner or GM.
  * @property {SkjaldborgMovementPlan} movement Recorded Foundry v14 movement plan summary.
  * @property {SkjaldborgEngagementState} engagement Current close-combat engagement state.
+ * @property {SkjaldborgDisengagementState} disengagement Current declared disengagement state.
+ * @property {SkjaldborgRuneMagicState} runeMagic Current Rune Script combat tracking state.
  * @property {SkjaldborgDexLedger|null} dexLedger Last calculated DEX ledger.
  * @property {SkjaldborgPlanningInitiative} planningInitiative Live Planning initiative tracking state.
  * @property {SkjaldborgResolutionAction[]} scheduledActions Actions created for this combatant.
@@ -37,11 +39,95 @@
  * @property {string} publicText Intent text visible in normal displays.
  * @property {string} privateText GM-only intent text.
  * @property {{drawWeapon: boolean, sheatheWeapon: boolean, surprised: boolean, fullMove: boolean}} modifiers DEX-affecting checkboxes.
- * @property {{enabled: boolean, targetDex: number|null}} delay Optional delayed DEX target.
+ * @property {SkjaldborgDelayIntent} delay Optional delayed DEX target.
  * @property {{enabled: boolean, text: string}} waitInterrupt Optional wait-to-interrupt condition.
  * @property {number} splitCount Number of split attacks to schedule.
  * @property {number|null} fixedRank Optional fixed DEX rank.
  * @property {boolean} runeCarryover Whether this action is a rune-script carryover.
+ */
+
+/**
+ * @typedef {object} SkjaldborgRuneMagicState
+ * @property {"none"|"carving"|"ready"|"failed"|"disrupted"|"resolved"|"ritual"} status Rune Script combat lifecycle.
+ * @property {string|null} itemUuid Source magic Item UUID.
+ * @property {string|null} itemId Owned magic Item id.
+ * @property {string} itemType Source magic Item type.
+ * @property {string} itemName Source magic Item name.
+ * @property {number} runeCount Rune Script rune count.
+ * @property {number} mpCost Magic point cost summary.
+ * @property {number} maxEffects Rune Script maximum effects.
+ * @property {number} dexPenalty DEX-rank delay applied when the galdur is sung.
+ * @property {number|null} startedRound Logical round in which carving began.
+ * @property {number|null} readyRound Logical round in which singing becomes available.
+ * @property {object[]} targetRefs Serialized selected targets.
+ * @property {boolean} resistance Whether selected targets should resist with POW.
+ * @property {number} [flatMod] Flat modifier applied to the Rune Magic or Seiðr check.
+ * @property {string} [customModifierReason] Optional reason label for the flat modifier.
+ * @property {string|null} [craftMode] Selected Rune Script craft mode.
+ * @property {number|null} [customCraftTarget] Manual custom Craft target value.
+ * @property {string|null} craftSkillId Selected Craft skill Item id.
+ * @property {string|null} craftMessageId AoV Craft roll chat message id.
+ * @property {string|null} castMessageId AoV Rune Magic roll chat message id.
+ * @property {string|null} eventMessageId Module tracking chat message id.
+ * @property {string[]} [resistanceMessageIds] Linked AoV Resistance card message ids.
+ * @property {string} notes GM-facing tracking notes.
+ * @property {number} updatedAt Epoch timestamp of the latest state write.
+ */
+
+/**
+ * @typedef {object} SkjaldborgDelayIntent
+ * @property {boolean} enabled Whether this combatant has declared a Delay action.
+ * @property {number|null} targetDex DEX rank the delayed action is moving to.
+ * @property {string|null} targetCombatantId Combatant id being waited on, for interrupt-style delays.
+ * @property {"before"|"after"|""} position Requested ordering around the target combatant.
+ * @property {number|null} tiebreakerInt INT or synthetic tiebreaker used by the resolution queue.
+ */
+
+/**
+ * @typedef {object} SkjaldborgReadiedWeapons
+ * @property {string|null} right Right-hand readied weapon Item id.
+ * @property {string|null} left Left-hand readied weapon Item id.
+ * @property {boolean} unlimited NPC-only flag allowing all carried weapons to count as available.
+ */
+
+/**
+ * @typedef {object} SkjaldborgShieldCover
+ * @property {string} shieldId Readied shield-like weapon Item id.
+ * @property {string[]} locationIds Actor hit-location Item ids covered by passive shield use.
+ */
+
+/**
+ * @typedef {object} SkjaldborgShieldwallOption
+ * @property {boolean} enabled Whether shieldwall state is declared for manual adjudication.
+ */
+
+/**
+ * @typedef {object} SkjaldborgTwoWeaponFightingOption
+ * @property {boolean} enabled Whether automated same-target full-skill two-weapon mode is declared.
+ * @property {string} primaryWeaponId Weapon Item id associated with the primary chance allocation.
+ * @property {string} secondaryWeaponId Weapon Item id associated with the secondary chance allocation.
+ * @property {number} primaryChance Allocated attack chance for the primary weapon.
+ * @property {number} secondaryChance Allocated attack chance for the secondary weapon.
+ */
+
+/**
+ * @typedef {object} SkjaldborgCombatOptions
+ * @property {SkjaldborgTwoWeaponFightingOption} twoWeaponFighting Two-weapon attack option state.
+ * @property {SkjaldborgShieldCover} shieldCover Passive shield cover declaration.
+ * @property {SkjaldborgShieldwallOption} shieldwall Shieldwall declaration state.
+ */
+
+/**
+ * @typedef {object} SkjaldborgTwoWeaponAttackMetadata
+ * @property {boolean} enabled Whether the attack payload includes a second weapon attack.
+ * @property {string|null} primaryWeaponUuid Primary weapon UUID.
+ * @property {string|null} secondaryWeaponUuid Secondary weapon UUID.
+ * @property {number|null} secondaryDexRank Rounded-up half DEX rank for the second attack.
+ * @property {"same-target-full-skill"|"multi-target-half-skill"|""} mode Automated two-weapon mode.
+ * @property {number} primarySkill Primary weapon skill total emitted for deterministic adjudication.
+ * @property {number} secondarySkill Secondary weapon skill total emitted for deterministic adjudication.
+ * @property {number} primaryWeaponChance Allocated primary attack chance used for the submitted attack.
+ * @property {number} secondaryWeaponChance Allocated secondary attack chance used for the submitted attack.
  */
 
 /**
@@ -72,6 +158,16 @@
  * @property {string[]} partnerIds Partner combatant ids.
  * @property {number} reachUnits Engagement reach in grid units.
  * @property {string} reason Machine-readable engagement reason.
+ */
+
+/**
+ * @typedef {object} SkjaldborgDisengagementState
+ * @property {"none"|"retreat"|"flee"|"knockback"} method Disengagement method.
+ * @property {"none"|"declared"|"complete"} status Disengagement lifecycle status.
+ * @property {string[]} partnerIds Partner combatant ids declared for this disengagement.
+ * @property {string|null} opportunityAttackerId Backward-compatible selected Flee opportunity attacker.
+ * @property {string[]} opportunityAttackerIds Selected Flee opportunity attackers.
+ * @property {"one"|"all"} opportunityMode Flee opportunity selection mode.
  */
 
 

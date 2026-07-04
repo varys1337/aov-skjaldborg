@@ -1,0 +1,541 @@
+/* ------------------------------------------------------------------------- */
+/* General-information reference, equipment totals, and weapon interactions  */
+/* ------------------------------------------------------------------------- */
+
+/* Present the personal actor-header fields as a normal History & Family
+ * reference category, using the same cards as Identity and Social Information. */
+.skj-history-general-grid .skj-info-row.is-wide {
+  grid-column: 1 / -1;
+}
+
+.skj-history-general-grid .skj-info-row strong {
+  text-align: right;
+}
+
+/* Keep every category label centred while placing the actor's authoritative
+ * total ENC at the far-left edge of each equipment category heading. */
+.skj-equipment-group h3.skj-equipment-group-heading {
+  align-items: center;
+  display: grid;
+  grid-template-columns: minmax(72px, 1fr) auto minmax(72px, 1fr);
+  min-height: 16px;
+  padding-left: 2px;
+  padding-right: 2px;
+}
+
+.skj-equipment-total-enc {
+  justify-self: start;
+  white-space: nowrap;
+}
+
+.skj-equipment-total-enc strong {
+  color: var(--skj-value, var(--skj-text));
+  font-weight: 800;
+}
+
+.skj-equipment-group-label {
+  justify-self: center;
+}
+
+.skj-equipment-heading-spacer {
+  min-width: 72px;
+}
+
+/* The selector no longer consumes the full combat strip. Its sword control is
+ * an explicit attack-roll button, while Draw/Sheathe remains separate. */
+.skj-weapon-action-strip {
+  grid-template-columns: 160px 58px 48px;
+  justify-content: center;
+  width: 274px;
+}
+
+.skj-weapon-select-wrap {
+  grid-template-columns: 25px minmax(0, 1fr);
+  padding-left: 1px;
+}
+
+.skj-selected-weapon-roll {
+  align-items: center;
+  align-self: stretch;
+  background: transparent;
+  border: 0;
+  border-right: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 0;
+  box-shadow: none;
+  color: #f5ede7;
+  cursor: pointer;
+  display: flex;
+  font-size: 12px;
+  justify-content: center;
+  margin: 0;
+  min-width: 0;
+  padding: 0 3px;
+}
+
+.skj-selected-weapon-roll:hover:not(:disabled),
+.skj-selected-weapon-roll:focus-visible {
+  color: var(--skj-hover);
+}
+
+.skj-selected-weapon-roll:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+/* Damage uses the same AoV check router as the actor sheet, and weapon HP is
+ * a compact current/max editor rather than a passive text value. */
+.skj-equipment-grid-weapon {
+  grid-template-columns: minmax(88px, 1.4fr) 30px 46px 32px 30px 58px 31px 36px;
+}
+
+.skj-equipment-damage-roll {
+  color: var(--skj-text);
+  font-weight: 700;
+}
+
+.skj-equipment-weapon-hp {
+  align-items: center;
+  display: grid;
+  gap: 1px;
+  grid-template-columns: 28px 5px minmax(18px, 1fr);
+  min-width: 0;
+}
+
+.skj-equipment-weapon-hp-input {
+  appearance: textfield;
+  background: rgba(7, 7, 8, 0.72);
+  border: 1px solid var(--skj-frame);
+  border-radius: 4px;
+  box-shadow: none;
+  color: var(--skj-text);
+  font-family: var(--font-primary);
+  font-size: 10px;
+  height: 20px;
+  margin: 0;
+  min-width: 0;
+  padding: 0 2px;
+  text-align: center;
+  width: 28px;
+}
+
+.skj-equipment-weapon-hp-input::-webkit-inner-spin-button,
+.skj-equipment-weapon-hp-input::-webkit-outer-spin-button {
+  appearance: none;
+  margin: 0;
+}
+
+.skj-equipment-weapon-hp > span,
+.skj-equipment-weapon-hp > strong {
+  font-family: var(--font-primary);
+  font-size: 10px;
+  line-height: 1;
+  text-align: center;
+}
+
+/* ------------------------------------------------------------------------- */
+/* v0.3.0-alpha.3 responsive four-way actor-hotbar docking                   */
+/* ------------------------------------------------------------------------- */
+
+.skj-actor-hotbar {
+  --skj-hotbar-effective-action-width: var(--skj-hotbar-action-width, 420px);
+}
+
+/* Flex ordering maps the actor core, collapse rail, and action surface to all
+   four cardinal dock positions without duplicating template markup. */
+.skj-actor-hotbar .skj-hotbar-layout {
+  align-items: flex-start;
+  display: flex;
+  gap: var(--skj-hotbar-panel-gap, 2px);
+  grid-template-columns: none;
+  width: max-content;
+}
+
+.skj-actor-hotbar.skj-hotbar-dock-right .skj-hotbar-layout {
+  flex-direction: row;
+}
+
+.skj-actor-hotbar.skj-hotbar-dock-left .skj-hotbar-layout {
+  flex-direction: row-reverse;
+}
+
+.skj-actor-hotbar.skj-hotbar-dock-bottom .skj-hotbar-layout {
+  align-items: center;
+  flex-direction: column;
+}
+
+.skj-actor-hotbar.skj-hotbar-dock-top .skj-hotbar-layout {
+  align-items: center;
+  flex-direction: column-reverse;
+}
+
+.skj-actor-hotbar .skj-actor-core,
+.skj-actor-hotbar .skj-hotbar-collapse-toggle,
+.skj-actor-hotbar .skj-actor-actions {
+  grid-column: auto;
+  grid-row: auto;
+}
+
+.skj-actor-hotbar .skj-actor-actions {
+  max-width: var(--skj-hotbar-effective-action-width, var(--skj-hotbar-action-width, 420px));
+  width: var(--skj-hotbar-effective-action-width, var(--skj-hotbar-action-width, 420px));
+}
+
+/* Left/right docking uses a narrow vertical rail centred on the portrait art.
+   Top/bottom docking turns the same control into a horizontal rail. */
+.skj-actor-hotbar .skj-hotbar-collapse-toggle {
+  appearance: none;
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  line-height: 1;
+  min-height: 0;
+  min-width: 0;
+  padding: 0;
+}
+
+.skj-actor-hotbar.skj-hotbar-dock-left .skj-hotbar-collapse-toggle,
+.skj-actor-hotbar.skj-hotbar-dock-right .skj-hotbar-collapse-toggle {
+  align-self: flex-start;
+  flex-basis: var(--skj-hotbar-collapse-width, 10px);
+  height: 42px;
+  margin: calc(38px + ((var(--skj-quick-stage-size, 192px) - 42px) / 2)) 0 0;
+  max-height: 42px;
+  max-width: var(--skj-hotbar-collapse-width, 10px);
+  min-height: 42px;
+  min-width: var(--skj-hotbar-collapse-width, 10px);
+  width: var(--skj-hotbar-collapse-width, 10px);
+}
+
+.skj-actor-hotbar.skj-hotbar-dock-top .skj-hotbar-collapse-toggle,
+.skj-actor-hotbar.skj-hotbar-dock-bottom .skj-hotbar-collapse-toggle {
+  align-self: center;
+  flex-basis: var(--skj-hotbar-collapse-width, 10px);
+  height: var(--skj-hotbar-collapse-width, 10px);
+  margin: 0;
+  max-height: var(--skj-hotbar-collapse-width, 10px);
+  max-width: 42px;
+  min-height: var(--skj-hotbar-collapse-width, 10px);
+  min-width: 42px;
+  width: 42px;
+}
+
+.skj-actor-hotbar.skj-hotbar-dock-left .skj-hotbar-collapse-toggle i {
+  transform: rotate(180deg);
+}
+
+.skj-actor-hotbar.skj-hotbar-dock-right .skj-hotbar-collapse-toggle i {
+  transform: rotate(0deg);
+}
+
+.skj-actor-hotbar.skj-hotbar-dock-top .skj-hotbar-collapse-toggle i {
+  transform: rotate(-90deg);
+}
+
+.skj-actor-hotbar.skj-hotbar-dock-bottom .skj-hotbar-collapse-toggle i {
+  transform: rotate(90deg);
+}
+
+.skj-actor-hotbar .skj-hotbar-collapse-toggle {
+  cursor: grab;
+  touch-action: none;
+}
+
+.skj-actor-hotbar.skj-dock-dragging,
+.skj-actor-hotbar.skj-dock-dragging * {
+  cursor: grabbing !important;
+  user-select: none !important;
+}
+
+/* Preserve the established centred navigation row in every dock orientation.
+   Active effects remain right-aligned and are clipped rather than introducing
+   a second horizontal scrollbar into the HUD header. */
+.skj-actor-hotbar .skj-hotbar-header-row {
+  align-items: flex-start;
+  display: grid;
+  gap: 2px;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.skj-actor-hotbar .skj-hotbar-tabs {
+  flex: none;
+  grid-column: 2;
+  justify-content: center;
+  justify-self: center;
+  max-width: max-content;
+  min-width: max-content;
+  overflow: visible;
+  white-space: normal;
+}
+
+.skj-actor-hotbar .skj-effect-row {
+  flex: none;
+  grid-column: 3;
+  justify-self: end;
+  margin-left: 0;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.skj-actor-hotbar .skj-hotbar-tabs a,
+.skj-actor-hotbar .skj-effect-icon {
+  flex: 0 0 auto;
+}
+
+.skj-actor-hotbar.skj-hotbar-dock-top .skj-actor-actions,
+.skj-actor-hotbar.skj-hotbar-dock-bottom .skj-actor-actions {
+  align-self: center;
+}
+
+/* Override the older mobile single-column fallback. Four-way docking and the
+   JS-calculated effective action width now provide the responsive behavior. */
+@media (max-width: 760px) {
+  .skj-actor-hotbar .skj-actor-core,
+  .skj-actor-hotbar .skj-hotbar-collapse-toggle {
+    display: flex;
+  }
+
+  .skj-actor-hotbar .skj-actor-actions {
+    max-width: var(--skj-hotbar-effective-action-width, calc(100vw - 24px));
+    width: var(--skj-hotbar-effective-action-width, calc(100vw - 24px));
+  }
+
+  .skj-actor-hotbar .skj-hotbar-layout {
+    column-gap: var(--skj-hotbar-panel-gap, 2px);
+    grid-template-columns: none;
+  }
+
+  .skj-actor-hotbar .skj-actions-bar,
+  .skj-actor-hotbar .skj-named-action-groups,
+  .skj-actor-hotbar .skj-equipment-groups,
+  .skj-actor-hotbar .skj-stat-groups,
+  .skj-actor-hotbar .skj-history-family-groups {
+    max-width: 100%;
+    min-width: 0;
+    width: 100%;
+  }
+}
+
+
+/* ------------------------------------------------------------------------- */
+/* v0.3.0-alpha.4 Token-bar resources and bounded AoV hit-location body map  */
+/* ------------------------------------------------------------------------- */
+
+.skj-hotbar-resources.is-single {
+  justify-content: center;
+}
+
+.skj-hit-location-section .skj-hit-location-grid {
+  place-self: center;
+}
+
+
+/* ------------------------------------------------------------------------- */
+/* v0.3.0-alpha.5 Compact hit-location typography                            */
+/* Keep all body-map labels readable inside the bounded 3 × 4 card layout.   */
+/* ------------------------------------------------------------------------- */
+
+.skj-hit-location-values > span {
+  min-width: 0;
+}
+
+/* ------------------------------------------------------------------------- */
+/* v0.3.0-alpha.6 Final compact hit-location typography                      */
+/* Reduce each text tier by one further pixel and tighten vertical rhythm.    */
+/* ------------------------------------------------------------------------- */
+
+.skj-hit-location-card {
+  grid-template-rows: minmax(0, 1fr) 14px;
+}
+
+.skj-hit-location-name {
+  font-size: 8px;
+  grid-template-rows: minmax(11px, auto) 8px;
+  line-height: 1;
+  padding: 0 1px;
+}
+
+.skj-hit-location-name span {
+  line-height: 1;
+  min-height: 11px;
+  padding-block: 0;
+}
+
+.skj-hit-location-name small {
+  font-size: 7px;
+  line-height: 8px;
+  min-height: 8px;
+}
+
+.skj-hit-location-values {
+  column-gap: 1px;
+  font-size: 7px;
+  line-height: 1;
+  padding: 0 2px;
+}
+
+.skj-hit-location-values strong {
+  font-size: 8px;
+}
+
+/* ------------------------------------------------------------------------- */
+/* v0.3.0-alpha.7 Neutral hit-location AP/HP values                          */
+/* AP and HP values belong to the body-map card, not the Token disposition.  */
+/* ------------------------------------------------------------------------- */
+
+.skj-hit-location-values strong {
+  color: var(--skj-text);
+  font-weight: 700;
+}
+
+/* ------------------------------------------------------------------------- */
+/* v0.3.0-alpha.8 Transparent empty wounds and authoritative AoV HP display  */
+/* ------------------------------------------------------------------------- */
+
+.skj-active-wounds-section.is-empty {
+  background: transparent;
+}
+
+.skj-active-wounds-section.is-empty > .skj-empty-actions {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  color: var(--skj-text);
+  justify-content: center;
+  min-height: 0;
+}
+
+
+/* ------------------------------------------------------------------------- */
+/* v0.3.0-alpha.9 persistent pre-combat intent declarations                  */
+/* ------------------------------------------------------------------------- */
+
+.skj-intent-slot.is-selected > i,
+.skj-intent-slot.is-selected .skj-intent-name {
+  color: var(--skj-text);
+}
+
+.skj-tracker-indicator.status-action.intent-grapple {
+  --skj-indicator-accent: #c58f62;
+}
+
+/* ------------------------------------------------------------------------- */
+/* v0.3.0-alpha.10 disposition-consistent actor-HUD interaction accents      */
+/* ------------------------------------------------------------------------- */
+
+/* The selected Token's disposition is the single interaction-accent source
+   for the actor HUD. Resource fills, wound severity, and workflow status keep
+   their semantic colours; active, selected, hover, focus, prepared, and drop
+   highlights use this inherited disposition palette. */
+.skj-actor-hotbar .skj-hotbar-layout {
+  --skj-active: var(--skj-disposition-color, #e7bd32);
+  --skj-active-soft: var(--skj-disposition-glow-soft, rgba(231, 189, 50, 0.42));
+  --skj-active-glow: var(--skj-disposition-glow-strong, rgba(231, 189, 50, 0.82));
+  --skj-hover: var(--skj-disposition-color, #e7bd32);
+  --skj-hover-glow: var(--skj-disposition-glow-soft, rgba(231, 189, 50, 0.42));
+  --skj-drop-glow: var(--skj-disposition-glow-strong, rgba(231, 189, 50, 0.82));
+}
+
+/* Override the older AoV-theme rule which hard-coded the active tab blue. */
+.skj-actor-hotbar.skj-theme-aov .skj-hotbar-layout .skj-hotbar-tabs a.active {
+  background-color: var(--skj-background);
+  background-image:
+    linear-gradient(var(--skj-active-soft), var(--skj-active-soft)),
+    var(--skj-surface-texture);
+  border-color: var(--skj-active);
+  box-shadow: 0 0 9px var(--skj-active-glow), inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+
+.skj-actor-hotbar .skj-hotbar-layout .skj-intent-slot.is-selected {
+  border-color: var(--skj-active);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--skj-active) 55%, transparent),
+    0 0 8px var(--skj-active-glow),
+    inset 0 0 10px rgba(255, 255, 255, 0.05);
+}
+
+.skj-actor-hotbar .skj-hotbar-layout .skj-hotbar-slot.prepared,
+.skj-actor-hotbar .skj-hotbar-layout .skj-named-action.prepared {
+  border-color: var(--skj-active);
+  box-shadow: 0 0 8px var(--skj-active-glow), 0 3px 7px var(--skj-shadow);
+}
+
+.skj-actor-hotbar .skj-hotbar-layout .skj-hotbar-slot.drop-target,
+.skj-actor-hotbar .skj-hotbar-layout .skj-named-action.drop-target {
+  border-color: var(--skj-hover);
+  box-shadow: inset 0 0 14px var(--skj-drop-glow);
+}
+
+.skj-actor-hotbar .skj-hotbar-layout .skj-quick-slot.quick-drop-target,
+.skj-actor-hotbar .skj-hotbar-layout .skj-quick-slot.empty.quick-drop-target,
+.skj-actor-hotbar .skj-hotbar-layout .skj-quick-slot.empty.quick-drop-target:hover {
+  border-color: var(--skj-hover);
+  box-shadow: 0 0 16px var(--skj-drop-glow), inset 0 0 10px var(--skj-hover-glow);
+}
+
+
+/* ------------------------------------------------------------------------- */
+/* v0.3.0-alpha.23 readied label below selector                            */
+/* ------------------------------------------------------------------------- */
+
+/* Keep the readied label in normal flow directly below the weapon controls.
+ * The same fixed 35px stack is retained, while the workflow pills are nudged
+ * down by one pixel so the label remains clear without enlarging the HUD. */
+.skj-combat-stage {
+  gap: 2px;
+}
+
+.skj-combat-stage .skj-intent-grid {
+  min-height: calc(var(--skj-slot-size) + var(--skj-slot-size) + 4px);
+  row-gap: 4px;
+}
+
+.skj-weapon-control-stack {
+  align-items: center;
+  display: grid;
+  flex: 0 0 35px;
+  gap: 1px;
+  grid-template-rows: 24px 10px;
+  height: 35px;
+  justify-items: center;
+  margin-top: 0;
+  max-width: 100%;
+  overflow: visible;
+  position: relative;
+  width: 300px;
+}
+
+.skj-weapon-control-stack .skj-readied-weapon-label {
+  background: none;
+  box-sizing: border-box;
+  height: 10px;
+  line-height: 10px;
+  margin: 0;
+  max-width: 300px;
+  min-height: 10px;
+  overflow: hidden;
+  padding: 0 2px;
+  pointer-events: none;
+  position: static;
+  transform: none;
+  width: 100%;
+  z-index: auto;
+}
+
+.skj-weapon-control-stack .skj-readied-weapon-label span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skj-weapon-control-stack .skj-weapon-action-strip {
+  margin: 0;
+  position: relative;
+  z-index: 1;
+}
+
+.skj-combat-stage .skj-workflow-pips-combat {
+  margin-top: 7px;
+}

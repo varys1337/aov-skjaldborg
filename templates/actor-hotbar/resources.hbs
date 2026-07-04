@@ -1,0 +1,31 @@
+      <div class="skj-hotbar-resources {{#if singleResource}}is-single{{/if}}" data-hotbar-region="resources" data-resource-count="{{resources.length}}">
+        {{#each resources}}
+          <label
+            class="skj-resource-card"
+            style="--resource-accent: {{accent}}; --resource-fill: {{fillPercent}}%;"
+            data-tooltip="{{label}}: {{value}}{{#if hasMaximum}}/{{max}}{{/if}}{{#if secondary}} - {{secondary}}{{/if}}"
+          >
+            <span class="sr-only">{{label}}</span>
+            <span class="skj-resource-current {{#unless hasMaximum}}is-value-only{{/unless}}">
+              <input
+                type="number"
+                class="skj-resource-input"
+                value="{{value}}"
+                min="0"
+                {{#if hasMaximum}}max="{{max}}"{{/if}}
+                step="{{step}}"
+                inputmode="decimal"
+                data-resource-input="{{id}}"
+                data-original-value="{{value}}"
+                aria-label="{{label}}"
+                {{#unless editable}}disabled{{/unless}}
+              >
+              {{#if hasMaximum}}
+                <span class="skj-resource-separator">/</span>
+                <span class="skj-resource-maximum">{{max}}</span>
+              {{/if}}
+            </span>
+            {{#if secondary}}<span class="skj-resource-secondary">{{secondary}}</span>{{/if}}
+          </label>
+        {{/each}}
+      </div>

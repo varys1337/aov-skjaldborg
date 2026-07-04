@@ -45,34 +45,40 @@
       </div>
       <p class="hint">{{localize "AOV_SKJALDBORG.Settings.MovementTickDelay.Hint"}}</p>
     </div>
+
+    <div class="form-group">
+      <label>{{localize "AOV_SKJALDBORG.Settings.MovementPlanVisibility.Name"}}</label>
+      <div class="form-fields">
+        <select name="movementPlanVisibility">
+          {{#each movementPlanVisibilityChoices}}
+            <option value="{{value}}" {{#if selected}}selected{{/if}}>{{label}}</option>
+          {{/each}}
+        </select>
+      </div>
+      <p class="hint">{{localize "AOV_SKJALDBORG.Settings.MovementPlanVisibility.Hint"}}</p>
+    </div>
   </fieldset>
 
   <fieldset>
-    <legend>{{localize "AOV_SKJALDBORG.Settings.CombatTrackingMenu.Reach.Name"}}</legend>
-    <p class="hint">{{localize "AOV_SKJALDBORG.Settings.CombatTrackingMenu.Reach.Hint"}}</p>
+    <legend>{{localize "AOV_SKJALDBORG.Settings.CombatTrackingMenu.Automation.Name"}}</legend>
+    <p class="hint">{{localize "AOV_SKJALDBORG.Settings.CombatTrackingMenu.Automation.Hint"}}</p>
 
     <div class="form-group">
-      <label>{{localize "AOV_SKJALDBORG.Settings.Reach.Short.Name"}}</label>
+      <label>{{localize "AOV_SKJALDBORG.Settings.EvadeFightingDefensively.Name"}}</label>
       <div class="form-fields">
-        <input type="number" name="shortReachGridUnits" value="{{shortReachGridUnits}}" min="{{limits.reach.min}}" max="{{limits.reach.max}}" step="{{limits.reach.step}}" data-dtype="Number">
+        <input type="checkbox" name="evadeFightingDefensively" value="true" data-dtype="Boolean" {{checked evadeFightingDefensively}}>
       </div>
-      <p class="hint">{{localize "AOV_SKJALDBORG.Settings.Reach.Short.Hint"}}</p>
+      <p class="hint">{{localize "AOV_SKJALDBORG.Settings.EvadeFightingDefensively.Hint"}}</p>
     </div>
 
-    <div class="form-group">
-      <label>{{localize "AOV_SKJALDBORG.Settings.Reach.Medium.Name"}}</label>
+    <div class="form-group skj-rolltable-drop-setting" data-skj-rolltable-drop>
+      <label>{{localize "AOV_SKJALDBORG.Settings.KnockbackFumbleTable.Name"}}</label>
       <div class="form-fields">
-        <input type="number" name="mediumReachGridUnits" value="{{mediumReachGridUnits}}" min="{{limits.reach.min}}" max="{{limits.reach.max}}" step="{{limits.reach.step}}" data-dtype="Number">
+        <input type="text" name="knockbackFumbleTableReference" value="{{knockbackFumbleTableReference}}" placeholder="Compendium.package.tables.RollTable.id / RollTable.id / rt..fumbles" data-dtype="String">
       </div>
-      <p class="hint">{{localize "AOV_SKJALDBORG.Settings.Reach.Medium.Hint"}}</p>
-    </div>
-
-    <div class="form-group">
-      <label>{{localize "AOV_SKJALDBORG.Settings.Reach.Long.Name"}}</label>
-      <div class="form-fields">
-        <input type="number" name="longReachGridUnits" value="{{longReachGridUnits}}" min="{{limits.reach.min}}" max="{{limits.reach.max}}" step="{{limits.reach.step}}" data-dtype="Number">
-      </div>
-      <p class="hint">{{localize "AOV_SKJALDBORG.Settings.Reach.Long.Hint"}}</p>
+      <p class="hint">{{localize "AOV_SKJALDBORG.Settings.KnockbackFumbleTable.Hint"}}</p>
+      <p class="hint skj-rolltable-drop-setting__drop"><i class="fa-solid fa-table-list"></i> {{localize "AOV_SKJALDBORG.Settings.KnockbackFumbleTable.DropHint"}}</p>
     </div>
   </fieldset>
+
 </div>

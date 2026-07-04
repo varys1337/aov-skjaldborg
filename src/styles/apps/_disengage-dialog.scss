@@ -1,0 +1,523 @@
+/* Age of Vikings - Skjaldborg: Disengage dialog source. */
+
+.application.dialog.skj-disengage-window {
+  --skj-roll-text: #f2eadb;
+  --skj-roll-muted: rgba(242, 234, 219, 0.68);
+  --skj-roll-surface: rgba(10, 12, 12, 0.9);
+  --skj-roll-surface-soft: rgba(14, 17, 16, 0.68);
+  --skj-roll-frame: rgba(84, 183, 126, 0.62);
+  --skj-roll-frame-soft: rgba(84, 183, 126, 0.24);
+  --skj-roll-active: rgba(34, 129, 103, 0.84);
+  --skj-roll-hover: rgba(42, 146, 116, 0.86);
+  --skj-roll-accent: #f0d9ac;
+  --skj-roll-warning: #e5b95d;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 0.82rem;
+}
+
+.application.dialog.skj-disengage-window.skj-theme-classic {
+  --skj-roll-frame: rgba(196, 137, 78, 0.62);
+  --skj-roll-frame-soft: rgba(196, 137, 78, 0.24);
+  --skj-roll-active: rgba(34, 129, 103, 0.84);
+}
+
+.application.dialog.skj-disengage-window .window-header {
+  background: rgba(4, 7, 7, 0.96);
+  border-bottom: 1px solid var(--skj-roll-frame-soft);
+  color: var(--skj-roll-text);
+  font-size: 0.82rem;
+  min-height: 1.9rem;
+  padding-inline: 0.42rem;
+}
+
+.application.dialog.skj-disengage-window .window-header .window-title {
+  font-size: 0.88rem;
+}
+
+.application.dialog.skj-disengage-window .window-header button {
+  font-size: 0.86rem;
+  height: 1.55rem;
+  min-height: 1.55rem;
+  min-width: 1.55rem;
+  width: 1.55rem;
+}
+
+.application.dialog.skj-disengage-window .window-content,
+.application.dialog.skj-disengage-window .window-content.skj-disengage-content {
+  background:
+    linear-gradient(rgba(7, 10, 10, 0.91), rgba(7, 9, 9, 0.96)),
+    url("/systems/aov/art-assets/darkstone.jpg") repeat;
+  border: 1px solid var(--skj-roll-frame-soft);
+  color: var(--skj-roll-text);
+  overflow: hidden;
+  padding: 0;
+}
+
+.application.dialog.skj-disengage-window.skj-theme-classic .window-content,
+.application.dialog.skj-disengage-window.skj-theme-classic .window-content.skj-disengage-content {
+  background:
+    linear-gradient(rgba(23, 13, 8, 0.93), rgba(13, 9, 7, 0.97)),
+    radial-gradient(circle at top, rgba(112, 63, 31, 0.2), transparent 58%);
+}
+
+.application.dialog.skj-disengage-window .dialog-buttons,
+.application.dialog.skj-disengage-window .form-footer {
+  display: none !important;
+}
+
+.skj-disengage-dialog__footer {
+  align-items: center;
+  background: rgba(4, 7, 7, 0.88);
+  border-top: 1px solid var(--skj-roll-frame-soft);
+  display: flex;
+  gap: 0.4rem;
+  justify-content: center;
+  padding: 0.58rem 0.72rem 0.72rem;
+}
+
+.skj-disengage-dialog__footer .skj-disengage-confirm-button {
+  align-items: center;
+  background: linear-gradient(180deg, rgba(45, 105, 73, 0.94), rgba(20, 66, 43, 0.96));
+  border: 1px solid var(--skj-roll-frame);
+  border-radius: 14px;
+  color: var(--skj-roll-text);
+  box-sizing: border-box;
+  cursor: pointer;
+  display: inline-flex;
+  flex: 0 0 8.4rem !important;
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 700;
+  gap: 0.3rem;
+  height: 2rem;
+  justify-content: center;
+  max-width: 8.4rem;
+  min-height: 2rem;
+  min-width: 0;
+  padding: 0.28rem 0.72rem;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.45);
+  width: 8.4rem !important;
+}
+
+
+.skj-disengage-dialog__footer .skj-disengage-confirm-button:hover,
+.skj-disengage-dialog__footer .skj-disengage-confirm-button:focus {
+  background: var(--skj-roll-hover);
+  box-shadow: 0 0 0 1px var(--skj-roll-frame-soft);
+  outline: none;
+}
+
+.skj-disengage-dialog__footer .skj-disengage-confirm-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
+.skj-disengage-dialog {
+  display: flex;
+  flex-direction: column;
+  max-height: 70vh;
+  min-width: 326px;
+  width: min(390px, 92vw);
+}
+
+.skj-disengage-dialog__header {
+  align-items: stretch;
+  background:
+    linear-gradient(110deg, rgba(10, 43, 31, 0.9), rgba(5, 13, 12, 0.95)),
+    url("/systems/aov/art-assets/darkstone.jpg") repeat;
+  border-bottom: 1px solid var(--skj-roll-frame);
+  display: grid;
+  gap: 0.6rem;
+  grid-template-columns: 48px minmax(0, 1fr) 74px;
+  padding: 0.72rem;
+}
+
+.skj-theme-classic .skj-disengage-dialog__header {
+  background: linear-gradient(110deg, rgba(82, 39, 20, 0.92), rgba(20, 11, 8, 0.96));
+}
+
+.skj-disengage-dialog__portrait,
+.skj-disengage-opponent__portrait {
+  align-items: center;
+  background: rgba(2, 5, 5, 0.72);
+  border: 1px solid var(--skj-roll-frame);
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.035);
+  display: flex;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.skj-disengage-dialog__portrait {
+  height: 48px;
+  width: 48px;
+}
+
+.skj-disengage-dialog__portrait img,
+.skj-disengage-dialog__portrait video,
+.skj-disengage-opponent__portrait img,
+.skj-disengage-opponent__portrait video {
+  display: block;
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.skj-disengage-dialog__portrait i,
+.skj-disengage-opponent__portrait i {
+  color: var(--skj-roll-muted);
+}
+
+.skj-disengage-dialog__identity {
+  display: grid;
+  gap: 0.12rem;
+  min-width: 0;
+}
+
+.skj-disengage-dialog__actor {
+  color: var(--skj-roll-muted);
+  font-size: 0.76rem;
+  line-height: 1.1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skj-disengage-dialog__identity strong {
+  color: var(--skj-roll-text);
+  font-size: 1.02rem;
+  line-height: 1.1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skj-disengage-dialog__identity span:not(.skj-disengage-dialog__actor) {
+  color: var(--skj-roll-muted);
+  font-size: 0.72rem;
+  line-height: 1.18;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skj-disengage-dialog__badge {
+  align-items: center;
+  background: rgba(2, 5, 5, 0.66);
+  border: 1px solid var(--skj-roll-frame);
+  border-radius: 14px;
+  display: grid;
+  justify-items: center;
+  min-height: 48px;
+  min-width: 0;
+  padding: 0.38rem;
+}
+
+.skj-disengage-dialog__badge span {
+  color: var(--skj-roll-muted);
+  font-size: 0.61rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  line-height: 1.1;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.skj-disengage-dialog__badge strong {
+  color: var(--skj-roll-accent);
+  font-size: 1.55rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.skj-disengage-dialog__body {
+  display: grid;
+  gap: 0.5rem;
+  overflow-y: auto;
+  padding: 0.68rem 0.72rem;
+}
+
+.skj-disengage-dialog .skj-dialog-note,
+.skj-disengage-dialog .skj-dialog-warning {
+  margin: 0;
+  line-height: 1.35;
+}
+
+.skj-disengage-dialog .skj-dialog-note {
+  color: var(--skj-roll-text);
+  font-size: 0.82rem;
+  font-weight: 650;
+}
+
+.skj-disengage-dialog .skj-dialog-warning {
+  align-items: center;
+  background: rgba(172, 79, 45, 0.14);
+  border: 1px solid rgba(216, 111, 61, 0.55);
+  border-radius: 10px;
+  color: #f4c89c;
+  display: flex;
+  gap: 0.45rem;
+  padding: 0.5rem 0.62rem;
+}
+
+.skj-disengage-options {
+  display: grid;
+  gap: 0.42rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.skj-disengage-option {
+  align-items: center;
+  background: var(--skj-roll-surface-soft);
+  border: 1px solid var(--skj-roll-frame-soft);
+  border-radius: 13px;
+  cursor: pointer;
+  display: grid;
+  gap: 0.42rem;
+  grid-template-columns: 20px minmax(0, 1fr);
+  margin: 0;
+  min-height: 38px;
+  padding: 0.44rem 0.58rem;
+}
+
+.skj-disengage-option:hover:not(.is-disabled) {
+  background: var(--skj-roll-hover);
+  border-color: var(--skj-roll-frame);
+}
+
+.skj-disengage-option.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
+.skj-disengage-option input {
+  height: 1px;
+  min-height: 0;
+  opacity: 0;
+  padding: 0;
+  position: absolute;
+  width: 1px;
+}
+
+.skj-disengage-option__mark {
+  background: rgba(113, 96, 83, 0.36);
+  border: 1px solid rgba(246, 215, 165, 0.16);
+  border-radius: 50%;
+  display: block;
+  height: 20px;
+  position: relative;
+  width: 20px;
+}
+
+.skj-disengage-option input:checked + .skj-disengage-option__mark {
+  background: var(--skj-roll-warning);
+  border-color: rgba(255, 231, 186, 0.7);
+  box-shadow: 0 0 0 3px rgba(229, 185, 93, 0.12);
+}
+
+.skj-disengage-option input:checked + .skj-disengage-option__mark::after {
+  background: #102017;
+  border-radius: 50%;
+  content: "";
+  display: block;
+  height: 8px;
+  left: 5px;
+  position: absolute;
+  top: 5px;
+  width: 8px;
+}
+
+.skj-disengage-option__copy {
+  align-items: center;
+  display: grid;
+  gap: 0.14rem;
+  min-width: 0;
+}
+
+.skj-disengage-option__copy strong {
+  color: var(--skj-roll-text);
+  font-size: 0.84rem;
+  line-height: 1.1;
+  text-align: center;
+}
+
+.skj-disengage-option__copy span {
+  color: var(--skj-roll-muted);
+  font-size: 0.74rem;
+  line-height: 1.24;
+}
+
+.skj-disengage-opponents {
+  display: grid;
+  gap: 0.38rem;
+}
+
+.skj-disengage-opponents__header {
+  align-items: end;
+  color: var(--skj-roll-muted);
+  display: flex;
+  font-size: 0.72rem;
+  font-weight: 800;
+  gap: 0.45rem;
+  justify-content: space-between;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.skj-disengage-opponents__header > span {
+  align-items: center;
+  display: inline-flex;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.skj-disengage-opponents__header small {
+  color: var(--skj-roll-muted);
+  font-size: 0.58rem;
+  font-weight: 650;
+  letter-spacing: 0;
+  line-height: 1.1;
+  text-align: right;
+  text-transform: none;
+}
+
+.skj-disengage-opponents__list {
+  display: grid;
+  gap: 0.38rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.skj-disengage-opponents__list.is-empty {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.skj-disengage-opponent {
+  align-items: center;
+  background: rgba(3, 6, 6, 0.68);
+  border: 1px solid var(--skj-roll-frame-soft);
+  border-radius: 12px;
+  color: var(--skj-roll-text);
+  cursor: pointer;
+  display: grid;
+  font-family: inherit;
+  gap: 0.38rem;
+  grid-template-columns: 22px 34px minmax(0, 1fr);
+  min-height: 42px;
+  padding: 0.34rem 0.44rem;
+  text-align: left;
+  width: 100%;
+}
+
+.skj-disengage-opponent:hover,
+.skj-disengage-opponent:focus-within {
+  background: rgba(56, 121, 163, 0.34);
+  border-color: var(--skj-roll-frame);
+  box-shadow: 0 0 0 1px var(--skj-roll-frame-soft);
+  outline: none;
+}
+
+.skj-disengage-opponent:has(input:checked) {
+  background: rgba(56, 121, 163, 0.28);
+  border-color: var(--skj-roll-frame);
+}
+
+.skj-disengage-opponent input {
+  height: 1px;
+  margin: 0;
+  min-height: 0;
+  opacity: 0;
+  padding: 0;
+  position: absolute;
+  width: 1px;
+}
+
+.skj-disengage-opponent__check {
+  background: rgba(113, 96, 83, 0.36);
+  border: 1px solid rgba(246, 215, 165, 0.16);
+  border-radius: 50%;
+  display: block;
+  height: 18px;
+  position: relative;
+  width: 18px;
+}
+
+.skj-disengage-opponent input:checked + .skj-disengage-opponent__check {
+  background: var(--skj-roll-warning);
+  border-color: rgba(255, 231, 186, 0.7);
+  box-shadow: 0 0 0 3px rgba(229, 185, 93, 0.12);
+}
+
+.skj-disengage-opponent input:checked + .skj-disengage-opponent__check::after {
+  background: #102017;
+  border-radius: 50%;
+  content: "";
+  display: block;
+  height: 7px;
+  left: 5px;
+  position: absolute;
+  top: 5px;
+  width: 7px;
+}
+
+.skj-disengage-opponent:active {
+  filter: brightness(1.12);
+}
+
+.skj-disengage-opponent__portrait {
+  height: 34px;
+  width: 34px;
+}
+
+.skj-disengage-opponent__copy {
+  display: grid;
+  gap: 0.08rem;
+  min-width: 0;
+}
+
+.skj-disengage-opponent__copy strong {
+  color: var(--skj-roll-text);
+  font-size: 0.78rem;
+  line-height: 1.1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skj-disengage-opponent__copy span {
+  color: var(--skj-roll-muted);
+  font-size: 0.66rem;
+  line-height: 1.15;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skj-disengage-opponents__empty {
+  background: rgba(3, 6, 6, 0.48);
+  border: 1px dashed var(--skj-roll-frame-soft);
+  border-radius: 11px;
+  color: var(--skj-roll-muted);
+  font-size: 0.74rem;
+  line-height: 1.3;
+  padding: 0.52rem 0.62rem;
+}
+
+@media (max-width: 460px) {
+  .skj-disengage-dialog {
+    min-width: 0;
+    width: 90vw;
+  }
+
+  .skj-disengage-dialog__header {
+    grid-template-columns: 44px minmax(0, 1fr);
+  }
+
+  .skj-disengage-dialog__badge {
+    display: none;
+  }
+
+  .skj-disengage-options,
+  .skj-disengage-opponents__list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

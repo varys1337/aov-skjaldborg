@@ -20,52 +20,26 @@
         "Name": "Movement tick delay",
         "Hint": "Delay in milliseconds between Skjaldborg movement checkpoints during the Foundry v14 movement phase."
       },
-      "Reach": {
-        "Short": {
-          "Name": "Short melee reach",
-          "Hint": "Grid-unit engagement distance when unarmed or using a readied melee weapon up to 1 meter long."
-        },
-        "Medium": {
-          "Name": "Medium melee reach",
-          "Hint": "Grid-unit engagement distance for a readied melee weapon over 1 meter and up to 2 meters long."
-        },
-        "Long": {
-          "Name": "Long melee reach",
-          "Hint": "Grid-unit engagement distance for a readied melee weapon over 2 meters long."
-        }
-      },
       "ChatReports": {
         "Name": "Post phase reports to chat",
         "Hint": "Creates short chat cards when phases advance and resolution queues are generated."
       },
       "Debug": {
         "Name": "Debug logging",
-        "Hint": "Enable all Skjaldborg diagnostic output with one switch, including general logs and every movement-debug category at trace detail."
+        "Hint": "Enable full Skjaldborg diagnostics with one switch, including general logs and all former advanced movement diagnostics at trace detail."
       },
       "PerformanceDiagnostics": {
         "Name": "Performance diagnostics",
         "Hint": "Collect client-side Skjaldborg render, cache, socket, and movement timing counters. Disabled by default."
       },
       "MovementDebugMenu": {
-        "Name": "Advanced movement diagnostics",
-        "Label": "Configure movement diagnostics",
-        "Hint": "GM-only v14 diagnostics for Skjaldborg movement capture, route execution, collision, and engagement.",
-        "Title": "Skjaldborg Movement Debugger",
-        "LogSnapshot": "Log current movement state",
-        "ExportDebug": "Export last movement debug JSON",
         "ExportCopied": "Movement debug JSON copied to clipboard and logged to the console.",
         "ExportLogged": "Movement debug JSON logged to the console.",
-        "General": {
-          "Name": "Diagnostic output",
-          "Hint": "Movement diagnostics are GM-facing console logs only. Leave disabled outside active troubleshooting."
-        },
         "Enabled": {
-          "Name": "Enable movement debugger",
-          "Hint": "Write structured movement diagnostics to the browser console."
+          "Name": "Enable movement debugger"
         },
         "Level": {
-          "Name": "Movement debug level",
-          "Hint": "Summary logs key lifecycle events. Verbose adds per-context data. Trace includes full routes and checkpoints."
+          "Name": "Movement debug level"
         },
         "Levels": {
           "summary": "Summary",
@@ -73,52 +47,7 @@
           "trace": "Trace"
         },
         "Categories": {
-          "Name": "Diagnostic categories",
-          "Hint": "Limit logging to the movement areas currently under investigation.",
-          "capture": {
-            "Name": "Capture and gating",
-            "Hint": "Intent-phase token movement capture, phase gates, ownership, and blocking decisions."
-          },
-          "socket": {
-            "Name": "Socket and sanitization",
-            "Hint": "GM-authoritative movement writes and sanitized payload shape."
-          },
-          "route": {
-            "Name": "Route normalization",
-            "Hint": "Raw route, preserved waypoints, destination, and duplicate filtering."
-          },
-          "expansion": {
-            "Name": "Waypoint expansion",
-            "Hint": "Per-segment complete-path calls and fallback checkpoint generation."
-          },
-          "run": {
-            "Name": "Movement run lifecycle",
-            "Hint": "Movement phase run start, contexts, completion, and result summaries."
-          },
-          "scheduler": {
-            "Name": "Scheduler ticks",
-            "Hint": "Per-tick context indices, submitted moves, waits, and results."
-          },
-          "collision": {
-            "Name": "Collision and reservation",
-            "Hint": "Occupied grid rectangles, reservations, blockers, and queued movement."
-          },
-          "engagement": {
-            "Name": "Engagement and reach",
-            "Hint": "Disposition checks, reach thresholds, occupied-grid separation, and engagement pair creation."
-          },
-          "stop": {
-            "Name": "Stop hooks",
-            "Hint": "moveToken/stopToken hooks, stop reasons, and distance used for stopped movement."
-          },
-          "status": {
-            "Name": "Status cleanup",
-            "Hint": "Engaged ActiveEffect synchronization and manual cleanup."
-          },
-          "dex": {
-            "Name": "DEX distance inputs",
-            "Hint": "Movement distances and path data that feed DEX penalties."
-          }
+          "Name": "Diagnostic categories"
         }
       },
       "ActionUiMenu": {
@@ -165,11 +94,11 @@
       },
       "ActionRing": {
         "Name": "Enable token action ring",
-        "Hint": "Adds a Crucible Tongs-style action ring to the core Token HUD. It always mirrors the represented actor's configured quick-access circles, including during Skjaldborg combat."
+        "Hint": "Adds a radial action selector to the core Token HUD. It mirrors the represented actor's configured quick-access circles, including during Skjaldborg combat."
       },
       "ActionRingMaxItems": {
         "Name": "Quick-access circles",
-        "Hint": "Sets 6 to 12 visible quick-access circles for both the selected-actor hotbar and the token action ring. Assignments hidden by a lower count are preserved."
+        "Hint": "Sets 6 to 12 visible quick-access circles for the actor hotbar and token action ring."
       },
       "ActorHotbar": {
         "Name": "Enable actor hotbar",
@@ -198,7 +127,7 @@
       },
       "ActionUiTheme": {
         "Name": "Action interface visual theme",
-        "Hint": "Choose the Age of Vikings textured presentation or the previous classic Crucible-style presentation for the token action ring and actor hotbar.",
+        "Hint": "Choose the Age of Vikings textured presentation or the classic presentation for the token action ring and actor hotbar.",
         "Aov": "Age of Vikings",
         "Classic": "Classic"
       },
@@ -232,7 +161,7 @@
       "CombatTrackingMenu": {
         "Name": "Combat tracking",
         "Label": "Configure combat tracking",
-        "Hint": "Configure Planning initiative behavior, phase validation, movement DEX rounding and timing, and melee engagement reach in one GM-only submenu.",
+        "Hint": "Configure Planning initiative behavior, phase validation, movement DEX rounding, route preview visibility, and RAW automation references in one GM-only submenu.",
         "Title": "Skjaldborg Combat Tracking",
         "Intro": "These world settings control Planning turn behavior, declaration validation, and how movement contributes to DEX and engagement. Phase navigation remains GM-authoritative.",
         "Navigation": {
@@ -241,16 +170,39 @@
         },
         "Movement": {
           "Name": "Movement and DEX",
-          "Hint": "Configure movement penalty rounding and the delay between simultaneous movement checkpoints."
+          "Hint": "Configure movement penalty rounding, simultaneous movement timing, and planned route preview visibility."
         },
-        "Reach": {
-          "Name": "Melee engagement reach",
-          "Hint": "Set the grid-unit contact distance used for short, medium, and long readied melee weapons."
+        "Automation": {
+          "Name": "Automation references",
+          "Hint": "Configure external documents used by Skjaldborg combat automation without hard-coding a single compendium source."
         }
+      },
+      "ReachVisualizerMenu": {
+        "Name": "Reach visualizer",
+        "Label": "Configure reach visualizer",
+        "Hint": "Configure the client-side canvas overlay for readied-weapon engagement reach.",
+        "Title": "Skjaldborg Reach Visualizer",
+        "Intro": "These client settings control the canvas overlay that shows effective reach from each token's currently readied weapon."
       },
       "DynamicPlanningInitiative": {
         "Name": "Use simultaneous live initiative during Planning",
         "Hint": "Optional advanced mode. Planning has no active combatant turn: initiative changes are tracked and re-sorted live, while Next Turn and Next Round advance to the next configured phase. Disable this to retain the normal sequential turn cursor during Planning."
+      },
+      "MovementPlanVisibility": {
+        "Name": "Movement plan preview visibility",
+        "Hint": "Controls who can see planned movement trajectories by hovering over tokens before the Movement phase resolves.",
+        "Everyone": "Everyone sees planned trajectories",
+        "Permission": "Permission based: GM, Owner, or Observer only",
+        "None": "Do not show planned trajectories"
+      },
+      "KnockbackFumbleTable": {
+        "Name": "Knockback Fumbles table",
+        "Hint": "Optional RollTable reference used by failed knockback fumble prompts. Paste a RollTable UUID, world table ID/name, Chaosium CID, or leave blank to use rt..fumbles / the bundled core UUID fallback.",
+        "DropHint": "Drop a RollTable here to fill this reference automatically."
+      },
+      "EvadeFightingDefensively": {
+        "Name": "Treat Evade as Fighting Defensively",
+        "Hint": "When enabled, Evade is tagged for the universal Fighting Defensively option: the combatant forfeits attacks/actions for the round and the first substituted Dodge does not increase the cumulative Dodge/Parry penalty. When disabled, Evade is tagged only for AoV ranged moving-target penalties."
       }
     },
     "Phases": {
@@ -263,7 +215,6 @@
     "Controls": {
       "Enable": "Enable",
       "Disable": "Disable",
-      "OpenHud": "Open combat HUD",
       "Commit": "Commit",
       "Hold": "Hold",
       "SaveMovement": "Save Manual Distance",
@@ -276,8 +227,48 @@
       "Carryover": "Carry Over",
       "PhaseNavigation": "Skjaldborg combat phases",
       "OpenActionRing": "Open action ring",
+      "EnableReachVisualizer": "Show readied weapon reach",
+      "DisableReachVisualizer": "Hide readied weapon reach",
       "Close": "Close",
-      "SetCurrentTurn": "Set Current Turn"
+      "SetCurrentTurn": "Set Current Turn",
+      "Utility": "Utility"
+    },
+    "ReachVisualizer": {
+      "Display": "Display",
+      "Style": "Style",
+      "Enabled": {
+        "Name": "Enable reach overlay",
+        "Hint": "Show effective readied-weapon engagement reach on the canvas."
+      },
+      "Visibility": {
+        "Name": "Visibility",
+        "Hint": "Choose whether reach appears for hovered tokens, all visible tokens, or all visible tokens with active/passive opacity.",
+        "Dynamic": "Dynamic",
+        "Hover": "Hovered token only",
+        "Always": "Always visible"
+      },
+      "Shape": {
+        "Name": "Shape",
+        "Hint": "Use a square-grid outline where supported, or a circular fallback.",
+        "Grid": "Grid outline",
+        "Circle": "Circle"
+      },
+      "Opacity": {
+        "Name": "Opacity",
+        "Hint": "Overlay opacity used outside dynamic visibility mode."
+      },
+      "PassiveOpacity": {
+        "Name": "Passive opacity",
+        "Hint": "Opacity for non-active tokens in dynamic visibility mode."
+      },
+      "ActiveOpacity": {
+        "Name": "Active opacity",
+        "Hint": "Opacity for hovered or controlled tokens in dynamic visibility mode."
+      },
+      "LineWidth": {
+        "Name": "Line width",
+        "Hint": "Canvas line width in pixels."
+      }
     },
     "Hud": {
       "Title": "Skjaldborg",
@@ -312,20 +303,23 @@
       "BaseDex": "Base DEX",
       "FinalDex": "Final DEX",
       "Reactions": "Reactions",
+      "NextReactionPenalty": "Next parry/Dodge penalty: {penalty}%",
       "Status": "Status",
       "Waypoints": "Waypoints",
-      "Destination": "Destination"
+      "Destination": "Destination",
+      "Unknown": "Unknown"
     },
     "ActionCategories": {
       "attack": "Attack",
       "missile": "Missile",
       "knockback": "Knockback",
       "grapple": "Grapple",
-      "defend": "Defend",
+      "defend": "Evade",
       "magic": "Magic",
-      "retreat": "Retreat",
+      "retreat": "Disengage",
       "wait": "Wait",
       "delay": "Delay",
+      "utility": "Utility",
       "other": "Other",
       "flee": "Flee"
     },
@@ -374,7 +368,86 @@
       "FullMovementRule": "Full movement only sets final DEX to 0.",
       "FixedRankRule": "Fixed DEX rank: {value}.",
       "DelayRule": "Delayed to DEX {value}.",
-      "PreventedRule": "Final DEX is 0 or below; the action carries over."
+      "PreventedRule": "Final DEX is 0 or below; the action carries over.",
+      "WeaponDexTitle": "Weapon readiness",
+      "WeaponDexChange": "{actor}: {action} {weapon}. DEX rank -{amount}; initiative {previous} -> {next}."
+    },
+    "RunicMagic": {
+      "Title": "Runic Magic",
+      "Submit": "Cast",
+      "TrackRitual": "Track Ritual",
+      "Round": "Round",
+      "NoCombatRound": "Free",
+      "Mode": "Mode",
+      "RuneScripts": "Rune Scripts",
+      "RuneScript": "Rune Script",
+      "Seidur": "Seidur",
+      "SeidurSpell": "Seidur Spell",
+      "RuneScriptOptions": "Runes & Combat",
+      "Options": "Options",
+      "RuneSummary": "{runes} rune(s), {mp} MP, max effects {effects}",
+      "SeidurSummary": "Realm {realm}, {mp} MP, {locked} locked MP, {time} minutes",
+      "PreparedShort": "prepared",
+      "DexPenalty": "DEX rank penalty",
+      "RollOptions": "Roll",
+      "FlatMod": "Custom",
+      "DecreaseMod": "Decrease modifier",
+      "IncreaseMod": "Increase modifier",
+      "CraftRune": "Craft",
+      "CustomModifier": "Custom",
+      "CraftSkill": "Craft skill",
+      "Prepared": "Prepared",
+      "CustomCraftTarget": "Custom target",
+      "ReadWriteRunesMissing": "Read/Write (runes) is not present on this actor.",
+      "Unavailable": "unavailable",
+      "Resistance": "Resists",
+      "RuneSkill": "Rune Magic check: {skill}",
+      "RuneMagicSkillMissing": "Rune Magic skill unavailable",
+      "SeidurSkill": "Seidur Magic check: {skill}",
+      "SeidurMagicSkillMissing": "Seidur Magic skill unavailable",
+      "NoMagic": "This actor has no Rune Script or Seidur items.",
+      "NoTargets": "No targets",
+      "Targets": "Targets: {targets}",
+      "Unopposed": "No selected targets: unopposed Rune Magic test.",
+      "StateCarving": "Carving is in progress. If not disrupted, this script can be sung in logical round {round}.",
+      "StateReady": "{script} is ready to sing.",
+      "StateFailed": "The Craft attempt failed; a new carving attempt is required next round.",
+      "StateDisrupted": "The carving was disrupted by damage and must restart next round.",
+      "StateResolved": "Rune Magic casting resolved.",
+      "SeidurRule": "Seidur is tracked as a long ritual: 10 minutes per MP invested. It does not use the Rune Script two-round combat timing.",
+      "IntentCarving": "Carving {script}",
+      "ChatCarvingTitle": "Rune Script carving",
+      "ChatCarving": "{actor} carves and dyes {script}. Rune count {runes}; the galdur is timed at DEX rank penalty {dex}.",
+      "ChatCustomCraft": "Craft is being resolved manually at {target}%.",
+      "ChatCarvingRule": "If the runemaster is wounded while carving and dyeing the runes, the delicate work is disrupted and a new attempt is required next melee round.",
+      "ChatTargets": "Targets: {targets}",
+      "ChatCastTitle": "Rune Script galdur",
+      "ChatCast": "{actor} sings the galdur for {script}. DEX rank penalty {dex}.",
+      "ChatDisruptedTitle": "Rune Script disrupted",
+      "ChatDisrupted": "{actor}'s carving of {script} is disrupted by damage.",
+      "ChatDisruptedRule": "The casting procedure resets; a new attempt must be made in the next melee round.",
+      "ChatSeidurTitle": "Seidur ritual",
+      "ChatSeidur": "{actor} tracks the Seidur ritual {spell}. Realm {realm}; {mp} MP; {locked} locked MP; {time} minutes.",
+      "CustomCraftManual": "Resolve Craft manually at {target}%.",
+      "ResultNarrative": "Rune Magic result",
+      "SeidurResultNarrative": "Seidur Magic result",
+      "ResistanceActiveLabel": "POW",
+      "ResistancePassiveLabel": "POW",
+      "TargetUnavailable": "The target {target} is unavailable for Runic Magic resistance.",
+      "Results": {
+        "Critical": "The magical rune script works with double effectiveness, producing an effect twice as potent. If it inflicts damage, that damage is doubled. If the script has an intended duration, the runemaster may choose to extend it. The required magic points are expended.",
+        "Special": "The magical rune script works with 1.5 x effectiveness. The required magic points are expended.",
+        "Success": "The magical rune script works just as the runemaster intended, with the predicted intensity. The required magic points are expended.",
+        "Failure": "A mistake was made in the singing of the galdur, and the magical effect fails to manifest. The required magic points are still locked in the carved runes of the script, and the runemaster may make another attempt to sing the galdur and unleash its power in the next melee round with a new Rune Magic roll.",
+        "Fumble": "The magical effect manifests, but it is spectacularly twisted. One of the runes of the script, chosen by the gamemaster, has its meaning and Use/Effect reversed, with disastrous repercussions. The required magic points are expended."
+      },
+      "SeidurResults": {
+        "Critical": "The practitioner can touch the threads of fate with great precision and may choose to increase any one spell element by up to three additional levels, to a maximum level of 6.",
+        "Special": "The spell works even better than expected. The practitioner may choose to increase Dimension by one additional level, to a maximum level of 6.",
+        "Success": "The spell works as intended.",
+        "Failure": "The spell fails to produce any magical effect. The practitioner may attempt the same ritual again on the next day.",
+        "Fumble": "The practitioner loses control of the magical forces, and they act in some way opposite to how it was intended."
+      }
     },
     "MovementAutomation": {
       "Engaged": "Engaged",
@@ -399,7 +472,7 @@
       "InvalidPhase": "That phase transition is not legal from the current phase.",
       "MovementRunning": "Movement automation is still resolving. Wait for movement to complete before advancing.",
       "MovementPlansPending": "Cannot begin Movement: the plans for {names} are still synchronizing or unfinished. Wait for the movement-plan confirmation, or clear and plan those routes again.",
-      "MovementRouteTruncated": "A movement route exceeded {limit} points and was truncated. Open the advanced movement diagnostics for details.",
+      "MovementRouteTruncated": "A movement route exceeded {limit} points and was truncated. Enable Debug logging for full movement diagnostics.",
       "UnknownMovementPlan": "one or more combatants",
       "NoCombatant": "Select or activate a combatant first.",
       "Uncommitted": "Cannot advance: these combatants have not committed or held intent: {names}",
@@ -418,10 +491,39 @@
       "SelectWeapon": "Select a carried weapon to roll.",
       "MagicPreparationFailed": "The magic preparation state could not be updated. See the browser console for details.",
       "NoItemDescription": "{item} has no description to share.",
-      "AttackTargetRequired": "Target exactly one Token before opening an attack roll.",
-      "SingleAttackTargetRequired": "The attack workflow currently requires exactly one targeted Token.",
+      "AttackTargetRequired": "Target at least one Token before opening an attack roll.",
+      "SingleAttackTargetRequired": "The attack workflow requires one resolving target at a time.",
       "AttackTargetUnavailable": "The targeted Token does not represent an available actor.",
-      "NoAttackWeapons": "{actor} has no attack-ready weapon. Ready a weapon, or add a Hand-to-hand or natural weapon, before opening an attack roll."
+      "NoAttackWeapons": "{actor} has no attack-ready weapon. Ready a weapon, or add a Hand-to-hand or natural weapon, before opening an attack roll.",
+      "CannotRetreatFromMounted": "A fighter cannot normally disengage from a mounted opponent unless they can hide, interpose an obstacle, or are defended by another combatant. Use Flee or ask the GM for an override.",
+      "RetreatDefensiveOnly": "This combatant is making a fighting retreat and can only declare defensive actions until the retreat resolves.",
+      "MissileTargetRequired": "Target at least one Token before opening a missile roll.",
+      "SingleMissileTargetRequired": "The missile workflow requires one resolving target at a time.",
+      "MissileTargetUnavailable": "The targeted Token does not represent an available actor.",
+      "NoMissileWeapons": "{actor} has no readied missile or thrown weapon. Ready a missile or thrown weapon before opening a missile roll.",
+      "NoReadiedMissileWeapon": "The actor no longer has a readied missile or thrown weapon.",
+      "NoMissileAmmunition": "{actor} has no available ammunition for {weapon}. Add carried gear named arrow, bolt, or round before firing.",
+      "AmmunitionRequired": "Select available ammunition before firing this weapon.",
+      "OpenCombatCard": "Resolve or close the existing AoV combat chat card before starting another attack workflow.",
+      "NoDefenderDefense": "{actor} has no weapon or Dodge skill available for the defender roll.",
+      "AmmunitionDepleted": "The selected ammunition is depleted.",
+      "AmmunitionDeductFailed": "The missile action could not be completed or ammunition could not be deducted. See the browser console for details.",
+      "KnockbackTargetRequired": "Select at least one target before attempting a knockback.",
+      "SingleKnockbackTargetRequired": "The knockback workflow requires one resolving target at a time.",
+      "NoKnockbackWeapons": "{actor} has no readied weapon, shield, natural weapon, or hand-to-hand attack available for a knockback.",
+      "GrappleTargetRequired": "Select at least one target before attempting a grapple.",
+      "SingleGrappleTargetRequired": "The grapple workflow requires one resolving target at a time.",
+      "NoGrappleSkill": "{actor} has no Grapple skill available.",
+      "SocketUserMissing": "The target user for this combat prompt is unavailable.",
+      "SocketUserInactive": "{user} is not active and cannot receive this combat prompt.",
+      "SocketUserTimeout": "{user} did not acknowledge the combat prompt.",
+      "NoDefensePromptUser": "No active owner or GM is available to receive the defender roll dialog.",
+      "NoDefensePromptRoute": "The defender roll belongs on another user's client, but no routing callback was available.",
+      "DefenseActorUnavailable": "The defender actor is unavailable on this client.",
+      "DefenseActorNotOwned": "You do not control the defender actor.",
+      "DefenseCombatCardUnavailable": "The AoV combat chat card was not available on this client in time for the defender roll.",
+      "DefensePromptCancelled": "No defense was added to the opposed combat card.",
+      "EvadeEffectUnavailable": "The Evading status effect could not be applied to this actor."
     },
     "ActionRing": {
       "IntentHint": "Click to commit. Shift-click or right-click for details.",
@@ -438,6 +540,7 @@
         "Unprepared": "Unprepared — click to prepare"
       },
       "Phase": "Current Skjaldborg phase",
+      "IntentControlHint": "Left click - interact. Right click - set intent.",
       "Tabs": {
         "Combat": "Combat and intent",
         "Skills": "Skills",
@@ -508,7 +611,11 @@
       },
       "AddNpcWound": "Add NPC wound damage",
       "DockMove": "Click to collapse or expand; drag around the portrait to dock action panels left, right, above, or below.",
-      "ReactionControlHint": "Reactions: left-click to add one; right-click to remove one."
+      "ReactionControlHint": "Reactions: left-click to add one; right-click to remove one.",
+      "ReactionPenaltyHint": "Reactions used: {count}; next parry/Dodge {penalty}%",
+      "HitLocationGrappledTooltip": "{location} is grappled by {source}.",
+      "HitLocationImmobilizedTooltip": "{location} is immobilized by {source}.",
+      "UnknownGrappler": "unknown grappler"
     },
     "Tracker": {
       "IntentCategory": "Declared action: {category}",
@@ -518,10 +625,103 @@
       "EngagedWith": "Engaged with {names}",
       "ReadiedWeapon": "Readied weapon: {weapon}",
       "ActionsRemaining": "{count} unresolved action(s)",
-      "SimultaneousGroup": "Member of a simultaneous resolution group"
+      "SimultaneousGroup": "Member of a simultaneous resolution group",
+      "CantEngage": "Can't Engage: moved {gridUnits} grid units; engagement limit {limit} grid units.",
+      "HiddenMovement": "???",
+      "HiddenMovementPlan": "Movement: {status}; hidden by permissions"
+    },
+    "Delay": {
+      "Title": "Delay Action",
+      "Apply": "Apply Delay",
+      "RawHint": "Delay to a later DEX rank, or wait for another combatant and resolve the ordering with INT.",
+      "Mode": "Delay mode",
+      "ToDex": "Delay to DEX rank",
+      "ForCombatant": "Delay for combatant",
+      "DexRank": "DEX rank",
+      "EndOfRound": "End of round (DEX 1)",
+      "TargetCombatant": "Combatant",
+      "NoTargets": "No other combatants",
+      "Position": "Order",
+      "Before": "Before target",
+      "After": "After target",
+      "WaitingFor": "Waiting for {combatant}"
+    },
+    "RollSummary": {
+      "Total": "Total {total}%"
+    },
+    "Utility": {
+      "Title": "Utility",
+      "Apply": "Apply Utility Options",
+      "ApplyShort": "Apply",
+      "Status": "Status",
+      "Active": "Active",
+      "Ready": "Ready",
+      "Summary": "Readied: {readied}; Shield: {shield}",
+      "Sections": {
+        "Weapons": "Equipped weapons",
+        "TwoWeapon": "Two Weapon Fighting",
+        "Shield": "Shield",
+        "Shieldwall": "Shieldwall"
+      },
+      "Tabs": {
+        "Weapons": "Weapons",
+        "TwoWeapon": "Two-Weapon",
+        "Shield": "Shield",
+        "Shieldwall": "Shieldwall"
+      },
+      "RightHand": "Right hand",
+      "LeftHand": "Left hand",
+      "RightHandShort": "Right",
+      "LeftHandShort": "Left",
+      "UnlimitedWeapons": "NPC/monster: no readied-weapon limit",
+      "TwoWeaponEnabled": "Enable two-weapon attack option",
+      "TwoWeaponAvailable": "Two eligible readied weapons are available.",
+      "TwoWeaponUnavailable": "Ready two non-natural weapons with 100% or higher skill.",
+      "PrimaryWeapon": "Primary:",
+      "SecondaryWeapon": "Secondary:",
+      "PrimaryChance": "Primary %",
+      "SecondaryChance": "Second %",
+      "Shield": "Shield",
+      "CoveredLocations": "Covered hit locations",
+      "CoveredCount": "{count}/3 covered",
+      "NoCoveredLocations": "No active cover locations",
+      "ShieldLocationWarning": "RAW shield cover normally protects exactly three hit locations.",
+      "ShieldwallEnabled": "Shieldwall active",
+      "ShieldwallStateHint": "Declare shieldwall state for manual adjudication.",
+      "ShieldwallShort": "Wall"
     },
     "StatusEffects": {
-      "Engaged": "Engaged"
+      "Engaged": "Engaged",
+      "Mounted": "Mounted",
+      "Disengaging": "Disengaging",
+      "Grappled": "Grappled",
+      "Immobilized": "Immobilized",
+      "Evading": "Evading",
+      "ReactionPenalty": "Reaction penalty",
+      "Impaled": "Impaled",
+      "Injury": "Injury"
+    },
+    "DamageEffects": {
+      "UnknownWeapon": "weapon",
+      "ImpaledName": "Impaled: {target}",
+      "ImpaledDescription": "{weapon} is stuck in {target}. No healing of this injury until the weapon is removed. Attacker may withdraw it later with half weapon skill; target may pull it out with (STR+CON)x2. Moving while impaled causes half normal weapon damage per round. If armor stopped penetration, remove this effect.",
+      "InjuryName": "Injury {severity}: {target}",
+      "InjuryDescriptions": {
+        "Leg1x": "Leg can't be used. Apply Prone. No further action this round. Prone attack penalties apply.",
+        "Arm1x": "Arm can't be used. Drop unsecured held items. The character may continue with other usable limbs.",
+        "Abdomen1x": "Both legs can't be used. Apply Prone. Bleed out to death within 10 minutes without First Aid or healing.",
+        "Chest1x": "Apply Prone. Cannot act. Bleed out to death within 10 minutes without First Aid.",
+        "Head1x": "Unconscious and Prone. Death within 5 minutes unless First Aid or healing restores at least 1 HP.",
+        "Location1x": "Location can't be used. Apply the appropriate RAW location consequence.",
+        "Limb2x": "Damage from this single blow is capped at 2x location HP for total HP loss. Functionally incapacitated and in shock until healed.",
+        "Vital2x": "Unconscious and Prone. Lose 1 HP per combat round until First Aid or healing is applied.",
+        "Limb3x": "Limb is severed or irrevocably maimed. Functionally incapacitated. Severed limbs require extraordinary regrowth; maiming must be fully healed within 10 minutes or the limb remains useless.",
+        "Vital3x": "Instant death."
+      }
+    },
+    "MountedCombat": {
+      "CapSummary": "Mounted cap: weapon {weapon}% / Ride {ride}% => {cap}%",
+      "RideUnavailable": "Mounted cap: Ride skill unavailable"
     },
     "Weapons": {
       "WeaponToDraw": "Weapon to draw",
@@ -549,19 +749,50 @@
       "Title": "Attack Roll",
       "Target": "Target",
       "Weapon": "Weapon",
+      "TwoWeaponHalfSkill": "1/2 Skill",
+      "TwoWeaponHalfSkillTooltip": "Use the RAW two-weapon half-skill subdivision for this attack.",
       "Attack": "Attack",
       "Situation": "Situation",
       "Damage": "Damage",
       "Augmentation": "Augmentation",
       "Skill": "Skill",
+      "Aimed": "Aimed",
+      "AimedLocation": "Location",
+      "AimedPenalty": "Aimed penalty",
+      "AimedPenaltyLimb": "-20%",
+      "AimedPenaltyTorso": "-40%",
+      "AimedNoLocations": "The target has no selectable hit location or equipped weapon.",
+      "AimedLocationUnavailable": "The aimed hit location is no longer available; using the normal hit-location workflow.",
+      "AimedEquipmentOption": "Weapon: {weapon}",
+      "AimedEquipmentUnavailable": "The aimed weapon or shield is no longer available; using the normal hit-location workflow.",
+      "AimedEquipmentDamageCard": "Aimed: {weapon} takes {weaponDamage} damage from {damage} rolled damage.",
+      "Disarm": "Disarm",
+      "DisarmTargetWeapon": "Target weapon",
+      "DisarmMode": "Method",
+      "DisarmModeStrikeWeapon": "Strike the Weapon",
+      "DisarmModeHitFlat": "Hit with the Flat",
+      "DisarmModeEntangle": "Entangle",
+      "DisarmPenalty": "Disarm penalty",
+      "DisarmPenaltyNone": "0%",
+      "DisarmPenaltyAverage": "-20%",
+      "DisarmPenaltyHard": "-40%",
+      "DisarmTargetTwoHanded": "2H",
+      "DisarmTargetTwoHandedTooltip": "Target weapon held two-handed",
+      "DisarmNoWeapons": "The target has no equipped weapon or shield to disarm.",
+      "Stun": "Stun",
+      "StunLocation": "Location",
+      "StunPenalty": "Penalty",
+      "StunPenaltyHead": "-40%",
+      "StunNoHead": "The target has no selectable hit location.",
+      "StunHeadUnavailable": "The selected Stun hit location is no longer available.",
       "Passion": "Passion",
       "Devotion": "Devotion",
       "Custom": "Custom",
       "CustomReason": "Reason",
       "RollAttack": "Attack",
-      "Summary": "Base {base}% · Situation {situation}% · Augment {augment}%",
-      "ScaffoldHint": "This first workflow stage prepares and publishes the attack request. Attack resolution and chat-card automation will be added later.",
-      "WorkflowQueued": "Attack workflow request prepared. Resolution automation is not enabled yet.",
+      "Summary": "Base {base}% · Situation {situation}% · Aimed {aimed}% · Disarm {disarm}% · Stun {stun}% · Augment {augment}%",
+      "ScaffoldHint": "This workflow stage sends the attack and target defense into the core Age of Vikings opposed combat card.",
+      "WorkflowQueued": "Core opposed attack workflow started.",
       "Modifiers": {
         "VeryEasy": "Very Easy",
         "Easy": "Easy",
@@ -570,7 +801,281 @@
         "VeryHard": "Very Hard"
       },
       "DamageTypeFixedTooltip": "{label} ({abbreviation})",
-      "DamageTypeSwitchTooltip": "{label} ({abbreviation}). Click to switch to {nextLabel} ({nextAbbreviation}). Weapon type: {sourceLabel} ({sourceAbbreviation})."
+      "DamageTypeSwitchTooltip": "{label} ({abbreviation}). Click to switch to {nextLabel} ({nextAbbreviation}). Weapon type: {sourceLabel} ({sourceAbbreviation}).",
+      "MeleeMissileDamageTooltip": "Melee use of {sourceLabel} ({sourceAbbreviation}) is treated as {label} ({abbreviation}). Use the Missile action for the weapon's ranged damage type."
+    },
+    "StunDialog": {
+      "ResultTitle": "Stun Result",
+      "ResistanceActiveLabel": "Stun Damage",
+      "ResistancePassiveLabel": "Head HP",
+      "RecoveryTitle": "Stun Recovery",
+      "RecoveryLabel": "CON x1",
+      "RecoverButton": "Roll CON x1",
+      "MinimumDamageRow": "Minimum damage {damage} - armor {armor} = {remaining}",
+      "HeadLocationRow": "Head: {location}",
+      "StunApplied": "{target} is stunned and unconscious.",
+      "StunResisted": "{target} resists the stunning blow.",
+      "NoStunDamage": "The blow does not penetrate head armor; no stun resistance roll is needed.",
+      "UnsupportedDamageFormula": "Skjaldborg could not calculate minimum Stun damage from this weapon formula.",
+      "MissingActors": "The Stun attacker or target is no longer available.",
+      "MissingStatusTarget": "The stunned actor or head location is no longer available.",
+      "RecoveryPrompt": "{target} may roll CON x1 to recover consciousness.",
+      "RecoverySuccess": "{target} recovers consciousness and takes 1 point of head damage.",
+      "RecoveryFailure": "{target} remains stunned and takes 1 point of head damage.",
+      "RecoveryAlreadyResolved": "This Stun recovery prompt has already been resolved.",
+      "StatusName": "Stunned"
+    },
+    "DisarmDialog": {
+      "ResultTitle": "Disarm Result",
+      "TargetWeaponUnavailable": "The selected Disarm target weapon is no longer available.",
+      "TargetWeaponRow": "Target weapon: {weapon}",
+      "AttackerWeaponRow": "Attacker weapon: {weapon}",
+      "StrikeWeaponDamageCard": "Disarm: {weapon} takes {weaponDamage} damage from {damage} rolled damage.",
+      "StrikeWeaponDamaged": "{weapon} takes {weaponDamage} damage.",
+      "StrikeWeaponNoDamage": "{weapon} takes no damage; rolled damage {damage} did not exceed its current hit points.",
+      "FlatDamageCard": "Disarm: hit with the flat for {damage} damage.",
+      "FlatActiveLabel": "Rolled damage",
+      "FlatPassiveLabel": "Target STR",
+      "FlatPassiveTwoHandedLabel": "Target STR x 1.5",
+      "FlatSuccessDistance": "{weapon} is knocked from the target's hand and flies {distance} meter(s).",
+      "FlatSuccessFeet": "{weapon} is knocked from the target's hand and lands at their feet.",
+      "FlatFailed": "{weapon} is struck, but remains in hand.",
+      "EntangleRequiresSpecial": "Entangle requires a special or critical attack success; no disarm occurs.",
+      "EntangleActiveLabel": "Attacker STR",
+      "EntanglePassiveLabel": "Target STR",
+      "EntangleCounterActiveLabel": "Target STR",
+      "EntangleCounterPassiveLabel": "Attacker STR",
+      "EntangleSuccess": "{weapon} is wrenched from the defender's hand.",
+      "EntangleCounterSuccess": "The defender takes {weapon} from the attacker.",
+      "EntangleCounterFailed": "The defender fails to take the entangling weapon; no disarm occurs."
+    },
+    "TargetQueue": {
+      "Title": "{workflow} target queue",
+      "Body": "Resolve each remaining target when the current AoV combat card is closed.",
+      "Resolve": "Resolve",
+      "Resolved": "Resolved",
+      "Pending": "Pending",
+      "NoTargets": "No current targets",
+      "MissingDocuments": "The queued target, actor, or item is no longer available.",
+      "Workflows": {
+        "attack": "Attack",
+        "missile": "Missile",
+        "knockback": "Knockback",
+        "grapple": "Grapple"
+      }
+    },
+    "SplitAttack": {
+      "Title": "Split Attack",
+      "Body": "{actor} splits the attack, second attack taking place at DEX rank {dex}.",
+      "Resolve": "Resolve Split Attack",
+      "Toggle": "Split Attack",
+      "Hint": "Split natural weapon skill into two attacks. Each value must be 50% or higher and the total cannot exceed natural skill.",
+      "First": "First Attack",
+      "Second": "Second Attack",
+      "Unavailable": "Requires natural weapon skill of 100% or higher. Temporary, magical, and dialog modifiers do not count.",
+      "ForcedLabel": "Split follow-up: base chance {chance}%",
+      "Invalid": "Split attacks must both be at least 50%, and their combined chance cannot exceed natural weapon skill."
+    },
+    "DisengageDialog": {
+      "Title": "Disengage",
+      "Intro": "Choose how this combatant attempts to break close combat engagement.",
+      "Confirm": "Disengage",
+      "OpportunityAttacker": "Opponent making the immediate Flee attack",
+      "OpportunityMode": {
+        "Label": "Flee opportunity attacks",
+        "One": "One opponent",
+        "All": "All opponents"
+      },
+      "NoEngagedOpponents": "No engaged opponents",
+      "FleeOpportunityTitle": "Flee opportunity attack",
+      "FleeOpportunityBody": "{attacker} may make one immediate attack against {target}. This attack cannot be parried or dodged and does not consume the attacker's normal action.",
+      "Methods": {
+        "retreat": {
+          "Label": "Retreat",
+          "Description": "Spend this combat round doing nothing except Parry or Dodge. Engagement clears before the next Planning phase."
+        },
+        "flee": {
+          "Label": "Flee",
+          "Description": "Run immediately. Selected engaged opponents get immediate attacks which cannot be parried or dodged."
+        },
+        "knockback": {
+          "Label": "Knockback",
+          "Description": "A successful knockback attack can clear engagement with the knocked-back opponent."
+        }
+      },
+      "HeaderTitle": "Break close combat",
+      "EngagedWith": "Engaged with: {opponents}",
+      "Badge": "Foes",
+      "Opponents": "Engaged opponents",
+      "OpponentSelectionHint": "Select this opponent.",
+      "NoEngagedOpponentsHint": "No currently tracked close-combat opponents.",
+      "UnknownOpponent": "Unknown opponent",
+      "OpponentsHint": "Select opponents to disengage from.",
+      "OpponentSelectionTooltip": "Toggle whether {opponent} is included in this disengagement declaration."
+    },
+    "MissileDialog": {
+      "Title": "Missile Roll",
+      "Target": "Target",
+      "Weapon": "Weapon",
+      "Missile": "Missile",
+      "Ammunition": "Ammunition",
+      "Aimed": "Aimed",
+      "AimedNoLocations": "The target has no selectable hit location or equipped weapon.",
+      "IntoMelee": "Into Melee",
+      "CombatantCount": "Combatants",
+      "IntoMeleeNone": "None",
+      "IntoMeleeSummary": "{count} bodies",
+      "IntoMeleeResultTitle": "Missile Into Melee",
+      "IntoMeleeRandomTarget": "The missile attack missed the intended target; roll for random target.",
+      "IntoMeleeRollRow": "Roll {roll} | Intended {adjusted}% | Melee {normal}%",
+      "ShieldCoverTitle": "Shield Cover",
+      "ShieldCoverTakesDamage": "The shield takes {damage} damage.",
+      "ShieldCoverNoDamage": "The shield takes no damage.",
+      "ShieldCoverDamageHeader": "Damage: {final} ({original} - {shield} - {armor})",
+      "ShieldCoverDetailLocation": "Protected location: {location}",
+      "ShieldCoverDetailOriginal": "Original damage: {damage}",
+      "ShieldCoverDetailShield": "Shield absorbs: {shield}",
+      "ShieldCoverDetailArmor": "Armor absorbs: {armor}",
+      "ShieldCoverDetailFinal": "Final damage: {final}",
+      "ShieldCoverMarkerTooltip": "Shield cover: {shield} protects {locations}",
+      "ShieldCoverUnknownLocations": "configured locations",
+      "Range": "Range",
+      "RangeMedium": "Medium (1/2)",
+      "RangeLong": "Long (1/4)",
+      "RangeNone": "Effective",
+      "RangeProjectileOnly": "Only projectile missile weapons can use medium or long range.",
+      "RollMissile": "Missile",
+      "Summary": "Base {base}% · Situation {situation}% · Aimed {aimed}% · Range {range} · Into Melee {intoMelee} · Augment {augment}%",
+      "ScaffoldHint": "This workflow stage sends the missile attack and target defense into the core Age of Vikings opposed combat card. Required ammunition is deducted when the request is submitted.",
+      "WorkflowQueued": "Core opposed missile workflow started.",
+      "NoAmmunition": "No ammunition available",
+      "NoAmmunitionRequired": "No ammunition required",
+      "AmmunitionReady": "Ammunition selected",
+      "AmmunitionQuantity": "{quantity} remaining"
+    },
+    "KnockbackDialog": {
+      "Title": "Knockback Roll",
+      "Weapon": "Weapon",
+      "Knockback": "Knockback",
+      "Resistance": "Resistance",
+      "RollKnockback": "Knockback",
+      "Summary": "Base {base}% · Situation {situation}% · Augment {augment}%",
+      "ScaffoldHint": "This starts a core Age of Vikings combat attack card. When the attack resolves successfully, a RAW knockback resistance card is created.",
+      "WorkflowQueued": "Knockback attack card prepared.",
+      "ResistanceSummary": "STR+SIZ {active} vs SIZ+DEX {passive}",
+      "ActiveResistanceLabel": "STR+SIZ",
+      "PassiveResistanceLabel": "SIZ+DEX",
+      "MissingResistanceActors": "Unable to create the knockback resistance card because one of the actors is unavailable.",
+      "DistanceRoll": "Knockback distance",
+      "OutcomeTitle": "Knockback outcome",
+      "TargetKnockedBack": "{target} is knocked back {distance} grid(s).",
+      "TargetFallsProne": "{target} falls prone.",
+      "TargetDropsWeapons": "{target} drops held weapon(s) or shield.",
+      "DexRecoveryRoll": "{actor} DEX×5 recovery roll vs {target}% — {result}",
+      "AttackerFalls": "{actor} fails to keep footing and falls prone.",
+      "AttackerBouncesBack": "{actor} bounces off the target and is knocked back {distance} grid(s).",
+      "FumblePromptTitle": "Knockback fumble",
+      "FumblePromptBody": "Resolve with the configured Fumbles table.",
+      "RollFumblesTable": "Roll Fumbles Table",
+      "ResistancePublicSummary": "STR+SIZ vs SIZ+DEX after successful attack",
+      "RecoveryTitle": "DEX×5 recovery",
+      "RecoveryLabel": "DEX×5",
+      "DistanceLabel": "Distance roll",
+      "RollResult": "{label}: {roll}",
+      "ResultTitle": "Knockback Result",
+      "FailedRecoveryTitle": "Failed Knockback: DEX×5",
+      "TargetKnockedBackCompact": "{target} is knocked back {distance} grid(s).{additions}",
+      "FallsProneAddition": "Falls prone.",
+      "DropsWeaponsAddition": "Drops held weapon(s) or shield.",
+      "AttackerFallsCompact": "{actor} falls prone.",
+      "AttackerBouncesBackCompact": "{actor} bounces back {distance} grid(s).",
+      "RecoveryChoiceTitle": "Failed Knockback Recovery",
+      "RecoveryChoiceIntro": "DEX×5 failed with {roll}.",
+      "RecoveryChoicePrompt": "Choose whether the attacker falls prone or bounces back from the target.",
+      "ChooseProne": "Fall prone",
+      "ChooseBounce": "Bounce back",
+      "AttackerChoosesProneCompact": "{actor} falls prone.",
+      "AttackerChoosesBounceCompact": "{actor} chooses to bounce back {distance} grid(s).",
+      "AttackerKeepsFootingCompact": "{actor} keeps footing.",
+      "FumblePromptLabel": "Failed knockback"
+    },
+    "GrappleDialog": {
+      "Title": "Grapple Roll",
+      "Grapple": "Grapple",
+      "GrappleSkill": "Grapple",
+      "ActionMode": "Action",
+      "TargetLocation": "Target location",
+      "RollD20Location": "Roll D20 location",
+      "ManualLocation": "Manual override",
+      "RAW": "RAW",
+      "RawHint": "RAW: a successful initial Grapple catches the hit location rolled; weapon parries catch the weapon arm; shield parries grasp the shield.",
+      "Resistance": "Resistance",
+      "ResistancePublicSummary": "Initial hold uses Grapple. Immobilize uses Grappler STR vs Target STR; Throw uses Grappler STR+DEX vs Target SIZ+DEX after a maintained hold.",
+      "RollGrapple": "Grapple",
+      "WorkflowQueued": "Grapple workflow prepared.",
+      "ScaffoldHint": "The Grapple workflow uses the AoV combat card first, then suppresses normal damage and resolves the RAW hold, immobilize, or throw branch after the card is closed.",
+      "Summary": "Base {base}% · Situation {situation}% · Augment {augment}%",
+      "ResultTitle": "Grapple Result",
+      "MissingResistanceActors": "Grapple resistance actors are unavailable.",
+      "ImobilizeTypoGuard": "",
+      "ImmobilizeActiveResistanceLabel": "Grappler STR",
+      "ImmobilizePassiveResistanceLabel": "Target STR",
+      "ThrowActiveResistanceLabel": "Grappler STR+DEX",
+      "ThrowPassiveResistanceLabel": "Target SIZ+DEX",
+      "WeaponArmChoiceTitle": "Grappled Hit Location",
+      "WeaponArmChoicePrompt": "The target parried with a weapon. Choose which hit location was caught.",
+      "ConfirmLocation": "Confirm",
+      "Shield": "shield",
+      "WeaponArm": "weapon arm",
+      "Hold": "hold",
+      "UnknownLocation": "unknown location",
+      "NoActiveHold": "No matching active Grappled hold was found.",
+      "GraspedLocationRow": "Location: {location} [{range}]",
+      "GraspedItemRow": "Object: {item}",
+      "InitialDodged": "{target} dodges the initial grapple. No hold is established.",
+      "InitialBlocked": "{target} blocks the hold with {defense}. No hold is established.",
+      "InitialHoldEstablished": "{attacker} establishes a grapple hold on {target}.",
+      "HoldBroken": "{attacker} fails to maintain the hold on {target}; the grapple is broken.",
+      "ImmobilizeSucceeded": "{attacker} immobilizes {target}'s {location}.",
+      "ImmobilizeFailed": "{attacker} keeps hold of {target}, but does not immobilize the grasped limb/object.",
+      "ThrowFailedHoldMaintained": "{attacker} fails to throw {target}, but maintains the grapple.",
+      "ThrowSucceeded": "{attacker} throws {target} {distance} grid unit(s).",
+      "ThrowDestinationTitle": "Choose Throw Direction",
+      "ThrowDestinationPrompt": "Choose where to throw the target: up to {distance} grid unit(s).",
+      "ThrowDestinationCanvasHint": "Choose any highlighted square for the grapple throw, up to {distance} grid unit(s).",
+      "LandingRollLabel": "Thrown landing: DEX×5",
+      "LandingSucceeded": "{target} succeeds at DEX×5 ({result}, roll {roll}) and avoids landing damage.",
+      "LandingFailedDamageApplied": "{target} fails DEX×5 ({result}, roll {roll}); landing roll {hitRoll} hits {location}. Damage {grossDamage} − armor {armor} = {netDamage}, applied.",
+      "LandingFailedDamagePosted": "{target} fails DEX×5 ({result}, roll {roll}); landing roll {hitRoll} hits {location}. Damage {grossDamage} − armor {armor} = {netDamage}. Apply manually if needed.",
+      "Modes": {
+        "Grapple": "Establish Hold",
+        "Immobilize": "Immobilize Held Location",
+        "Throw": "Throw Grappled Target"
+      },
+      "Submit": {
+        "grapple": "Grapple",
+        "immobilize": "Immobilize",
+        "throw": "Throw"
+      },
+      "Direction": {
+        "n": "North",
+        "ne": "North-East",
+        "e": "East",
+        "se": "South-East",
+        "s": "South",
+        "sw": "South-West",
+        "w": "West",
+        "nw": "North-West",
+        "GridOffset": "{dx}, {dy}"
+      },
+      "GraspedLocationInline": "Grappled location: {location}{range}.",
+      "GraspedItemInline": "Grappled object: {item}."
     }
+  },
+  "COMBAT": {
+    "ToggleVis": "Toggle visibility",
+    "ToggleDead": "Toggle defeated",
+    "ToggleDefeated": "Toggle defeated",
+    "PingCombatant": "Ping combatant"
   }
 }

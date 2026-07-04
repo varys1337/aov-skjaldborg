@@ -1,0 +1,104 @@
+<div class="skj-roll-dialog skj-roll-dialog--grapple skj-attack-roll-dialog skj-grapple-roll-dialog">
+  <header class="skj-roll-dialog__header skj-attack-roll-dialog__header">
+    <div class="skj-roll-dialog__identity skj-attack-roll-dialog__identity">
+      <div class="skj-roll-dialog__target-summary skj-attack-roll-dialog__target-summary">
+        <span class="skj-roll-dialog__actor skj-attack-roll-dialog__actor">{{actorName}}</span>
+        <div class="skj-roll-dialog__target-list" aria-label="{{localize "AOV_SKJALDBORG.AttackDialog.Target"}}">
+          {{#each targets}}
+          <button type="button" class="skj-roll-dialog__target-chip {{#if active}}is-active{{/if}}" data-target-key="{{key}}" title="{{name}}">
+            <span class="skj-roll-dialog__target-portrait skj-attack-roll-dialog__target-portrait" aria-hidden="true">
+              {{#if img}}
+                {{#if imgIsVideo}}
+                <video src="{{img}}" autoplay muted loop playsinline></video>
+                {{else}}
+                <img src="{{img}}" alt="" />
+                {{/if}}
+              {{else}}
+              <i class="fa-solid fa-user-shield"></i>
+              {{/if}}
+            </span>
+            <span>{{name}}</span>
+          </button>
+          {{else}}
+          <span class="skj-roll-dialog__target-empty">{{localize "AOV_SKJALDBORG.TargetQueue.NoTargets"}}</span>
+          {{/each}}
+        </div>
+      </div>
+      <label class="skj-roll-dialog__control skj-attack-roll-dialog__weapon">
+        <span>{{localize "AOV_SKJALDBORG.GrappleDialog.GrappleSkill"}}</span>
+        <select name="weaponId" class="skj-roll-dialog__select skj-attack-roll-dialog__weapon-select">
+          {{#each weapons}}
+          <option value="{{id}}" {{#if selected}}selected{{/if}}>{{label}}</option>
+          {{/each}}
+        </select>
+      </label>
+    </div>
+
+    <div class="skj-roll-dialog__rating-card skj-attack-roll-dialog__target-card" data-tooltip="{{initialSummary}}" aria-label="{{initialSummary}}">
+      <span class="skj-roll-dialog__label skj-attack-roll-dialog__target-label">{{localize "AOV_SKJALDBORG.GrappleDialog.Grapple"}}</span>
+      <strong data-target-number>{{targetNumber}}%</strong>
+      <span data-target-caption>{{localize "AOV_SKJALDBORG.AttackDialog.Modifiers.Standard"}}</span>
+    </div>
+  </header>
+
+  <section class="skj-roll-dialog__body skj-attack-roll-dialog__body">
+    <div class="skj-roll-dialog__row skj-attack-roll-dialog__row skj-roll-dialog__row--grapple-mode">
+      <label for="skj-grapple-mode">{{localize "AOV_SKJALDBORG.GrappleDialog.ActionMode"}}</label>
+      <select id="skj-grapple-mode" name="mode">
+        {{#each modes}}
+        <option value="{{value}}" {{#if selected}}selected{{/if}} {{#if disabled}}disabled{{/if}}>{{label}}</option>
+        {{/each}}
+      </select>
+    </div>
+
+    <fieldset class="skj-roll-dialog__augment skj-attack-roll-dialog__fieldset skj-grapple-location-fieldset" data-grapple-location-section>
+      <legend>{{localize "AOV_SKJALDBORG.GrappleDialog.TargetLocation"}}</legend>
+      <div class="skj-roll-dialog__segments skj-attack-roll-dialog__segments skj-grapple-location-segments">
+        <label class="skj-roll-dialog__segment skj-attack-roll-dialog__segment">
+          <input type="radio" name="locationMode" value="roll" checked />
+          <span>{{localize "AOV_SKJALDBORG.GrappleDialog.RollD20Location"}}</span>
+        </label>
+        <label class="skj-roll-dialog__segment skj-attack-roll-dialog__segment {{#unless hasLocations}}is-disabled{{/unless}}">
+          <input type="radio" name="locationMode" value="manual" {{#unless hasLocations}}disabled{{/unless}} />
+          <span>{{localize "AOV_SKJALDBORG.GrappleDialog.ManualLocation"}}</span>
+        </label>
+      </div>
+      <div class="skj-roll-dialog__detail skj-attack-roll-dialog__detail skj-grapple-manual-location" data-grapple-manual-location hidden>
+        <label>{{localize "AOV_SKJALDBORG.GrappleDialog.TargetLocation"}}</label>
+        <select name="manualLocationId">
+          {{#each locations}}
+          <option value="{{id}}">{{label}}</option>
+          {{/each}}
+        </select>
+      </div>
+    </fieldset>
+
+    <div class="skj-roll-dialog__row skj-roll-dialog__row--modifier skj-roll-dialog__row--grapple-modifier skj-attack-roll-dialog__row skj-attack-roll-dialog__row--modifier">
+      <label for="skj-grapple-situational-modifier">{{localize "AOV_SKJALDBORG.AttackDialog.Situation"}}</label>
+      <select id="skj-grapple-situational-modifier" name="situationalModifier">
+        {{#each modifiers}}
+        <option value="{{value}}" {{#if selected}}selected{{/if}}>{{label}} ({{value}}%)</option>
+        {{/each}}
+      </select>
+      <div class="skj-grapple-raw-note" data-tooltip="{{resistanceSummary}}" aria-label="{{resistanceSummary}}">
+        <i class="fa-solid fa-scale-balanced" aria-hidden="true"></i>
+        <span>{{localize "AOV_SKJALDBORG.GrappleDialog.Resistance"}}</span>
+      </div>
+    </div>
+
+    <section class="skj-roll-dialog__details skj-attack-roll-dialog__details">
+      <div class="skj-roll-dialog__detail skj-roll-dialog__detail--custom skj-attack-roll-dialog__detail skj-attack-roll-dialog__detail--custom">
+        <label>{{localize "AOV_SKJALDBORG.AttackDialog.Custom"}}</label>
+        <input type="text" name="customAugmentReason" placeholder="{{localize "AOV_SKJALDBORG.AttackDialog.CustomReason"}}" />
+        <input type="number" name="customAugmentValue" value="0" step="1" />
+      </div>
+    </section>
+
+    <div class="skj-roll-dialog__footer skj-attack-roll-dialog__actions">
+      <button type="button" class="skj-roll-dialog__action skj-attack-roll-dialog__roll-button" data-action="submitGrapple" {{#unless hasTargets}}disabled{{/unless}}>
+        <i class="fa-solid fa-people-pulling" aria-hidden="true"></i>
+        <span data-grapple-submit-label>{{localize "AOV_SKJALDBORG.GrappleDialog.RollGrapple"}}</span>
+      </button>
+    </div>
+  </section>
+</div>
