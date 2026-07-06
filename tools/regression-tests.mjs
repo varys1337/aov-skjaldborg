@@ -473,7 +473,7 @@ async function testReachVisualizerConfigAndGeometry() {
   assert.equal(source.includes("reachMin"), false);
 
   const settingsSource = readFileSync(new URL("../scripts/settings.mjs", import.meta.url), "utf8");
-  assert.match(settingsSource, /registerMenu\(MODULE_ID,\s*"reachVisualizerConfiguration"/);
+  assert.doesNotMatch(settingsSource, /registerMenu\(MODULE_ID,\s*"reachVisualizerConfiguration"/);
   assert.match(settingsSource, /register\(MODULE_ID,\s*"reachVisualizer"/);
   assert.match(settingsSource, /scope:\s*"client"/);
   assert.match(settingsSource, /type:\s*Object/);
