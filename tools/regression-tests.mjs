@@ -20,6 +20,21 @@ function mergeObject(base = {}, patch = {}, { inplace = false } = {}) {
   return target;
 }
 
+function setProperty(object, path, value) {
+  const parts = String(path ?? "").split(".").filter(Boolean);
+  if (!object || typeof object !== "object" || !parts.length) return object;
+
+  let target = object;
+  for (const part of parts.slice(0, -1)) {
+    if (!target[part] || typeof target[part] !== "object" || Array.isArray(target[part])) {
+      target[part] = {};
+    }
+    target = target[part];
+  }
+
+  target[parts.at(-1)] = clone(value);
+  return object;
+}
 function installFoundryMocks() {
   const users = new Map();
   const gm = { id: "gm", isGM: true, active: true };
@@ -45,6 +60,7 @@ function installFoundryMocks() {
     utils: {
       deepClone: clone,
       mergeObject,
+      setProperty,
       randomID: () => `test-${++idCounter}`,
       getProperty: (object, path) => String(path ?? "").split(".").reduce((value, part) => value?.[part], object),
       hasProperty: (object, path) => {
@@ -217,8 +233,11 @@ function combat(id, combatants) {
       for (const update of updates ?? []) {
         const entry = collection.get(update._id);
         if (!entry) continue;
-        Object.assign(entry, clone(update));
-        delete entry._id;
+        for (const [key, value] of Object.entries(update)) {
+          if (key === "_id") continue;
+          if (key.includes(".")) foundry.utils.setProperty(entry, key, value);
+          else entry[key] = clone(value);
+        }
       }
       return updates ?? [];
     },
