@@ -121,7 +121,7 @@ function registerRuntimeFeatures() {
     ["intent-indicators", "Token Intent Indicators", registerTokenIntentIndicatorHooks, 17],
     ["movement-plan-preview", "Movement Plan Preview", registerMovementPlanPreviewHooks, 12],
     ["engagement-indicators", "Engagement Indicators", registerEngagementIndicatorHooks, 8],
-    ["reach-visualizer", "Reach Visualizer", registerReachVisualizerHooks, 14],
+    ["reach-visualizer", "Reach Visualizer", () => registerReachVisualizerHooks(), 14],
     ["chat-report", "Chat Report Hooks", registerChatReportHooks, 1],
     ["dialog-target-queue", "Dialog Target Queue", registerDialogTargetQueueHooks, 1]
   ].forEach(([id, label, initialize, hookCount]) => registerFeature({ id, label, initialize, hookCount }));

@@ -35,6 +35,7 @@ function setProperty(object, path, value) {
   target[parts.at(-1)] = clone(value);
   return object;
 }
+
 function installFoundryMocks() {
   const users = new Map();
   const gm = { id: "gm", isGM: true, active: true };
@@ -146,10 +147,11 @@ function installFoundryMocks() {
 
 function actor(id) {
   const flags = { [MODULE_ID]: {} };
-  return {
+  const document = {
     id: `actor-${id}`,
     type: "npc",
     isOwner: true,
+    flags,
     system: {
       hp: { max: 10, value: 10 },
       moveRate: 10,
@@ -161,17 +163,18 @@ function actor(id) {
     items: [],
     effects: [],
     testUserPermission: () => true,
-    getFlag: (module, key) => flags[module]?.[key],
+    getFlag: (module, key) => document.flags[module]?.[key],
     setFlag: async (module, key, value) => {
-      flags[module] ??= {};
-      flags[module][key] = clone(value);
+      document.flags[module] ??= {};
+      document.flags[module][key] = clone(value);
       return value;
     },
     unsetFlag: async (module, key) => {
-      if (flags[module]) delete flags[module][key];
+      if (document.flags[module]) delete document.flags[module][key];
       return null;
     }
   };
+  return document;
 }
 
 function token(id, x, y, disposition) {
@@ -199,12 +202,13 @@ function combatant(id, x, y, disposition, state = {}) {
     tokenId: tokenDocument.id,
     token: tokenDocument,
     actor: owner,
+    flags,
     defeated: false,
     isDefeated: false,
-    getFlag: (module, key) => flags[module]?.[key],
+    getFlag: (module, key) => combatantDocument.flags[module]?.[key],
     setFlag: async (module, key, value) => {
-      flags[module] ??= {};
-      flags[module][key] = clone(value);
+      combatantDocument.flags[module] ??= {};
+      combatantDocument.flags[module][key] = clone(value);
       return value;
     }
   };
@@ -226,6 +230,7 @@ function combat(id, combatants) {
   const document = {
     id,
     started: true,
+    flags,
     combatants: collection,
     updateLog: [],
     updateEmbeddedDocuments: async (_type, updates) => {
@@ -241,10 +246,10 @@ function combat(id, combatants) {
       }
       return updates ?? [];
     },
-    getFlag: (module, key) => flags[module]?.[key],
+    getFlag: (module, key) => document.flags[module]?.[key],
     setFlag: async (module, key, value) => {
-      flags[module] ??= {};
-      flags[module][key] = clone(value);
+      document.flags[module] ??= {};
+      document.flags[module][key] = clone(value);
       return value;
     }
   };
@@ -720,11 +725,12 @@ async function testActorHotbarRegionRenderStructure() {
   const partsBody = source.match(/static PARTS = \{([\s\S]*?)\n  \};/)?.[1] ?? "";
   assert.match(partsBody, /HOTBAR_PARTS\.SHELL/);
   assert.equal(/HOTBAR_REGIONS|RESOURCES|COMBAT_WORKFLOW|TAB_BODY|EQUIPMENT_CONTROLS/.test(partsBody), false);
+  const regionSource = readFileSync(new URL("../scripts/apps/actor-hotbar/regions.mjs", import.meta.url), "utf8");
   assert.match(
-    source,
+    regionSource,
     /part === "workflow" \|\| part === "weaponControls" \|\| part === "equipmentControls"[\s\S]{0,160}regions\.add\(HOTBAR_REGIONS\.COMBAT_WORKFLOW\)/
   );
-  assert.match(source, /regions\.has\(HOTBAR_REGIONS\.TAB_BODY\)[\s\S]{0,80}regions\.delete\(HOTBAR_REGIONS\.COMBAT_WORKFLOW\)/);
+  assert.match(regionSource, /regions\.has\(HOTBAR_REGIONS\.TAB_BODY\)[\s\S]{0,80}regions\.delete\(HOTBAR_REGIONS\.COMBAT_WORKFLOW\)/);
 
   const templateRoot = new URL("../templates/actor-hotbar/", import.meta.url);
   const hotbarTemplates = readdirSync(templateRoot)
@@ -917,13 +923,13 @@ async function testMovementEligibilityBlocksOverLimitEngagement() {
   const legalMover = combatant("legal-mover", 0, 0, 1, {
     movement: {
       planStatus: "completed",
-      distance: 50
+      distance: 25
     }
   });
   const legalTarget = combatant("legal-target", 100, 0, -1, {
     movement: {
       planStatus: "completed",
-      distance: 50
+      distance: 25
     }
   });
   const legalCombat = combat("legal-half-move-combat", [legalMover, legalTarget]);
@@ -934,10 +940,15 @@ async function testMovementEligibilityBlocksOverLimitEngagement() {
   const overLimitMover = combatant("over-limit-mover", 0, 0, -1, {
     movement: {
       planStatus: "completed",
-      distance: 55
+      distance: 30
     }
   });
-  const stationaryTarget = combatant("stationary-target", 100, 0, 1);
+  const stationaryTarget = combatant("stationary-target", 100, 0, 1, {
+    movement: {
+      planStatus: "completed",
+      distance: 30
+    }
+  });
   const blockedCombat = combat("over-limit-engagement-combat", [stationaryTarget, overLimitMover]);
   assert.equal(await checkMovementEngagements(blockedCombat, { includeStationary: true, reason: "regression-over-limit-blocked" }), 0);
   assert.notEqual(getCombatantState(overLimitMover).engagement?.engaged, true);

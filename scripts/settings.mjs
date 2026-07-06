@@ -27,6 +27,7 @@ import { ActionUiSettings } from "./apps/action-ui-settings.mjs";
 import { CombatTrackingSettings } from "./apps/combat-tracking-settings.mjs";
 import { ReportSettings } from "./apps/report-settings.mjs";
 import { PhaseStructureSettings } from "./apps/phase-structure-settings.mjs";
+import { ReachVisualizerSettings } from "./apps/reach-visualizer-settings.mjs";
 import { debug } from "./logger.mjs";
 import { RenderCoordinator } from "./ui/render-coordinator.mjs";
 import { normalizeReachVisualizerSettings } from "./canvas/reach-visualizer-config.mjs";
@@ -72,6 +73,15 @@ export function registerSettings() {
     icon: "fa-solid fa-list-ol",
     type: PhaseStructureSettings,
     restricted: true
+  });
+
+  game.settings.registerMenu(MODULE_ID, "reachVisualizerConfiguration", {
+    name: "AOV_SKJALDBORG.Settings.ReachVisualizerMenu.Name",
+    label: "AOV_SKJALDBORG.Settings.ReachVisualizerMenu.Label",
+    hint: "AOV_SKJALDBORG.Settings.ReachVisualizerMenu.Hint",
+    icon: "fa-solid fa-ruler-combined",
+    type: ReachVisualizerSettings,
+    restricted: false
   });
 
   game.settings.register(MODULE_ID, "enableActionRing", {
