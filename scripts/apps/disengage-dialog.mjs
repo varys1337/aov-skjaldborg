@@ -10,8 +10,7 @@ import {
   registerTargetRefresh,
   unregisterTargetRefresh
 } from "./target-refresh-helpers.mjs";
-
-const { DialogV2 } = foundry.applications.api;
+import { SkjCombatDialogV2 } from "./base/combat-dialog-v2.mjs";
 
 function localize(key) {
   return game.i18n.localize(key);
@@ -129,7 +128,7 @@ function renderContent({ combat, combatant, targets = [] }) {
         </section>
       </section>
       <footer class="skj-disengage-dialog__footer">
-        <button type="button" class="skj-disengage-confirm-button" data-action="confirmDisengage" ${partners.length ? "" : "disabled"}>
+        <button type="button" class="skj-disengage-confirm-button" data-action="submitWorkflow" ${partners.length ? "" : "disabled"}>
           <i class="fa-solid fa-person-running" aria-hidden="true"></i>
           <span>${htmlEscape(localize("AOV_SKJALDBORG.DisengageDialog.Confirm"))}</span>
         </button>
@@ -137,7 +136,7 @@ function renderContent({ combat, combatant, targets = [] }) {
     </div>`;
 }
 
-export class DisengageDialog extends DialogV2 {
+export class DisengageDialog extends SkjCombatDialogV2 {
   static current = null;
 
   static DEFAULT_OPTIONS = {
@@ -148,26 +147,16 @@ export class DisengageDialog extends DialogV2 {
       contentTag: "form",
       contentClasses: ["aov-skjaldborg", "skj-disengage-content"]
     },
-    position: { width: 430, height: "auto" },
-    actions: {
-      ...super.DEFAULT_OPTIONS.actions,
-      confirmDisengage: function (event, target) {
-        return this._onConfirmDisengage(event, target);
-      }
-    }
+    position: { width: 430, height: "auto" }
   };
 
   constructor({ actor, combatant, combat = game.combat }) {
     let dialog;
-    const themeClass = actionThemeClass();
     super({
-      classes: ["aov-skjaldborg", "dialog", "skj-disengage-window", themeClass],
-      window: {
-        title: localize("AOV_SKJALDBORG.DisengageDialog.Title"),
-        contentTag: "form",
-        contentClasses: ["aov-skjaldborg", "skj-disengage-content", themeClass]
-      },
-      position: { width: 430, height: "auto" },
+      title: localize("AOV_SKJALDBORG.DisengageDialog.Title"),
+      width: 430,
+      classes: ["skj-disengage-window"],
+      contentClasses: ["skj-disengage-content"],
       modal: true,
       buttons: [
         {
@@ -195,22 +184,18 @@ export class DisengageDialog extends DialogV2 {
     });
   }
 
-  async _renderHTML() {
+  _renderDialogContent() {
     return renderContent({ combat: this.combat, combatant: this.combatant, targets: this.targets });
   }
 
-  _replaceHTML(result, content) {
-    content.innerHTML = result;
-  }
-
-  _onRender(context, options) {
-    super._onRender(context, options);
-    const form = this.element.querySelector("form.window-content") ?? this.element.querySelector("form");
-    if (!(form instanceof HTMLFormElement) || form.dataset.skjDisengageConfigured === "true") return;
-    form.dataset.skjDisengageConfigured = "true";
+  _configureForm(form, context, options) {
+    super._configureForm(form, context, options);
     registerTargetRefresh(this, () => this._refreshTargets());
     this._restoreMethod(form);
-    form.addEventListener("change", () => this._captureMethod(form));
+  }
+
+  _onFormChange(_event, form) {
+    this._captureMethod(form);
   }
 
   async close(options = {}) {
@@ -234,7 +219,7 @@ export class DisengageDialog extends DialogV2 {
   }
 
   async _refreshTargets() {
-    const form = this.element?.querySelector?.("form.window-content") ?? this.element?.querySelector?.("form");
+    const form = this.formElement;
     this._captureMethod(form);
     this.targets = currentTargetSnapshots();
     await this.render({ force: true });
@@ -259,12 +244,6 @@ export class DisengageDialog extends DialogV2 {
     this._waitResolve?.(result);
     await this.close();
     return result;
-  }
-
-  async _onConfirmDisengage(event, target) {
-    event.preventDefault();
-    const form = target.closest("form");
-    return this._submit(form);
   }
 
   static async show({ actor, combatant, combat = game.combat } = {}) {
@@ -294,7 +273,10 @@ export class DisengageDialog extends DialogV2 {
         opportunityAttackerIds: Array.isArray(result.opportunityAttackerIds) ? result.opportunityAttackerIds : [],
         opportunityMode: result.opportunityMode
       });
-      RenderCoordinator.invalidateCombatTracker("disengagement-dialog");
+      RenderCoordinator.invalidateCombatTracker("disengagement-dialog", {
+        combatantIds: [combatant.id],
+        parts: ["rows"]
+      });
       return declared;
     } catch (exception) {
       error("Failed to declare disengagement.", exception);

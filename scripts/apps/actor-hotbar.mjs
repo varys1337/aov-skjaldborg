@@ -1,12 +1,5 @@
 import {
   ACTION_CATEGORIES,
-  DISENGAGING_STATUS_ID,
-  ENGAGED_STATUS_ID,
-  EVADING_STATUS_ID,
-  GRAPPLED_STATUS_ID,
-  IMMOBILIZED_STATUS_ID,
-  IMPALED_STATUS_ID,
-  INJURY_STATUS_ID,
   INTENT_STATUS,
   MODULE_ID,
   UTILITY_ACTION_ID
@@ -17,16 +10,10 @@ import { debug, error } from "../logger.mjs";
 import { requestGm } from "../socket.mjs";
 import { clearReadiedWeapon, clearReadiedWeaponInHand, getReadiedWeaponIds, prepareReadiedWeaponState, setReadiedWeaponInHand } from "../combat/weapon-state.mjs";
 import { createModuleChatMessage } from "../compat/chat-message.mjs";
-import { effectHasStatus, effectParentActor, hotbarVisibleEffects, moduleFlag, openEffectSheet } from "../compat/active-effects.mjs";
-import { performanceDiagnostics, measureAsync } from "../performance/performance-monitor.mjs";
+import { hotbarVisibleEffects, openEffectSheet } from "../compat/active-effects.mjs";
+import { performanceDiagnostics } from "../performance/performance-monitor.mjs";
 import { RenderCoordinator } from "../ui/render-coordinator.mjs";
 import { PresentationCache } from "../ui/presentation-cache.mjs";
-import {
-  actorHotbarPartsForActorChange,
-  actorHotbarPartsForCombatantChange,
-  actorHotbarPartsForCombatChange,
-  actorHotbarPartsForItemChange
-} from "../utils/changed-paths.mjs";
 import { handleCommitInputKeydown } from "../ui/dom-utils.mjs";
 import { reactionPenaltyForCount } from "../combat/reaction-penalty-effects.mjs";
 import {
@@ -39,7 +26,6 @@ import {
   executeMacro,
   getActorPreparedIntent,
   getQuickAccessCircleCount,
-  invalidateActorItemSnapshot,
   isSkjaldborgCombatActive,
   openActorItem,
   persistActionOrder,
@@ -58,404 +44,50 @@ import {
   updateActorEquipmentQuantity,
   updateActorWeaponHitPoints
 } from "../ui/action-catalog.mjs";
+import {
+  EXPLICIT_HOTBAR_DOCKS,
+  HOTBAR_DOCK_DRAG_THRESHOLD,
+  HOTBAR_DOCKS,
+  HOTBAR_MIN_RESPONSIVE_ACTION_WIDTH,
+  HOTBAR_PARTS,
+  HOTBAR_REGION_TEMPLATES,
+  HOTBAR_REGIONS,
+  HOTBAR_TEMPLATE_PATHS,
+  HOTBAR_VIEWPORT_MARGIN,
+  QUICK_ACCESS_DRAG_MIME,
+  QUICK_ACCESS_DRAG_TYPE
+} from "./actor-hotbar/constants.mjs";
+import { resolveDispositionPalette } from "./actor-hotbar/effects.mjs";
+import { quickAccessGeometry } from "./actor-hotbar/quick-access.mjs";
+import { regionsForInvalidation } from "./actor-hotbar/regions.mjs";
+import {
+  finiteResourceNumber,
+  normalizeTrackedResourcePath,
+  trackedResourceKind
+} from "./actor-hotbar/resources.mjs";
+import {
+  openAttackRollDialog,
+  openDelayDialog,
+  openDisengageDialog,
+  openGrappleRollDialog,
+  openKnockbackRollDialog,
+  openMissileRollDialog,
+  openRunicMagicDialog,
+  openUtilityDialog
+} from "./actor-hotbar/actions.mjs";
+import {
+  intentDisplayLabel,
+  measureHotbarContextPart,
+  measureHotbarContextPartAsync,
+  prepareNamedGroups,
+  trackedResourceLabel
+} from "./actor-hotbar/context.mjs";
+import {
+  actorHotbarPartsForActiveEffect,
+  registerActorHotbarHooks as registerActorHotbarHookRegistry
+} from "./actor-hotbar/hooks.mjs";
 
 const { ApplicationV2, HandlebarsApplicationMixin } = foundry.applications.api;
-
-const QUICK_ACCESS_DRAG_TYPE = "AOVSkjaldborgActorHotbarAction";
-const QUICK_ACCESS_DRAG_MIME = "application/x-aov-skjaldborg-action";
-const QUICK_ACCESS_SLOT_SIZE = 42;
-const QUICK_ACCESS_MIN_RADIUS = 75;
-const QUICK_ACCESS_MIN_STAGE_SIZE = 192;
-const QUICK_ACCESS_SLOT_GAP = 4;
-
-const HOTBAR_DOCKS = Object.freeze({
-  AUTO: "auto",
-  LEFT: "left",
-  RIGHT: "right",
-  TOP: "top",
-  BOTTOM: "bottom"
-});
-const EXPLICIT_HOTBAR_DOCKS = new Set([
-  HOTBAR_DOCKS.LEFT,
-  HOTBAR_DOCKS.RIGHT,
-  HOTBAR_DOCKS.TOP,
-  HOTBAR_DOCKS.BOTTOM
-]);
-const HOTBAR_DOCK_DRAG_THRESHOLD = 7;
-const HOTBAR_VIEWPORT_MARGIN = 8;
-const HOTBAR_MIN_RESPONSIVE_ACTION_WIDTH = 180;
-const HOTBAR_PARTS = Object.freeze({
-  SHELL: "shell"
-});
-const HOTBAR_REGIONS = Object.freeze({
-  RESOURCES: "resources",
-  PORTRAIT_QUICK_ACCESS: "portraitQuickAccess",
-  HEADER_EFFECTS: "headerEffects",
-  COMBAT_WORKFLOW: "combatWorkflow",
-  TAB_BODY: "tabBody"
-});
-const HOTBAR_RENDER_REGIONS = new Set(Object.values(HOTBAR_REGIONS));
-const HOTBAR_TAB_BODY_CATEGORIES = new Set([
-  "equipment",
-  "historyFamily",
-  "magic",
-  "macros",
-  "skills",
-  "stats",
-  "wellbeing"
-]);
-const HOTBAR_REGION_TEMPLATES = Object.freeze({
-  [HOTBAR_REGIONS.RESOURCES]: "modules/aov-skjaldborg/templates/actor-hotbar/resources.hbs",
-  [HOTBAR_REGIONS.PORTRAIT_QUICK_ACCESS]: "modules/aov-skjaldborg/templates/actor-hotbar/portrait-quick-access.hbs",
-  [HOTBAR_REGIONS.HEADER_EFFECTS]: "modules/aov-skjaldborg/templates/actor-hotbar/header-effects.hbs",
-  [HOTBAR_REGIONS.COMBAT_WORKFLOW]: "modules/aov-skjaldborg/templates/actor-hotbar/combat-workflow.hbs",
-  [HOTBAR_REGIONS.TAB_BODY]: "modules/aov-skjaldborg/templates/actor-hotbar/tab-body.hbs"
-});
-const HOTBAR_TEMPLATE_PATHS = Object.freeze([
-  "modules/aov-skjaldborg/templates/actor-hotbar.hbs",
-  ...Object.values(HOTBAR_REGION_TEMPLATES),
-  "modules/aov-skjaldborg/templates/actor-hotbar/equipment-controls.hbs"
-]);
-
-function intentDisplayLabel(category, publicText = "") {
-  const normalizedCategory = Object.values(ACTION_CATEGORIES).includes(category)
-    ? category
-    : ACTION_CATEGORIES.ATTACK;
-  const customText = String(publicText ?? "").trim();
-  if (normalizedCategory === ACTION_CATEGORIES.OTHER && customText) return customText;
-  return game.i18n.localize(`AOV_SKJALDBORG.ActionCategories.${normalizedCategory}`);
-}
-
-/**
- * Calculate a single-circle portrait layout for six through twelve slots.
- *
- * @param {number} count Visible slot count.
- * @returns {{center: number, radius: number, size: number, stageSize: number}}
- */
-function quickAccessGeometry(count) {
-  const normalized = Math.max(1, Math.round(Number(count) || 1));
-  const chordRadius = (QUICK_ACCESS_SLOT_SIZE + QUICK_ACCESS_SLOT_GAP)
-    / (2 * Math.sin(Math.PI / normalized));
-  const radius = Math.max(QUICK_ACCESS_MIN_RADIUS, Math.ceil(chordRadius));
-  const stageSize = Math.max(
-    QUICK_ACCESS_MIN_STAGE_SIZE,
-    Math.ceil((radius + (QUICK_ACCESS_SLOT_SIZE / 2)) * 2)
-  );
-  return {
-    center: stageSize / 2,
-    radius,
-    size: QUICK_ACCESS_SLOT_SIZE,
-    stageSize
-  };
-}
-
-const SKILL_CATEGORY_ORDER = Object.freeze([
-  "agi",
-  "cbt",
-  "com",
-  "knw",
-  "man",
-  "myt",
-  "per",
-  "ste",
-  "zzz",
-  "other"
-]);
-
-const MAGIC_TYPE_ORDER = Object.freeze([
-  "rune",
-  "runescript",
-  "seidur",
-  "npcpower",
-  "other"
-]);
-
-let hooksRegistered = false;
-
-const DISPOSITION_PALETTES = Object.freeze({
-  friendly: Object.freeze({
-    key: "friendly",
-    color: "#3399ff",
-    labelColor: "#73c2ff",
-    labelWeight: 800,
-    glowSoft: "rgba(51, 153, 255, 0.42)",
-    glowStrong: "rgba(51, 153, 255, 0.82)"
-  }),
-  neutral: Object.freeze({
-    key: "neutral",
-    color: "#e7bd32",
-    labelColor: "#ffd54d",
-    labelWeight: 900,
-    glowSoft: "rgba(231, 189, 50, 0.42)",
-    glowStrong: "rgba(231, 189, 50, 0.82)"
-  }),
-  hostile: Object.freeze({
-    key: "hostile",
-    color: "#e53935",
-    labelColor: "#ff766d",
-    labelWeight: 800,
-    glowSoft: "rgba(229, 57, 53, 0.42)",
-    glowStrong: "rgba(229, 57, 53, 0.82)"
-  }),
-  secret: Object.freeze({
-    key: "secret",
-    color: "#9256d9",
-    labelColor: "#c79cff",
-    labelWeight: 800,
-    glowSoft: "rgba(146, 86, 217, 0.42)",
-    glowStrong: "rgba(146, 86, 217, 0.82)"
-  })
-});
-
-/**
- * Resolve the selected actor's authoritative Token disposition.
- *
- * The active Combatant Token is preferred during combat. Outside combat, the
- * currently controlled Token, a synthetic Token, the first active Token, and
- * finally the Actor prototype Token are considered in that order.
- *
- * @param {Actor|null} actor Current actor document.
- * @param {Combatant|null} combatant Current actor Combatant document.
- * @returns {{key: string, color: string, labelColor: string, labelWeight: number, glowSoft: string, glowStrong: string}}
- */
-function resolveDispositionPalette(actor, combatant) {
-  const controlled = canvas?.tokens?.controlled?.find(token => {
-    const tokenActor = token.actor;
-    return tokenActor?.id === actor?.id || tokenActor?.baseActor?.id === actor?.id;
-  }) ?? null;
-  const activeToken = actor?.getActiveTokens?.(false, true)?.[0] ?? null;
-  const tokenDocument = combatant?.token?.document
-    ?? combatant?.token
-    ?? controlled?.document
-    ?? actor?.token
-    ?? activeToken?.document
-    ?? activeToken
-    ?? actor?.prototypeToken
-    ?? null;
-  const disposition = Number(tokenDocument?.disposition);
-  const dispositions = globalThis.CONST?.TOKEN_DISPOSITIONS ?? {};
-  const friendly = Number(dispositions.FRIENDLY ?? 1);
-  const neutral = Number(dispositions.NEUTRAL ?? 0);
-  const hostile = Number(dispositions.HOSTILE ?? -1);
-  const secret = Number(dispositions.SECRET ?? -2);
-
-  if (disposition === friendly) return DISPOSITION_PALETTES.friendly;
-  if (disposition === hostile) return DISPOSITION_PALETTES.hostile;
-  if (disposition === secret) return DISPOSITION_PALETTES.secret;
-  if (disposition === neutral) return DISPOSITION_PALETTES.neutral;
-  return DISPOSITION_PALETTES.neutral;
-}
-
-/**
- * Localize an AoV skill category while retaining a readable fallback.
- *
- * @param {string} category AoV category id.
- * @returns {string}
- */
-function localizeSkillCategory(category) {
-  if (category === "other") return game.i18n.localize("AOV_SKJALDBORG.ActorHotbar.Groups.OtherSkills");
-  const key = `AOV.skillCat.${category}`;
-  const localized = game.i18n.localize(key);
-  return localized === key ? category.toLocaleUpperCase(game.i18n.lang) : localized;
-}
-
-/**
- * Localize an AoV magic or power Item type.
- *
- * @param {string} itemType AoV Item type.
- * @returns {string}
- */
-function localizeMagicType(itemType) {
-  if (itemType === "other") return game.i18n.localize("AOV_SKJALDBORG.ActorHotbar.Groups.OtherMagic");
-  const key = `TYPES.Item.${itemType}`;
-  const localized = game.i18n.localize(key);
-  return localized === key ? itemType : localized;
-}
-
-function measureHotbarContextPart(part, build) {
-  const measureId = performanceDiagnostics.markStart(`actorHotbar.context.${part}`);
-  try {
-    return build();
-  } finally {
-    performanceDiagnostics.markEnd(measureId, { part });
-  }
-}
-
-async function measureHotbarContextPartAsync(part, build) {
-  const measureId = performanceDiagnostics.markStart(`actorHotbar.context.${part}`);
-  try {
-    return await build();
-  } finally {
-    performanceDiagnostics.markEnd(measureId, { part });
-  }
-}
-
-/**
- * Lazy-load the Attack Roll dialog only when the Attack intent is invoked.
- *
- * @param {object} context Dialog context.
- * @returns {Promise<unknown>}
- */
-async function openAttackRollDialog(context) {
-  return measureAsync("attackDialog.open", async () => {
-    const { AttackRollDialog } = await import("./attack-roll-dialog.mjs");
-    return AttackRollDialog.show(context);
-  });
-}
-
-/**
- * Lazy-load the Missile Roll dialog only when the Missile intent is invoked.
- *
- * @param {object} context Dialog context.
- * @returns {Promise<unknown>}
- */
-async function openMissileRollDialog(context) {
-  return measureAsync("missileDialog.open", async () => {
-    const { MissileRollDialog } = await import("./missile-roll-dialog.mjs");
-    return MissileRollDialog.show(context);
-  });
-}
-
-async function openDisengageDialog(context) {
-  return measureAsync("disengageDialog.open", async () => {
-    const { DisengageDialog } = await import("./disengage-dialog.mjs");
-    return DisengageDialog.show(context);
-  });
-}
-
-async function openKnockbackRollDialog(context) {
-  return measureAsync("knockbackDialog.open", async () => {
-    const { KnockbackRollDialog } = await import("./knockback-roll-dialog.mjs");
-    return KnockbackRollDialog.show(context);
-  });
-}
-
-async function openGrappleRollDialog(context) {
-  return measureAsync("grappleDialog.open", async () => {
-    const { GrappleRollDialog } = await import("./grapple-roll-dialog.mjs");
-    return GrappleRollDialog.show(context);
-  });
-}
-
-async function openDelayDialog(context) {
-  return measureAsync("delayDialog.open", async () => {
-    const { DelayDialog } = await import("./delay-dialog.mjs");
-    return DelayDialog.show(context);
-  });
-}
-
-async function openUtilityDialog(context) {
-  return measureAsync("utilityDialog.open", async () => {
-    const { UtilityDialog } = await import("./utility-dialog.mjs");
-    return UtilityDialog.show(context);
-  });
-}
-
-async function openRunicMagicDialog(context) {
-  return measureAsync("runicMagicDialog.open", async () => {
-    const { RunicMagicDialog } = await import("./runic-magic-dialog.mjs");
-    return RunicMagicDialog.show(context);
-  });
-}
-
-/**
- * Normalize a configured Token bar attribute to an Actor document path.
- *
- * Foundry Token configuration stores system-relative values such as `hp`,
- * while TokenDocument#getBarAttribute may return either that value or the
- * expanded `system.hp` path depending on the tracked attribute type.
- *
- * @param {unknown} attribute Configured or resolved Token bar attribute.
- * @returns {string}
- */
-function normalizeTrackedResourcePath(attribute) {
-  let path = String(attribute ?? "").trim();
-  if (!path) return "";
-  if (path.startsWith("actor.")) path = path.slice("actor.".length);
-  if (!path.startsWith("system.")) path = `system.${path}`;
-  return path;
-}
-
-/**
- * Identify AoV resources that require system-specific write semantics.
- *
- * @param {string} attribute Normalized Actor path.
- * @returns {"hp"|"mp"|"generic"}
- */
-function trackedResourceKind(attribute) {
-  const relative = String(attribute ?? "")
-    .replace(/^system\./, "")
-    .replace(/\.value$/, "");
-  if (relative === "hp") return "hp";
-  if (relative === "mp") return "mp";
-  return "generic";
-}
-
-/**
- * Produce a readable label for an arbitrary Token bar resource.
- *
- * @param {string} attribute Normalized Actor path.
- * @param {string} barName Token bar slot name.
- * @returns {string}
- */
-function trackedResourceLabel(attribute, barName) {
-  const kind = trackedResourceKind(attribute);
-  if (kind === "hp") return game.i18n.localize("AOV_SKJALDBORG.ActorHotbar.HitPoints");
-  if (kind === "mp") return game.i18n.localize("AOV_SKJALDBORG.ActorHotbar.MagicPoints");
-
-  const segments = String(attribute ?? "")
-    .replace(/^system\./, "")
-    .replace(/\.value$/, "")
-    .split(".")
-    .filter(Boolean);
-  const leaf = segments.at(-1) ?? barName;
-  const localizationKey = `AOV.${leaf}`;
-  const localized = game.i18n.localize(localizationKey);
-  if (localized !== localizationKey) return localized;
-  return leaf
-    .replace(/[_-]+/g, " ")
-    .replace(/\b\w/g, character => character.toLocaleUpperCase(game.i18n.lang));
-}
-
-/**
- * Convert an unknown Token bar number to a finite display value.
- *
- * @param {unknown} value Candidate number.
- * @param {number} [fallback=0] Fallback number.
- * @returns {number}
- */
-function finiteResourceNumber(value, fallback = 0) {
-  const numeric = Number(value);
-  return Number.isFinite(numeric) ? numeric : fallback;
-}
-
-/**
- * Build Token Action HUD-style named groups from actor-owned actions.
- *
- * @param {object[]} actions Prepared action descriptors.
- * @param {"skills"|"magic"} type Grouping strategy.
- * @returns {{id: string, label: string, actions: object[]}[]}
- */
-function prepareNamedGroups(actions, type) {
-  const order = type === "skills" ? SKILL_CATEGORY_ORDER : MAGIC_TYPE_ORDER;
-  const grouped = new Map();
-
-  for (const action of actions) {
-    const key = type === "skills"
-      ? (action.category || "other")
-      : (MAGIC_TYPE_ORDER.includes(action.itemType) ? action.itemType : "other");
-    if (!grouped.has(key)) grouped.set(key, []);
-    grouped.get(key).push({ ...action, reorderable: true, section: key });
-  }
-
-  return order
-    .filter(key => grouped.has(key))
-    .map(key => ({
-      id: key,
-      label: type === "skills" ? localizeSkillCategory(key) : localizeMagicType(key),
-      actions: grouped.get(key)
-    }));
-}
 
 /**
  * Frame-less selected-actor hotbar adapted to Age of Vikings and Skjaldborg.
@@ -670,32 +302,7 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
    * @returns {string[]} Renderable internal hotbar regions.
    */
   static _regionsForInvalidation(parts) {
-    const regions = new Set();
-    for (const part of parts) {
-      if (part === "quickAccess") {
-        regions.add(HOTBAR_REGIONS.PORTRAIT_QUICK_ACCESS);
-        continue;
-      }
-      if (part === "effects") {
-        regions.add(HOTBAR_REGIONS.HEADER_EFFECTS);
-        continue;
-      }
-      if (part === "workflow" || part === "weaponControls" || part === "equipmentControls") {
-        regions.add(HOTBAR_REGIONS.COMBAT_WORKFLOW);
-        continue;
-      }
-      if (part === "resources") {
-        regions.add(HOTBAR_REGIONS.RESOURCES);
-        continue;
-      }
-      if (HOTBAR_TAB_BODY_CATEGORIES.has(part)) {
-        regions.add(HOTBAR_REGIONS.TAB_BODY);
-        continue;
-      }
-      if (HOTBAR_RENDER_REGIONS.has(part)) regions.add(part);
-    }
-    if (regions.has(HOTBAR_REGIONS.TAB_BODY)) regions.delete(HOTBAR_REGIONS.COMBAT_WORKFLOW);
-    return Array.from(regions);
+    return regionsForInvalidation(parts);
   }
 
   /**
@@ -3065,6 +2672,9 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
           event,
           target
         });
+        if (actionId === ACTION_CATEGORIES.OTHER) {
+          return this._commitIntentAction(actionId);
+        }
         if (actionId === ACTION_CATEGORIES.ATTACK) {
           return openAttackRollDialog({ actor: this.actor, originEvent: event });
         }
@@ -3506,310 +3116,12 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
 }
 
 /**
- * Test whether a TokenDocument represents the actor shown by the hotbar.
- *
- * @param {TokenDocument|null|undefined} token Token document.
- * @returns {boolean}
- */
-function tokenBelongsToCurrentHotbarActor(token) {
-  const currentActor = ActorHotbar.current?.actor;
-  const currentActorId = currentActor?.id ?? currentHotbarActorId();
-  if (!currentActorId) return false;
-  const tokenActor = token?.actor ?? null;
-  const baseActor = token?.baseActor ?? tokenActor?.baseActor ?? null;
-  return tokenActor?.id === currentActorId
-    || baseActor?.id === currentActorId
-    || token?.actorId === currentActorId
-    || currentActor?.token?.id === token?.id;
-}
-
-/**
- * Resolve the actor id currently represented, or about to be represented, by
- * the actor hotbar.
- *
- * @returns {string|null}
- */
-function currentHotbarActorId() {
-  return ActorHotbar.current?.actor?.id ?? resolveHotbarActor()?.id ?? null;
-}
-
-/**
- * Resolve the owning Actor id for Actor, Item, ActiveEffect, and nested
- * embedded-document hook payloads.
- *
- * @param {Document|null|undefined} document Candidate Foundry document.
- * @returns {string|null}
- */
-function documentActorId(document) {
-  if (!document) return null;
-  if (document.documentName === "ActiveEffect") return effectParentActor(document)?.id ?? null;
-  if (document.documentName === "Actor") return document.id ?? null;
-  if (document.actor?.id) return document.actor.id;
-  const parent = document.parent ?? null;
-  if (parent?.documentName === "Actor") return parent.id ?? null;
-  if (parent?.actor?.id) return parent.actor.id;
-  if (parent?.parent?.documentName === "Actor") return parent.parent.id ?? null;
-  return null;
-}
-
-/**
- * Test whether a document hook payload affects the selected actor.
- *
- * @param {Document|null|undefined} document Candidate Foundry document.
- * @returns {boolean}
- */
-function documentBelongsToCurrentHotbarActor(document) {
-  const currentActorId = currentHotbarActorId();
-  if (!currentActorId) return false;
-  return documentActorId(document) === currentActorId;
-}
-
-/**
- * Test whether a Combat document may affect visible hotbar data.
- *
- * @param {Combat|null|undefined} combat Candidate Combat document.
- * @returns {boolean}
- */
-function combatAffectsCurrentHotbar(combat) {
-  const current = ActorHotbar.current;
-  const currentActorId = currentHotbarActorId();
-  if (!currentActorId) return false;
-  const combatId = combat?.id ?? null;
-  const currentCombatId = current?.combatant?.parent?.id ?? game.combat?.id ?? null;
-  return !combatId || !currentCombatId || combatId === currentCombatId;
-}
-
-/**
- * Test whether a Combatant document may affect visible hotbar data.
- *
- * @param {Combatant|null|undefined} combatant Candidate Combatant document.
- * @returns {boolean}
- */
-function combatantAffectsCurrentHotbar(combatant) {
-  const current = ActorHotbar.current;
-  const currentActorId = currentHotbarActorId();
-  if (!currentActorId || !combatant) return false;
-  return combatant.id === current?.combatant?.id
-    || combatant.actor?.id === currentActorId
-    || combatant.token?.actor?.id === currentActorId;
-}
-
-/**
- * Classify ActiveEffect changes into the narrowest safe hotbar regions.
- *
- * @param {ActiveEffect|object|null} effect Candidate ActiveEffect.
- * @returns {Set<string>} Hotbar invalidation regions.
- */
-function actorHotbarPartsForActiveEffect(effect) {
-  const parts = new Set(["effects"]);
-
-  if (moduleFlag(effect, "managedEvading") !== undefined || effectHasStatus(effect, EVADING_STATUS_ID)) {
-    parts.add("workflow");
-    return parts;
-  }
-  if (moduleFlag(effect, "managedReactionPenalty") !== undefined) {
-    parts.add("workflow");
-    return parts;
-  }
-  if (moduleFlag(effect, "managedEngagement") !== undefined || effectHasStatus(effect, ENGAGED_STATUS_ID)) {
-    parts.add("workflow");
-    return parts;
-  }
-  if (moduleFlag(effect, "managedDisengaging") !== undefined || effectHasStatus(effect, DISENGAGING_STATUS_ID)) {
-    parts.add("workflow");
-    return parts;
-  }
-  if (moduleFlag(effect, "managedKnockbackStatus") !== undefined || effectHasStatus(effect, "prone")) {
-    parts.add("workflow");
-    return parts;
-  }
-  if (moduleFlag(effect, "grapple") !== undefined || effectHasStatus(effect, GRAPPLED_STATUS_ID) || effectHasStatus(effect, IMMOBILIZED_STATUS_ID)) {
-    parts.add("workflow");
-    parts.add("tabBody");
-    parts.add("wellbeing");
-    return parts;
-  }
-  if (moduleFlag(effect, "stunStatus") !== undefined) {
-    parts.add("workflow");
-    parts.add("tabBody");
-    parts.add("wellbeing");
-    return parts;
-  }
-  if (
-    moduleFlag(effect, "impalement") !== undefined
-    || moduleFlag(effect, "injuryThreshold") !== undefined
-    || effectHasStatus(effect, IMPALED_STATUS_ID)
-    || effectHasStatus(effect, INJURY_STATUS_ID)
-  ) {
-    parts.add("resources");
-    parts.add("tabBody");
-    parts.add("wellbeing");
-    return parts;
-  }
-  if (Object.keys(effect?.flags?.[MODULE_ID] ?? {}).length) {
-    parts.add("tabBody");
-    return parts;
-  }
-
-  parts.add("resources");
-  parts.add("tabBody");
-  return parts;
-}
-
-/**
- * Invalidate cached presentation data affected by hotbar render parts.
- *
- * @param {Actor|null|undefined} actor Actor document.
- * @param {Set<string>|string[]} parts Affected hotbar regions.
- * @returns {void}
- */
-function invalidatePresentationForHotbarParts(actor, parts) {
-  const affected = new Set(parts ?? []);
-  const categories = new Set();
-  let itemSnapshotAffected = false;
-  if (affected.has("resources")) categories.add("resources");
-  if (affected.has("effects") || affected.has("headerEffects")) categories.add("effects");
-  if (affected.has("weaponControls") || affected.has("equipmentControls")) {
-    categories.add("weapons");
-    categories.add("equipment");
-    itemSnapshotAffected = true;
-  }
-  if (affected.has("quickAccess")) {
-    categories.add("actions");
-    categories.add("stats");
-    itemSnapshotAffected = true;
-  }
-  if (affected.has("equipment")) {
-    categories.add("equipment");
-    categories.add("weapons");
-    itemSnapshotAffected = true;
-  }
-  if (affected.has("magic")) {
-    categories.add("magic");
-    categories.add("actions");
-    itemSnapshotAffected = true;
-  }
-  if (affected.has("skills")) {
-    categories.add("skills");
-    categories.add("actions");
-    itemSnapshotAffected = true;
-  }
-  if (affected.has("stats")) categories.add("stats");
-  if (affected.has("historyFamily")) {
-    categories.add("historyFamily");
-    categories.add("actions");
-    itemSnapshotAffected = true;
-  }
-  if (affected.has("wellbeing")) categories.add("wellbeing");
-  if (affected.has("tabBody")) {
-    categories.add("actions");
-    categories.add("equipment");
-    categories.add("stats");
-    categories.add("skills");
-    categories.add("magic");
-    categories.add("historyFamily");
-    itemSnapshotAffected = true;
-  }
-  if (affected.has("shell")) {
-    PresentationCache.invalidate(actor);
-    invalidateActorItemSnapshot(actor);
-  } else {
-    if (categories.size) PresentationCache.invalidate(actor, categories);
-    if (itemSnapshotAffected) invalidateActorItemSnapshot(actor);
-  }
-}
-
-/**
- * Schedule a part-aware hotbar refresh.
- *
- * @param {Set<string>|string[]} parts Affected hotbar regions.
- * @param {string} reason Diagnostic reason.
- * @param {Actor|null|undefined} [actor=ActorHotbar.current?.actor] Actor whose cache should be invalidated.
- * @returns {void}
- */
-function invalidateActorHotbar(parts, reason, actor = ActorHotbar.current?.actor) {
-  const affected = new Set(parts ?? []);
-  if (!affected.size) return;
-  invalidatePresentationForHotbarParts(actor, affected);
-  ActorHotbar.scheduleRender({
-    parts: affected,
-    reason,
-    full: affected.has("shell")
-  });
-}
-
-/**
  * Register actor-hotbar render hooks once.
  *
  * @returns {void}
  */
 export function registerActorHotbarHooks() {
-  if (hooksRegistered) return;
-  hooksRegistered = true;
-
-  RenderCoordinator.register("actorHotbar", detail => ActorHotbar.renderInvalidated(detail));
-
-  Hooks.on("controlToken", () => invalidateActorHotbar(["shell"], "control-token"));
-  Hooks.on("canvasReady", () => invalidateActorHotbar(["shell"], "canvas-ready"));
-  Hooks.on("canvasTearDown", () => invalidateActorHotbar(["shell"], "canvas-teardown"));
-  Hooks.on("renderHotbar", () => invalidateActorHotbar(["shell"], "core-hotbar-render"));
-  Hooks.on("createToken", token => {
-    if (tokenBelongsToCurrentHotbarActor(token)) invalidateActorHotbar(["shell"], "token-create");
-  });
-  Hooks.on("deleteToken", token => {
-    if (tokenBelongsToCurrentHotbarActor(token)) invalidateActorHotbar(["shell"], "token-delete");
-  });
-  Hooks.on("updateToken", (token, changes) => {
-    const changedKeys = Object.keys(changes ?? {});
-    const dispositionChanged = Object.prototype.hasOwnProperty.call(changes ?? {}, "disposition");
-    const actorChanged = ["actorId", "actorLink"].some(key => Object.prototype.hasOwnProperty.call(changes ?? {}, key));
-    const resourceBarsChanged = changedKeys.some(key => key === "bar1" || key === "bar2" || key.startsWith("bar1.") || key.startsWith("bar2."));
-    if ((dispositionChanged || actorChanged || resourceBarsChanged) && tokenBelongsToCurrentHotbarActor(token)) {
-      invalidateActorHotbar(["shell", "resources"], "token-update");
-    }
-  });
-  Hooks.on("updateActor", (actor, changed) => {
-    const current = ActorHotbar.current;
-    if (current?._xpUpdatePending && current.actor?.id === actor.id) return;
-    if (!documentBelongsToCurrentHotbarActor(actor)) return;
-    invalidateActorHotbar(actorHotbarPartsForActorChange(changed), "actor-update", actor);
-  });
-  Hooks.on("updateItem", (item, changed) => {
-    const current = ActorHotbar.current;
-    const sameActor = documentBelongsToCurrentHotbarActor(item);
-    if (sameActor && (current?._xpUpdatePending || current?._magicPreparationUpdatesPending?.size > 0)) return;
-    if (sameActor) invalidateActorHotbar(actorHotbarPartsForItemChange(changed), "item-update", item.actor);
-  });
-  Hooks.on("createItem", item => {
-    if (documentBelongsToCurrentHotbarActor(item)) invalidateActorHotbar(["shell"], "item-create", item.actor);
-  });
-  Hooks.on("deleteItem", item => {
-    if (documentBelongsToCurrentHotbarActor(item)) invalidateActorHotbar(["shell"], "item-delete", item.actor);
-  });
-  Hooks.on("createActiveEffect", effect => {
-    if (documentBelongsToCurrentHotbarActor(effect)) {
-      invalidateActorHotbar(actorHotbarPartsForActiveEffect(effect), "effect-create", effectParentActor(effect));
-    }
-  });
-  Hooks.on("updateActiveEffect", (effect, changed) => {
-    if (!documentBelongsToCurrentHotbarActor(effect)) return;
-    if (!Object.keys(changed ?? {}).length) return;
-    invalidateActorHotbar(actorHotbarPartsForActiveEffect(effect), "effect-update", effectParentActor(effect));
-  });
-  Hooks.on("deleteActiveEffect", effect => {
-    if (documentBelongsToCurrentHotbarActor(effect)) {
-      invalidateActorHotbar(actorHotbarPartsForActiveEffect(effect), "effect-delete", effectParentActor(effect));
-    }
-  });
-  Hooks.on("updateCombat", (combat, changed) => {
-    if (combatAffectsCurrentHotbar(combat)) invalidateActorHotbar(actorHotbarPartsForCombatChange(changed), "combat-update");
-  });
-  Hooks.on("updateCombatant", (combatant, changed) => {
-    if (combatantAffectsCurrentHotbar(combatant)) invalidateActorHotbar(actorHotbarPartsForCombatantChange(changed), "combatant-update", combatant.actor);
-  });
-
-  window.addEventListener("resize", () => ActorHotbar.current?._clampCurrentPosition());
-  ActorHotbar.scheduleRender({ parts: ["shell"], reason: "register-hooks", full: true });
+  return registerActorHotbarHookRegistry(ActorHotbar);
 }
 
 export const __test = {

@@ -1,6 +1,7 @@
 import { MOVEMENT_PLAN_STATUS } from "../constants.mjs";
 import { AoVAdapter } from "../adapter/aov-adapter.mjs";
 import { getCombatState, getCombatantState } from "../combat/state.mjs";
+import { combatantForTokenDocument } from "../combat/combatant-token-resolution.mjs";
 import { canUserViewMovementPlanPreview } from "../permissions.mjs";
 import { performanceDiagnostics } from "../performance/performance-monitor.mjs";
 import { RenderCoordinator } from "../ui/render-coordinator.mjs";
@@ -95,16 +96,6 @@ function sceneDistanceBetween(a, b) {
   const dy = Number(b?.y) - Number(a?.y);
   if (!Number.isFinite(dx) || !Number.isFinite(dy)) return 0;
   return (Math.hypot(dx, dy) / gridSize()) * gridDistance();
-}
-
-function resolveCombatantForToken(token, combat = game.combat) {
-  if (!token || !combat?.started) return null;
-  const byAdapter = AoVAdapter.getCombatantForToken?.(combat, token);
-  if (byAdapter) return byAdapter;
-  const tokenId = token?.id ?? token?.document?.id ?? null;
-  return tokenId
-    ? Array.from(combat.combatants ?? []).find(combatant => (combatant.tokenId ?? combatant.token?.id) === tokenId) ?? null
-    : null;
 }
 
 function previewAllowed(combat, combatant) {
@@ -374,7 +365,9 @@ function renderPreviewForToken(token) {
     }
 
     const combat = game.combat;
-    const combatant = resolveCombatantForToken(token, combat);
+    const combatant = token && combat?.started
+      ? combatantForTokenDocument(combat, token?.document ?? token)
+      : null;
     combatantId = combatant?.id ?? null;
     if (!combatant || !previewAllowed(combat, combatant)) {
       activeCombatantId = null;

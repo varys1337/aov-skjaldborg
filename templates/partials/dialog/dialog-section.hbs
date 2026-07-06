@@ -1,0 +1,11 @@
+<section class="skj-dialog-section {{class}} {{#if collapsed}}collapsed{{/if}}" data-collapsible-section="{{id}}" aria-expanded="{{#if collapsed}}false{{else}}true{{/if}}">
+  <header class="skj-dialog-section__header">
+    <button type="button" data-action="toggleSection" aria-expanded="{{#if collapsed}}false{{else}}true{{/if}}">
+      <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
+      <span>{{title}}</span>
+    </button>
+  </header>
+  <div class="skj-dialog-section__body">
+    {{> @partial-block}}
+  </div>
+</section>

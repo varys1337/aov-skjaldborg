@@ -1,0 +1,47 @@
+.aov-skjaldborg .skj-dialog-shell {
+  display: grid;
+  gap: var(--skj-dialog-gap-md);
+  min-width: 0;
+}
+
+.aov-skjaldborg .skj-dialog-footer {
+  align-items: center;
+  display: grid;
+  gap: var(--skj-dialog-gap-sm);
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-width: 0;
+}
+
+.aov-skjaldborg .skj-dialog-summary-card {
+  background: var(--skj-dialog-bg-soft);
+  border: 1px solid var(--skj-dialog-border);
+  border-radius: var(--skj-dialog-radius-md);
+  display: grid;
+  gap: var(--skj-dialog-gap-xs);
+  min-width: 0;
+  padding: var(--skj-dialog-section-padding);
+}
+
+.aov-skjaldborg .skj-dialog-summary-card__rows {
+  display: grid;
+  gap: var(--skj-dialog-gap-xs);
+  min-width: 0;
+}
+
+.aov-skjaldborg .skj-dialog-summary-card__row {
+  align-items: center;
+  display: grid;
+  gap: var(--skj-dialog-gap-sm);
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-width: 0;
+}
+
+.aov-skjaldborg .skj-dialog-summary-card__row.is-muted {
+  opacity: 0.68;
+}
+
+@media (max-width: 460px) {
+  .aov-skjaldborg .skj-dialog-footer {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

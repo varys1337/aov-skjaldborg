@@ -1,6 +1,7 @@
 import { MODULE_ID } from "../constants.mjs";
 import { warn } from "../logger.mjs";
 import { collectionArray, numberOr, safeFromUuid } from "../utils/document-data.mjs";
+import { combatantForTokenDocument, combatantValues } from "./combatant-token-resolution.mjs";
 
 export { collectionArray, numberOr, safeFromUuid } from "../utils/document-data.mjs";
 
@@ -44,6 +45,74 @@ export function actorImage(actor) {
  */
 export function actorName(actor) {
   return actor?.name || localize("AOV_SKJALDBORG.Warnings.ActorUnavailable");
+}
+
+
+/**
+ * Resolve the pending chat-message HTMLElement defensively.
+ *
+ * @param {HTMLElement|ArrayLike<HTMLElement>|null|undefined} html Pending message HTML.
+ * @returns {HTMLElement|null}
+ */
+export function resolveChatMessageElement(html) {
+  if (!html) return null;
+  if (typeof html.querySelector === "function") return html;
+  const candidate = html[0];
+  return candidate && typeof candidate.querySelector === "function" ? candidate : null;
+}
+
+/**
+ * Resolve an AoV participant id/type pair into its Actor document.
+ *
+ * @param {unknown} participantId AoV participant id.
+ * @param {unknown} participantType AoV participant type.
+ * @returns {Actor|null}
+ */
+export function actorFromAoVParticipant(participantId, participantType) {
+  const id = String(participantId ?? "");
+  const type = String(participantType ?? "");
+  if (!id) return null;
+  if (type === "token") return game.actors?.tokens?.[id] ?? null;
+  if (type === "actor") return game.actors?.get?.(id) ?? null;
+  return null;
+}
+
+/**
+ * Whether core AoV automatic damage application is currently enabled.
+ *
+ * @returns {boolean}
+ */
+export function autoDamageEnabled() {
+  try {
+    return !!game.settings.get("aov", "autoDmg");
+  } catch (_exception) {
+    return false;
+  }
+}
+
+/**
+ * Read the current armor points from a target hit location.
+ *
+ * @param {Actor|object} actor Target Actor.
+ * @param {Item|object} hitLocation Target hit-location Item.
+ * @returns {number}
+ */
+export function locationArmor(actor, hitLocation) {
+  const value = actor?.type === "npc" ? hitLocation?.system?.npcAP : hitLocation?.system?.map;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : 0;
+}
+
+/**
+ * Read gross damage before armor absorption from an AoV damage card.
+ *
+ * @param {object|null|undefined} card AoV damage card.
+ * @returns {number}
+ */
+export function grossDamage(card) {
+  const damageBeforeAbsorb = Number(card?.damageBeforeAbsorb);
+  if (Number.isFinite(damageBeforeAbsorb)) return Math.max(0, damageBeforeAbsorb);
+  return Math.max(0, (Number(card?.rollVal ?? 0) || 0) + (Number(card?.armourAbsorb ?? 0) || 0));
 }
 
 /**
@@ -116,51 +185,17 @@ export function recentFlaggedMessages({
     .sort((a, b) => Number(createdAt(b.flag, b.message)) - Number(createdAt(a.flag, a.message)));
 }
 
-function combatantValues(combat) {
-  return Array.from(combat?.combatants ?? []).map(entry => Array.isArray(entry) ? entry[1] : entry);
-}
-
-function tokenIdentityCandidates(value) {
-  const candidates = [
-    value?.id,
-    value?._id,
-    value?.document?.id,
-    value?.document?._id,
-    value?.object?.id,
-    value?.object?.document?.id,
-    value?.tokenId
-  ];
-  const uuid = String(value?.uuid ?? value?.document?.uuid ?? value?.object?.document?.uuid ?? "");
-  if (uuid.includes(".Token.")) candidates.push(uuid.split(".Token.").at(-1));
-  return Array.from(new Set(candidates.map(candidate => String(candidate ?? "").trim()).filter(Boolean)));
-}
-
-function combatantTokenIdentityCandidates(combatant) {
-  return tokenIdentityCandidates({
-    id: combatant?.tokenId,
-    _id: combatant?.token?._id,
-    tokenId: combatant?.tokenId,
-    document: combatant?.token?.document,
-    object: combatant?.token?.object,
-    uuid: combatant?.token?.uuid
-  }).concat(tokenIdentityCandidates(combatant?.token));
-}
-
 export function combatantForToken(combat, tokenDocument, actor) {
   if (!combat) return null;
-  const tokenIds = tokenIdentityCandidates(tokenDocument);
-  const combatants = combatantValues(combat);
-  if (tokenIds.length) {
-    const tokenMatched = combatants.find(combatant => {
-      const candidateIds = combatantTokenIdentityCandidates(combatant);
-      return candidateIds.some(id => tokenIds.includes(id));
-    });
-    if (tokenMatched) return tokenMatched;
-  }
+  const tokenMatched = combatantForTokenDocument(combat, tokenDocument);
+  if (tokenMatched) return tokenMatched;
 
+  // Last-resort compatibility fallback for legacy AoV calls which provide an
+  // Actor but no resolvable TokenDocument. Ambiguous linked-token copies are
+  // deliberately not collapsed.
   const actorId = String(actor?.id ?? "").trim();
   if (!actorId) return null;
-  const actorMatches = combatants.filter(combatant => String(combatant?.actor?.id ?? "") === actorId);
+  const actorMatches = combatantValues(combat).filter(combatant => String(combatant?.actor?.id ?? combatant?.actorId ?? "") === actorId);
   return actorMatches.length === 1 ? actorMatches[0] : null;
 }
 

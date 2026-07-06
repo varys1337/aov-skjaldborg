@@ -25,7 +25,7 @@ import { cleanMovementPoint, normalizeMovementRoute } from "./combat/movement-ro
 import { movementDebug } from "./combat/movement-debugger.mjs";
 import { enqueueCombatantWrite } from "./combat/authoritative-write-queue.mjs";
 import { startMovementPhase } from "./combat/movement-controller.mjs";
-import { shouldExecuteMovementImmediately, shouldQueueResolutionImmediately } from "./combat/phase-structure.mjs";
+import { shouldExecuteMovementImmediately, shouldQueueResolutionImmediately, shouldTrackCurrentTurnForPhase } from "./combat/phase-structure.mjs";
 import { refreshImmediateResolutionActions } from "./combat/resolution-queue.mjs";
 import { performanceDiagnostics } from "./performance/performance-monitor.mjs";
 import { createModuleChatMessage } from "./compat/chat-message.mjs";
@@ -40,9 +40,23 @@ import {
 } from "./combat/disengagement.mjs";
 import { activateEvadingForCombatant } from "./combat/evade-status.mjs";
 import { reconcileReactionPenaltyEffect } from "./combat/reaction-penalty-effects.mjs";
+import { maybeAutoIncrementReactionForDefense } from "./combat/reaction-automation.mjs";
 import { cleanString, cleanStringArray } from "./utils/document-data.mjs";
 import {
-  cleanTargetRefs,
+  assertSocketAuthority,
+  resolveRequestingUser
+} from "./socket/authority.mjs";
+import { getSocketActionSchema, SOCKET_ACTIONS } from "./socket/schema.mjs";
+import { unknownSocketActionError } from "./socket/errors.mjs";
+import {
+  cleanActionCategory,
+  cleanFiniteNumber,
+  cleanIntentStatus,
+  cleanNonNegativeNumber,
+  cleanPositiveNumber,
+  sanitizeRunicMagicPayload
+} from "./socket/sanitizers.mjs";
+import {
   CRAFT_RUNE_MODES,
   firstRuneMagicSkill,
   firstSeidurMagicSkill,
@@ -62,7 +76,80 @@ const PROCESSED_REQUEST_TTL_MS = 60000;
 const pendingSocketRequests = new Map();
 const processedSocketRequests = new Map();
 const userPromptQueues = new Map();
-const CLIENT_SOCKET_ACTIONS = new Set(["promptDefenseRoll"]);
+const CLIENT_SOCKET_ACTIONS = new Set(Object.entries(SOCKET_ACTIONS)
+  .filter(([, schema]) => schema.clientAction === true)
+  .map(([action]) => action));
+const DEFENSE_RESULT_FIELDS = Object.freeze([
+  "accepted",
+  "alreadyResolved",
+  "cancelled",
+  "combatAction",
+  "coreDialogSource",
+  "defenseMessageId",
+  "defenseMode",
+  "reason"
+]);
+
+function plainSocketActionResult(action, result = {}) {
+  const source = result && typeof result === "object" && !Array.isArray(result) ? result : {};
+  return {
+    accepted: source.accepted !== false,
+    action: String(action ?? ""),
+    ...(source.duplicate === true ? { duplicate: true } : {}),
+    ...(source.reason ? { reason: cleanString(source.reason, 120) } : {})
+  };
+}
+
+function movementSocketResult(action, result = {}) {
+  const source = result && typeof result === "object" && !Array.isArray(result) ? result : {};
+  const movement = source.movement && typeof source.movement === "object" ? source.movement : source;
+  return {
+    ...plainSocketActionResult(action, source),
+    ignoredReason: cleanString(source.ignoredReason, 80),
+    routeId: cleanString(source.routeId ?? movement.routeId, 160),
+    routeRevision: Math.max(0, Number(source.routeRevision ?? movement.routeRevision) || 0),
+    planStatus: cleanString(source.planStatus ?? movement.planStatus, 40),
+    draft: (source.draft ?? movement.draft) === true
+  };
+}
+
+function defenseSocketResult(action, result = {}) {
+  const source = result && typeof result === "object" && !Array.isArray(result) ? result : {};
+  const summary = plainSocketActionResult(action, source);
+  for (const field of DEFENSE_RESULT_FIELDS) {
+    if (source[field] === undefined) continue;
+    if (typeof source[field] === "string") summary[field] = cleanString(source[field], 200);
+    else if (typeof source[field] === "boolean") summary[field] = source[field];
+    else if (source[field] === null) summary[field] = null;
+  }
+  return summary;
+}
+
+function isDocumentLike(value) {
+  return !!value
+    && typeof value === "object"
+    && (
+      typeof value.documentName === "string"
+      || typeof value.uuid === "string"
+      || typeof value.update === "function"
+      || typeof value.setFlag === "function"
+    );
+}
+
+function normalizeSocketResult(action, result) {
+  if (action === "recordMovement" || action === "clearMovement") return movementSocketResult(action, result);
+  if (action === "promptDefenseRoll" || action === "commitDefenseCard") return defenseSocketResult(action, result);
+  if (result === null || result === undefined) return plainSocketActionResult(action);
+  if (typeof result === "boolean") return { accepted: result, action: String(action ?? "") };
+  if (isDocumentLike(result)) return plainSocketActionResult(action, {
+    accepted: true,
+    reason: result.documentName ?? result.constructor?.name ?? ""
+  });
+  if (Array.isArray(result)) return plainSocketActionResult(action, { accepted: true });
+  if (typeof result !== "object") return plainSocketActionResult(action, { accepted: true });
+  if (result.accepted !== undefined || result.reason !== undefined) return plainSocketActionResult(action, result);
+  return plainSocketActionResult(action);
+}
 
 /**
  * Select the first active GM to receive a player request.
@@ -121,11 +208,7 @@ function socketUserTimeoutMessage(userId) {
  * @returns {User}
  */
 function requestingUser(userId) {
-  const id = String(userId ?? "");
-  if (id && id === game.user?.id) return game.user;
-  const user = game.users?.get?.(id) ?? game.users?.find?.(candidate => candidate.id === id) ?? null;
-  if (!user) throw new Error(`Rejected ${MODULE_ID} socket request from an unknown User.`);
-  return user;
+  return resolveRequestingUser(userId);
 }
 
 /**
@@ -150,12 +233,17 @@ function assertGmRequest(user) {
  */
 function emitSocketResponse(request, response) {
   if (!request?.requestId || !request?.from) return;
+  const result = response?.ok
+    ? normalizeSocketResult(request.action, response.result)
+    : response.result;
   game.socket.emit(SOCKET_NAME, {
     type: SOCKET_MESSAGE_RESPONSE,
+    action: request.action,
     requestId: request.requestId,
     from: game.user.id,
     to: request.from,
-    ...response
+    ...response,
+    result
   });
 }
 
@@ -192,10 +280,27 @@ export function handleSocketResponse(message) {
   if (pending.gmId && message?.from !== pending.gmId) return false;
   pendingSocketRequests.delete(message.requestId);
   globalThis.clearTimeout(pending.timeout);
-  if (message.ok) pending.resolve(message.result ?? true);
+  if (message.ok) {
+    performanceDiagnostics.count("socket.response.ok", 1, {
+      action: pending.action ?? message.action ?? "",
+      requestId: message.requestId
+    });
+    if (message.result?.alreadyResolved === true) {
+      performanceDiagnostics.count("socket.response.alreadyResolved", 1, {
+        action: pending.action ?? message.action ?? "",
+        requestId: message.requestId
+      });
+      ui.notifications.warn(game.i18n.localize("AOV_SKJALDBORG.Warnings.DefenseAlreadyResolved"));
+    }
+    pending.resolve(message.result ?? true);
+  }
   else {
     const errorMessage = cleanString(message.error, 1000) || game.i18n.localize("AOV_SKJALDBORG.Warnings.ActionFailed");
     if (isStaleDocumentMessage(errorMessage)) {
+      performanceDiagnostics.count("socket.response.stale", 1, {
+        action: pending.action ?? message.action ?? "",
+        requestId: message.requestId
+      });
       ui.notifications.warn(errorMessage);
       debug("Rejected stale socket request.", {
         requestId: message.requestId,
@@ -203,56 +308,13 @@ export function handleSocketResponse(message) {
         to: message.to
       });
     }
+    performanceDiagnostics.count("socket.response.error", 1, {
+      action: pending.action ?? message.action ?? "",
+      requestId: message.requestId
+    });
     pending.reject(new Error(errorMessage));
   }
   return true;
-}
-
-/**
- * Convert an optional numeric form value into a finite number or `null`.
- *
- * Empty, missing, non-finite, and non-positive values are intentionally stored
- * as `null` for rank-style inputs. That keeps flags explicit without turning an
- * unselected input into DEX rank 0.
- *
- * @param {unknown} value Candidate numeric value.
- * @returns {number|null}
- */
-function cleanPositiveNumber(value) {
-  if (value === "" || value === null || value === undefined) return null;
-  const number = Number(value);
-  return Number.isFinite(number) && number > 0 ? number : null;
-}
-
-function cleanFiniteNumber(value) {
-  if (value === "" || value === null || value === undefined) return null;
-  const number = Number(value);
-  return Number.isFinite(number) ? number : null;
-}
-
-/**
- * Clamp a user-selected action category to the module's supported enum.
- *
- * @param {unknown} value Candidate action category.
- * @returns {string}
- */
-function cleanActionCategory(value) {
-  const category = cleanString(value, 40);
-  if (!category) return ACTION_CATEGORIES.ATTACK;
-  if (category === "flee") return ACTION_CATEGORIES.RETREAT;
-  return Object.values(ACTION_CATEGORIES).includes(category) ? category : ACTION_CATEGORIES.OTHER;
-}
-
-/**
- * Clamp a user-submitted intent status to committed or held.
- *
- * Uncommitted is a derived default state, not a legal declaration write.
- *
- * @param {unknown} value Candidate status.
- * @returns {string}
- */
-function cleanIntentStatus(value) {
-  return value === INTENT_STATUS.HELD ? INTENT_STATUS.HELD : INTENT_STATUS.COMMITTED;
 }
 
 /**
@@ -368,6 +430,23 @@ export function sanitizeMovementPayload(payload = {}) {
   return sanitized;
 }
 
+function movementCommitSummary(movement, {
+  accepted = true,
+  action = "recordMovement",
+  ignoredReason = ""
+} = {}) {
+  const source = movement && typeof movement === "object" ? movement : {};
+  return {
+    accepted: accepted !== false,
+    action,
+    ignoredReason: cleanString(ignoredReason, 80),
+    routeId: cleanString(source.routeId, 160),
+    routeRevision: Math.max(0, Number(source.routeRevision) || 0),
+    planStatus: cleanString(source.planStatus, 40),
+    draft: source.draft === true
+  };
+}
+
 /**
  * Throw when a user is not permitted to mutate a combatant's module state.
  *
@@ -463,11 +542,6 @@ function cleanInitiativeAdjustment(value) {
   const amount = Number(value);
   if (!Number.isFinite(amount)) throw new Error("Initiative adjustment must be numeric.");
   return amount;
-}
-
-function cleanNonNegativeNumber(value) {
-  const number = Number(value);
-  return Number.isFinite(number) ? Math.max(0, number) : 0;
 }
 
 function cleanHand(value) {
@@ -586,7 +660,10 @@ export async function applyInitiativeAndWeaponAction(combatant, payload) {
       [MODULE_ID]: { planningExternalHandled: true }
     });
     const ledger = await captureExternalPlanningInitiativeChange(combatant, { initiative: nextInitiative });
-    if (ledger) await PhaseController.clearCurrentTurn(combatant.parent, "planning-initiative-update");
+    const phase = getCombatState(combatant.parent).phase;
+    if (ledger && !shouldTrackCurrentTurnForPhase(phase)) {
+      await PhaseController.clearCurrentTurn(combatant.parent, "planning-initiative-update");
+    }
     if (action === "draw" || action === "sheathe") {
       await postWeaponDexChat(combatant, {
         action,
@@ -736,26 +813,6 @@ function logicalRound(combat) {
   return getCombatState(combat).logicalRound ?? AoVAdapter.getSystemLogicalRound(combat);
 }
 
-function cleanRunicPayload(payload = {}) {
-  return {
-    magicMode: cleanString(payload.magicMode, 40),
-    itemId: cleanString(payload.itemId, 100),
-    itemType: cleanString(payload.itemType, 40),
-    dexPenalty: Math.max(1, Math.round(Number(payload.dexPenalty) || 1)),
-    flatMod: Math.round(Number(payload.flatMod) || 0),
-    customModifierReason: cleanString(payload.customModifierReason, 120),
-    craftEnabled: payload.craftEnabled === true,
-    craftMode: cleanString(payload.craftMode, 40),
-    craftSkillId: cleanString(payload.craftSkillId, 100),
-    customCraftTarget: Math.max(1, Math.round(Number(payload.customCraftTarget) || 0)),
-    prepared: payload.prepared === true,
-    alreadyCarved: payload.alreadyCarved === true,
-    resistance: payload.resistance === true,
-    casterTokenUuid: cleanString(payload.casterTokenUuid, 200),
-    targetRefs: cleanTargetRefs(payload.targetRefs)
-  };
-}
-
 function targetSummary(refs) {
   const names = targetNames(refs);
   return names.length ? names.join(", ") : game.i18n.localize("AOV_SKJALDBORG.RunicMagic.NoTargets");
@@ -806,7 +863,7 @@ function runeMagicIntentPatch(combatant, dexPenalty = 0) {
 async function startRuneCarving(combat, combatant, payload) {
   const actor = combatant?.actor;
   if (!actor) throw new Error(game.i18n.localize("AOV_SKJALDBORG.Warnings.ActorUnavailable"));
-  const clean = cleanRunicPayload(payload);
+  const clean = sanitizeRunicMagicPayload(payload);
   const item = actor.items?.get?.(clean.itemId);
   if (!item || item.type !== "runescript") throw new Error(game.i18n.localize("AOV_SKJALDBORG.Warnings.ItemUnavailable"));
   const details = runeScriptDetails(item);
@@ -875,7 +932,7 @@ async function startRuneCarving(combat, combatant, payload) {
 async function castRuneScript(combat, combatant, payload) {
   const actor = combatant?.actor;
   if (!actor) throw new Error(game.i18n.localize("AOV_SKJALDBORG.Warnings.ActorUnavailable"));
-  const clean = cleanRunicPayload(payload);
+  const clean = sanitizeRunicMagicPayload(payload);
   const item = actor.items?.get?.(clean.itemId);
   if (!item || item.type !== "runescript") throw new Error(game.i18n.localize("AOV_SKJALDBORG.Warnings.ItemUnavailable"));
   const details = runeScriptDetails(item);
@@ -940,7 +997,7 @@ async function castRuneScript(combat, combatant, payload) {
 async function trackSeidurRitual(combat, combatant, payload) {
   const actor = combatant?.actor;
   if (!actor) throw new Error(game.i18n.localize("AOV_SKJALDBORG.Warnings.ActorUnavailable"));
-  const clean = cleanRunicPayload(payload);
+  const clean = sanitizeRunicMagicPayload(payload);
   const item = actor.items?.get?.(clean.itemId);
   if (!item || item.type !== "seidur") throw new Error(game.i18n.localize("AOV_SKJALDBORG.Warnings.ItemUnavailable"));
   const details = seidurDetails(item);
@@ -990,7 +1047,7 @@ async function trackSeidurRitual(combat, combatant, payload) {
 async function markRunePrepared(combat, combatant, payload) {
   const actor = combatant?.actor;
   if (!actor) throw new Error(game.i18n.localize("AOV_SKJALDBORG.Warnings.ActorUnavailable"));
-  const clean = cleanRunicPayload(payload);
+  const clean = sanitizeRunicMagicPayload(payload);
   const item = actor.items?.get?.(clean.itemId);
   if (!item || item.type !== "runescript") throw new Error(game.i18n.localize("AOV_SKJALDBORG.Warnings.ItemUnavailable"));
   const details = runeScriptDetails(item);
@@ -1078,8 +1135,8 @@ export function registerSocket() {
 
     if (!game.user.isGM) return;
 
-    void handleSocketRequest(message).then(() => {
-      emitSocketResponse(message, { ok: true });
+    void handleSocketRequest(message).then(result => {
+      emitSocketResponse(message, { ok: true, result });
     }).catch(err => {
       const errorMessage = err?.message ?? String(err);
       if (isStaleDocumentMessage(errorMessage)) {
@@ -1089,7 +1146,14 @@ export function registerSocket() {
           from: message?.from
         });
       } else {
-        warn(err);
+        if (errorMessage === game.i18n.localize("AOV_SKJALDBORG.Warnings.GmOnly")) {
+          warn("Rejected GM-only socket request.", {
+            action: message?.action,
+            requestId: message?.requestId,
+            from: message?.from,
+            to: message?.to
+          }, err);
+        } else warn(err);
         ui.notifications.error(errorMessage);
       }
       emitSocketResponse(message, { ok: false, error: errorMessage });
@@ -1119,7 +1183,11 @@ export async function requestGm(action, payload = {}) {
 
   if (game.user.isGM) {
     try {
-      return await handleSocketRequest(message);
+      const result = await handleSocketRequest(message);
+      const summary = normalizeSocketResult(action, result);
+      performanceDiagnostics.count("socket.localGm.ok", 1, { action });
+      if (summary.alreadyResolved === true) ui.notifications.warn(game.i18n.localize("AOV_SKJALDBORG.Warnings.DefenseAlreadyResolved"));
+      return summary;
     } finally {
       performanceDiagnostics.markEnd(measureId, { action, localGm: true });
     }
@@ -1134,6 +1202,7 @@ export async function requestGm(action, payload = {}) {
       pendingSocketRequests.delete(message.requestId);
       const errorMessage = socketTimeoutMessage(message.to);
       ui.notifications.warn(errorMessage);
+      performanceDiagnostics.count("socket.request.timeout", 1, { action, gmId: message.to });
       performanceDiagnostics.markEnd(measureId, { action, timedOut: true });
       reject(new Error(errorMessage));
     }, SOCKET_REQUEST_TIMEOUT_MS);
@@ -1147,7 +1216,8 @@ export async function requestGm(action, payload = {}) {
         reject(error);
       },
       timeout,
-      gmId: message.to
+      gmId: message.to,
+      action
     });
     try {
       game.socket.emit(SOCKET_NAME, message);
@@ -1195,20 +1265,30 @@ export async function requestUser(action, payload = {}, userId) {
 
   if (targetUser.id === game.user.id) {
     try {
-      return await handleClientSocketRequest(message);
+      const result = await handleClientSocketRequest(message);
+      const summary = normalizeSocketResult(action, result);
+      performanceDiagnostics.count("socket.localUser.ok", 1, { action, userId: targetUser.id });
+      if (summary.alreadyResolved === true) ui.notifications.warn(game.i18n.localize("AOV_SKJALDBORG.Warnings.DefenseAlreadyResolved"));
+      return summary;
     } finally {
       performanceDiagnostics.markEnd(measureId, { action, localUser: true });
     }
   }
+
+  const schemaTimeout = Number(getSocketActionSchema(action)?.timeoutMs);
+  const timeoutMs = Number.isFinite(schemaTimeout) && schemaTimeout > 0
+    ? schemaTimeout
+    : SOCKET_REQUEST_TIMEOUT_MS;
 
   return new Promise((resolve, reject) => {
     const timeout = globalThis.setTimeout(() => {
       pendingSocketRequests.delete(message.requestId);
       const errorMessage = socketUserTimeoutMessage(message.to);
       ui.notifications.warn(errorMessage);
+      performanceDiagnostics.count("socket.user.timeout", 1, { action, userId: message.to });
       performanceDiagnostics.markEnd(measureId, { action, timedOut: true });
       reject(new Error(errorMessage));
-    }, SOCKET_REQUEST_TIMEOUT_MS);
+    }, timeoutMs);
     pendingSocketRequests.set(message.requestId, {
       resolve: result => {
         performanceDiagnostics.markEnd(measureId, { action, ok: true });
@@ -1219,7 +1299,8 @@ export async function requestUser(action, payload = {}, userId) {
         reject(error);
       },
       timeout,
-      gmId: message.to
+      gmId: message.to,
+      action
     });
     try {
       game.socket.emit(SOCKET_NAME, message);
@@ -1257,16 +1338,41 @@ function requestUserQueued(action, payload = {}, userId) {
  * @returns {Promise<unknown>}
  */
 export async function startDialogCombatWorkflow(payload = {}) {
-  return AoVAdapter.rollDialogCombatWorkflow(payload, {
+  const result = await AoVAdapter.rollDialogCombatWorkflow(payload, {
     promptDefender: (user, defensePayload) => requestUserQueued("promptDefenseRoll", defensePayload, user.id)
   });
+  if (result?.defenseRouted !== true) {
+    await maybeAutoIncrementReactionForDefense({
+      result: {
+        ...result,
+        combatAction: result?.defenseCombatAction ?? result?.combatAction ?? null
+      },
+      payload,
+      combat: game.combat,
+      requestReactionIncrement: requestGm
+    });
+  }
+  return result;
 }
 
 export async function startDialogCombatWorkflowBatch(payloads = [], options = {}) {
-  return AoVAdapter.rollDialogCombatWorkflowBatch(payloads, {
+  const results = await AoVAdapter.rollDialogCombatWorkflowBatch(payloads, {
     beforeCreate: options.beforeCreate,
     promptDefender: (user, defensePayload) => requestUserQueued("promptDefenseRoll", defensePayload, user.id)
   });
+  await Promise.all((Array.isArray(results) ? results : []).map((result, index) => {
+    if (result?.defenseRouted === true) return null;
+    return maybeAutoIncrementReactionForDefense({
+      result: {
+        ...result,
+        combatAction: result?.defenseCombatAction ?? result?.combatAction ?? null
+      },
+      payload: Array.isArray(payloads) ? (payloads[index] ?? {}) : {},
+      combat: game.combat,
+      requestReactionIncrement: requestGm
+    });
+  }));
+  return results;
 }
 
 /**
@@ -1286,15 +1392,20 @@ export async function handleClientSocketRequest(message) {
     throw new Error(`Unsupported ${MODULE_ID} socket schema version.`);
   }
   if (!message?.requestId) throw new Error(`Rejected ${MODULE_ID} socket request without a request id.`);
-  if (isDuplicateRequest(message)) return { duplicate: true };
-  requestingUser(message?.from);
-
-  switch (message.action) {
-    case "promptDefenseRoll":
-      return AoVAdapter.rollDialogDefenseWorkflow(message.payload ?? {});
-    default:
-      throw new Error(`Unknown ${MODULE_ID} client socket action "${message.action}"`);
+  if (isDuplicateRequest(message)) {
+    performanceDiagnostics.count("socket.request.duplicate", 1, {
+      action: message.action,
+      requestId: message.requestId,
+      client: true
+    });
+    return { accepted: true, action: message.action, duplicate: true };
   }
+  const schema = getSocketActionSchema(message.action);
+  if (!schema?.clientAction) throw unknownSocketActionError(MODULE_ID, message.action, { client: true });
+  const user = requestingUser(message?.from);
+  const payload = schema.sanitize(message?.payload ?? {});
+  assertSocketAuthority({ action: message.action, schema, user, payload, message });
+  return schema.execute({ payload, user, message, requestGm });
 }
 
 /**
@@ -1312,7 +1423,14 @@ export async function handleSocketRequest(message) {
     throw new Error(`Unsupported ${MODULE_ID} socket schema version.`);
   }
   if (!message?.requestId) throw new Error(`Rejected ${MODULE_ID} socket request without a request id.`);
-  if (isDuplicateRequest(message)) return { duplicate: true };
+  if (isDuplicateRequest(message)) {
+    performanceDiagnostics.count("socket.request.duplicate", 1, {
+      action: message.action,
+      requestId: message.requestId,
+      client: false
+    });
+    return { accepted: true, action: message.action, duplicate: true };
+  }
   const user = requestingUser(message?.from);
   const payload = message?.payload ?? {};
   const combat = AoVAdapter.getCombatById(payload.combatId);
@@ -1351,6 +1469,11 @@ export async function handleSocketRequest(message) {
               combatId: combat?.id ?? null,
               combatantId: combatant?.id ?? null,
               actionCategory: intent.actionCategory
+            });
+            performanceDiagnostics.count("socket.request.staleNoop", 1, {
+              action: message.action,
+              combatId: combat?.id ?? null,
+              combatantId: combatant?.id ?? null
             });
             return getCombatantState(combatant);
           }
@@ -1403,6 +1526,13 @@ export async function handleSocketRequest(message) {
         // and the slower draft update may overwrite the final plan.
         if (incomingRevision > 0) {
           if (incomingRevision < currentRevision) {
+            performanceDiagnostics.count("movement.commit.ignored", 1, {
+              combatId: combat?.id ?? null,
+              combatantId: combatant?.id ?? null,
+              ignoredReason: "stale-revision",
+              incomingRevision,
+              currentRevision
+            });
             movementDebug(MOVEMENT_DEBUG_CATEGORIES.SOCKET, "record-movement-stale-revision-ignored", () => ({
               combatantId: combatant?.id ?? null,
               incomingRevision,
@@ -1414,12 +1544,19 @@ export async function handleSocketRequest(message) {
               combatantId: combatant?.id ?? null,
               level: MOVEMENT_DEBUG_LEVELS.VERBOSE
             });
-            return current;
+            return movementCommitSummary(incoming, { accepted: false, ignoredReason: "stale-revision" });
           }
           if (
             incomingRevision === currentRevision
             && Number(incoming.capturedAt) < Number(current?.capturedAt ?? 0)
           ) {
+            performanceDiagnostics.count("movement.commit.ignored", 1, {
+              combatId: combat?.id ?? null,
+              combatantId: combatant?.id ?? null,
+              ignoredReason: "older-equal-revision",
+              incomingRevision,
+              currentRevision
+            });
             movementDebug(MOVEMENT_DEBUG_CATEGORIES.SOCKET, "record-movement-older-equal-revision-ignored", () => ({
               combatantId: combatant?.id ?? null,
               incomingRevision,
@@ -1432,7 +1569,7 @@ export async function handleSocketRequest(message) {
               combatantId: combatant?.id ?? null,
               level: MOVEMENT_DEBUG_LEVELS.VERBOSE
             });
-            return current;
+            return movementCommitSummary(incoming, { accepted: false, ignoredReason: "older-equal-revision" });
           }
         }
         else assertFreshCombatant(payload, combatant);
@@ -1451,7 +1588,7 @@ export async function handleSocketRequest(message) {
           combatantId: combatant?.id ?? null,
           level: MOVEMENT_DEBUG_LEVELS.TRACE
         });
-        const updated = await updateCombatantState(combatant, { movement: incoming });
+        await updateCombatantState(combatant, { movement: incoming });
         movementDebug(MOVEMENT_DEBUG_CATEGORIES.SOCKET, "record-movement-write-complete", () => ({
           combatantId: combatant?.id ?? null,
           routeId: incoming.routeId,
@@ -1462,17 +1599,18 @@ export async function handleSocketRequest(message) {
           combatantId: combatant?.id ?? null,
           level: MOVEMENT_DEBUG_LEVELS.TRACE
         });
-        return updated;
+        return movementCommitSummary(getCombatantState(combatant).movement);
       }, { movement: true });
 
       const persisted = getCombatantState(combatant).movement;
       const combatPhase = getCombatState(combat).phase;
       const sameRevision = Number(persisted?.routeRevision ?? 0) === Number(incoming.routeRevision ?? 0);
-      if (incoming.draft !== true && sameRevision) {
+      if (result.accepted !== false && incoming.draft !== true && sameRevision) {
         await refreshPlanningInitiative(combat, combatant);
       }
       if (
-        incoming.draft !== true
+        result.accepted !== false
+        && incoming.draft !== true
         && sameRevision
         && persisted?.planStatus === MOVEMENT_PLAN_STATUS.PLANNED
         && shouldExecuteMovementImmediately(combatPhase)
@@ -1482,38 +1620,43 @@ export async function handleSocketRequest(message) {
           await refreshImmediateResolutionActions(combat, combatant, { preserveStatus: true });
         }
       }
-      return result;
+      return {
+        ...result,
+        planStatus: cleanString(persisted?.planStatus ?? result.planStatus, 40),
+        draft: persisted?.draft === true
+      };
     }
     case "clearMovement":
       assertCombatantAccess(user, combatant);
       return enqueueCombatantWrite(combat?.id, combatant?.id, async () => {
         assertFreshCombatant(payload, combatant);
-        const updated = await updateCombatantState(combatant, {
-          movement: {
-            mode: "none",
-            origin: null,
-            destination: null,
-            route: [],
-            waypoints: [],
-            distance: 0,
-            units: "",
-            manual: true,
-            planStatus: MOVEMENT_PLAN_STATUS.NONE,
-            startedAt: null,
-            completedAt: null,
-            stoppedReason: "",
-            routeRevision: Date.now(),
-            routeId: "",
-            captureSource: "manual-clear",
-            capturedAt: Date.now(),
-            draft: false
-          }
+        const clearedMovement = {
+          mode: "none",
+          origin: null,
+          destination: null,
+          route: [],
+          waypoints: [],
+          distance: 0,
+          units: "",
+          manual: true,
+          planStatus: MOVEMENT_PLAN_STATUS.NONE,
+          startedAt: null,
+          completedAt: null,
+          stoppedReason: "",
+          routeRevision: Date.now(),
+          routeId: "",
+          captureSource: "manual-clear",
+          capturedAt: Date.now(),
+          draft: false
+        };
+        await updateCombatantState(combatant, {
+          movement: clearedMovement
         });
         await refreshPlanningInitiative(combat, combatant);
         if (shouldQueueResolutionImmediately()) {
           await refreshImmediateResolutionActions(combat, combatant, { preserveStatus: true });
         }
-        return updated;
+        return movementCommitSummary(getCombatantState(combatant).movement, { action: "clearMovement" });
       }, { movement: true });
     case "adjustInitiative":
       assertCombatantAccess(user, combatant);
@@ -1619,6 +1762,11 @@ export async function handleSocketRequest(message) {
         await reconcileReactionPenaltyEffect(combat, combatant, reactionCount);
         return next;
       });
+    }
+    case "commitDefenseCard": {
+      const schema = getSocketActionSchema("commitDefenseCard");
+      const sanitized = schema?.sanitize(payload) ?? payload;
+      return AoVAdapter.commitDefenseCard(sanitized, { user, requestId: message.requestId });
     }
     default:
       throw new Error(`Unknown ${MODULE_ID} socket action "${message.action}"`);

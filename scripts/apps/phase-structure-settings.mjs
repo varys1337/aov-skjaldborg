@@ -1,5 +1,7 @@
 import {
   MODULE_ID,
+  PHASE_CURRENT_TURN_DEFAULTS,
+  PHASE_CURRENT_TURN_SETTING_KEYS,
   PHASE_ORDER,
   PHASE_STRUCTURE_SETTING_KEYS,
   PHASES
@@ -51,10 +53,14 @@ export class PhaseStructureSettings extends HandlebarsApplicationMixin(Applicati
       ...context,
       phases: PHASE_ORDER.map(phase => ({
         id: phase,
+        enableId: `skj-phase-${phase}`,
+        trackCurrentTurnId: `skj-phase-${phase}-track-current-turn`,
         name: `phases.${phase}`,
+        trackCurrentTurnName: `trackCurrentTurn.${phase}`,
         label: game.i18n.localize(`AOV_SKJALDBORG.Phases.${phase}`),
         hint: game.i18n.localize(`AOV_SKJALDBORG.Settings.PhaseStructureMenu.Phases.${phase}.Hint`),
-        checked: game.settings.get(MODULE_ID, PHASE_STRUCTURE_SETTING_KEYS[phase]) !== false
+        checked: game.settings.get(MODULE_ID, PHASE_STRUCTURE_SETTING_KEYS[phase]) !== false,
+        trackCurrentTurn: game.settings.get(MODULE_ID, PHASE_CURRENT_TURN_SETTING_KEYS[phase]) === true
       })),
       buttons: [
         { type: "submit", icon: "fa-solid fa-save", label: "SETTINGS.Save" },
@@ -72,7 +78,10 @@ export class PhaseStructureSettings extends HandlebarsApplicationMixin(Applicati
    */
   static async onStandardPreset(event) {
     event.preventDefault();
-    await PhaseStructureSettings._persistSelection(Object.fromEntries(PHASE_ORDER.map(phase => [phase, true])));
+    await PhaseStructureSettings._persistConfiguration({
+      phases: Object.fromEntries(PHASE_ORDER.map(phase => [phase, true])),
+      trackCurrentTurn: { ...PHASE_CURRENT_TURN_DEFAULTS }
+    });
     await this.render();
   }
 
@@ -87,33 +96,46 @@ export class PhaseStructureSettings extends HandlebarsApplicationMixin(Applicati
    */
   static async onStreamlinedPreset(event) {
     event.preventDefault();
-    await PhaseStructureSettings._persistSelection({
-      [PHASES.INTENT]: false,
-      [PHASES.MOVEMENT]: false,
-      [PHASES.RESOLUTION]: true,
-      [PHASES.BOOKKEEPING]: false
+    await PhaseStructureSettings._persistConfiguration({
+      phases: {
+        [PHASES.INTENT]: false,
+        [PHASES.MOVEMENT]: false,
+        [PHASES.RESOLUTION]: true,
+        [PHASES.BOOKKEEPING]: false
+      },
+      trackCurrentTurn: { ...PHASE_CURRENT_TURN_DEFAULTS }
     });
     await this.render();
   }
 
   /**
-   * Persist one normalized phase selection and reconcile an active combat.
+   * Persist normalized phase structure and turn-cursor behavior, then reconcile an active combat.
    *
-   * @param {Record<string, boolean>} selection Phase selection.
+   * @param {{phases?: Record<string, boolean>, trackCurrentTurn?: Record<string, boolean>}} configuration Phase settings.
    * @returns {Promise<void>}
    * @protected
    */
-  static async _persistSelection(selection) {
-    const normalized = Object.fromEntries(PHASE_ORDER.map(phase => [phase, selection?.[phase] === true]));
+  static async _persistConfiguration(configuration = {}) {
+    const normalized = Object.fromEntries(PHASE_ORDER.map(phase => [
+      phase,
+      configuration.phases?.[phase] === true
+    ]));
     if (!Object.values(normalized).some(Boolean)) normalized[PHASES.RESOLUTION] = true;
 
-    await Promise.all(PHASE_ORDER.map(phase => game.settings.set(
-      MODULE_ID,
-      PHASE_STRUCTURE_SETTING_KEYS[phase],
-      normalized[phase]
-    )));
+    const turnTracking = Object.fromEntries(PHASE_ORDER.map(phase => [
+      phase,
+      typeof configuration.trackCurrentTurn?.[phase] === "boolean"
+        ? configuration.trackCurrentTurn[phase]
+        : PHASE_CURRENT_TURN_DEFAULTS[phase] !== false
+    ]));
+
+    await Promise.all(PHASE_ORDER.flatMap(phase => [
+      game.settings.set(MODULE_ID, PHASE_STRUCTURE_SETTING_KEYS[phase], normalized[phase]),
+      game.settings.set(MODULE_ID, PHASE_CURRENT_TURN_SETTING_KEYS[phase], turnTracking[phase])
+    ]));
 
     await game.aovSkjaldborg?.phase?.reconcilePhaseStructure?.(game.combat);
+    await game.aovSkjaldborg?.phase?.reconcileCurrentTurnTracking?.(game.combat);
     RenderCoordinator.invalidateCombatTracker("phase-structure-settings");
   }
 
@@ -137,6 +159,11 @@ export class PhaseStructureSettings extends HandlebarsApplicationMixin(Applicati
       ui.notifications.warn(game.i18n.localize("AOV_SKJALDBORG.Warnings.AtLeastOnePhase"));
       selection[PHASES.RESOLUTION] = true;
     }
-    await PhaseStructureSettings._persistSelection(selection);
+    const trackCurrentTurn = Object.fromEntries(PHASE_ORDER.map(phase => [
+      phase,
+      data.trackCurrentTurn?.[phase] === true
+    ]));
+
+    await PhaseStructureSettings._persistConfiguration({ phases: selection, trackCurrentTurn });
   }
 }

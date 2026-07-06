@@ -1,9 +1,24 @@
 import { DAMAGE_EFFECT_SOURCE_FLAG, GRAPPLED_STATUS_ID, IMMOBILIZED_STATUS_ID, MODULE_ID, PHASES } from "../constants.mjs";
+import { runtimeSettings } from "../runtime-settings.mjs";
+import { warn } from "../logger.mjs";
 import { effectHasStatus, effectIsActive, injuryThresholdSeverityFromEffects, moduleFlag } from "../compat/active-effects.mjs";
+import { guardedModuleFlag, guardedUpdate } from "../utils/guarded-document-writes.mjs";
 import {
   getItemCritFumbleChances,
   getWeaponCritFumbleChances
 } from "../combat/automation-helpers.mjs";
+import { combatantForTokenDocument } from "../combat/combatant-token-resolution.mjs";
+import {
+  proneAttackModifierContext,
+  proneDamageContext,
+  serializeProneAttackModifierContext,
+  serializeProneDamageContext
+} from "../combat/prone-automation.mjs";
+
+const CORE_ROLL_PROMPT_TIMEOUT_MS = 15000;
+const defenseCardQueues = new Map();
+const defenseCommitResults = new Map();
+const DEFENSE_COMMIT_RESULT_TTL_MS = 60000;
 
 /**
  * Convert a possibly absent or textual value to a finite number.
@@ -117,6 +132,32 @@ const CORE_COMBAT_CARD_WAIT_STEP_MS = 100;
  */
 function sleep(ms) {
   return new Promise(resolve => globalThis.setTimeout(resolve, ms));
+}
+
+function defenseCommitResultKey(messageId, requestId) {
+  const attackMessageId = String(messageId ?? "").trim();
+  const id = String(requestId ?? "").trim();
+  return attackMessageId && id ? `${attackMessageId}:${id}` : "";
+}
+
+function pruneDefenseCommitResults() {
+  const now = Date.now();
+  for (const [key, entry] of defenseCommitResults) {
+    if ((now - Number(entry?.storedAt ?? 0)) > DEFENSE_COMMIT_RESULT_TTL_MS) defenseCommitResults.delete(key);
+  }
+}
+
+function queuedDefenseCardAppend(messageId, operation) {
+  const key = String(messageId ?? "") || "no-message";
+  const previous = defenseCardQueues.get(key) ?? Promise.resolve();
+  const next = previous
+    .catch(() => undefined)
+    .then(operation);
+  defenseCardQueues.set(key, next);
+  void next.finally(() => {
+    if (defenseCardQueues.get(key) === next) defenseCardQueues.delete(key);
+  }).catch(() => undefined);
+  return next;
 }
 
 /**
@@ -252,6 +293,16 @@ function actorGrappleLocationStates(actor) {
 
 let aovCheckApiPromise = null;
 let aovRollOptionsApiPromise = null;
+let aovCombatChatApiPromise = null;
+let aovRollTypeApiPromise = null;
+const warnedAoVAdapterFailures = new Set();
+
+function warnAoVAdapterFailureOnce(key, message, exception = null) {
+  if (warnedAoVAdapterFailures.has(key)) return;
+  warnedAoVAdapterFailures.add(key);
+  if (exception) warn(message, exception);
+  else warn(message);
+}
 
 /**
  * Import one installed AoV system module using Foundry's route resolver.
@@ -301,6 +352,25 @@ async function getAoVCheckApi() {
   return aovCheckApiPromise;
 }
 
+async function getAoVCombatChatApi() {
+  if (!aovCombatChatApiPromise) {
+    const path = "systems/aov/system/chat/combat-chat.mjs";
+    aovCombatChatApiPromise = importAoVSystemModule(path)
+      .then(module => {
+        if (typeof module.COCard?.resolveDam !== "function" || typeof module.COCard?.COHitLoc !== "function") {
+          throw new Error("The Age of Vikings combat card workflow is unavailable.");
+        }
+        return { COCard: module.COCard };
+      })
+      .catch(exception => {
+        aovCombatChatApiPromise = null;
+        warnAoVAdapterFailureOnce("combat-chat-api", "Age of Vikings combat chat workflow integration is unavailable.", exception);
+        throw exception;
+      });
+  }
+  return aovCombatChatApiPromise;
+}
+
 /**
  * Load AoV's core roll-options dialog surface without using AOVCheck.RollDialog,
  * whose combat option list depends on global open-card discovery.
@@ -333,6 +403,25 @@ async function getAoVRollOptionsApi() {
       });
   }
   return aovRollOptionsApiPromise;
+}
+
+async function getAoVRollTypeApi() {
+  if (!aovRollTypeApiPromise) {
+    const path = "systems/aov/system/apps/roll-types.mjs";
+    aovRollTypeApiPromise = importAoVSystemModule(path)
+      .then(module => {
+        if (typeof module.AOVRollType?._onDetermineCheck !== "function") {
+          throw new Error("The Age of Vikings statistic roll router is unavailable.");
+        }
+        return { AOVRollType: module.AOVRollType };
+      })
+      .catch(exception => {
+        aovRollTypeApiPromise = null;
+        warnAoVAdapterFailureOnce("roll-type-api", "Age of Vikings statistic roll integration is unavailable.", exception);
+        throw exception;
+      });
+  }
+  return aovRollTypeApiPromise;
 }
 
 /**
@@ -385,7 +474,7 @@ export class AoVAdapter {
    * @returns {boolean}
    */
   static get enabledSetting() {
-    return game.settings.get(MODULE_ID, "enabled");
+    return runtimeSettings.enabled === true;
   }
 
   /**
@@ -395,6 +484,182 @@ export class AoVAdapter {
    */
   static isAoVWorld() {
     return game.system?.id === "aov";
+  }
+
+  /**
+   * Public alias for callers that need a system-active check without depending
+   * on the legacy method name.
+   *
+   * @returns {boolean}
+   */
+  static isAovSystemActive() {
+    return this.isAoVWorld();
+  }
+
+  /**
+   * Trigger AoV's core check workflow through the adapter boundary.
+   *
+   * String `rollType` and `cardType` values are resolved against AoV's current
+   * constants before dispatch.
+   *
+   * @param {object} config AoV check request data.
+   * @returns {Promise<string|undefined|false>}
+   */
+  static async triggerAovCheck(config = {}) {
+    const { AOVCheck, RollType, CardType } = await getAoVCheckApi();
+    const request = { ...config };
+    if (typeof request.rollType === "string" && RollType[request.rollType]) request.rollType = RollType[request.rollType];
+    if (typeof request.cardType === "string" && CardType[request.cardType]) request.cardType = CardType[request.cardType];
+    return AOVCheck._trigger(request);
+  }
+
+  /**
+   * Normalize an AoV check request using the current system implementation.
+   *
+   * @param {object} config Raw AoV check request data.
+   * @returns {Promise<object>}
+   */
+  static async normalizeAovCheckRequest(config = {}) {
+    const { AOVCheck, RollType, CardType } = await getAoVCheckApi();
+    if (typeof AOVCheck.normaliseRequest !== "function") {
+      const error = new Error("The Age of Vikings check request normalizer is unavailable.");
+      warnAoVAdapterFailureOnce("check-normalise-request", error.message, error);
+      throw error;
+    }
+    return AOVCheck.normaliseRequest({
+      ...config,
+      rollType: typeof config.rollType === "string" && RollType[config.rollType] ? RollType[config.rollType] : config.rollType,
+      cardType: typeof config.cardType === "string" && CardType[config.cardType] ? CardType[config.cardType] : config.cardType
+    });
+  }
+
+  /**
+   * Start an AoV check from an already-normalized request.
+   *
+   * @param {object} config Normalized AoV check request.
+   * @returns {Promise<string|undefined|false>}
+   */
+  static async startAovCheck(config = {}) {
+    const { AOVCheck } = await getAoVCheckApi();
+    if (typeof AOVCheck.startCheck !== "function") {
+      const error = new Error("The Age of Vikings check starter is unavailable.");
+      warnAoVAdapterFailureOnce("check-start-check", error.message, error);
+      throw error;
+    }
+    return AOVCheck.startCheck(config);
+  }
+
+  /**
+   * Render AoV combat chat content from existing AoV flags.
+   *
+   * @param {object} aovFlags AoV chat flags.
+   * @returns {Promise<string>}
+   */
+  static async createAovCombatCard(aovFlags = {}) {
+    const { AOVCheck } = await getAoVCheckApi();
+    if (typeof AOVCheck.startChat === "function") return AOVCheck.startChat(aovFlags);
+    return foundry.applications.handlebars.renderTemplate(
+      aovFlags.chatTemplate ?? "systems/aov/templates/chat/roll-combat.hbs",
+      aovFlags
+    );
+  }
+
+  /**
+   * Resolve an AoV damage card through AoV's current combat-chat handler.
+   *
+   * @param {object} config AoV combat-chat damage resolve config.
+   * @returns {Promise<unknown>}
+   */
+  static async resolveAovDamage(config = {}) {
+    const { COCard } = await getAoVCombatChatApi();
+    return COCard.resolveDam(config);
+  }
+
+  /**
+   * Resolve AoV hit-location selection through AoV's combat-chat handler.
+   *
+   * @param {object} config AoV combat-chat hit-location config.
+   * @returns {Promise<unknown>}
+   */
+  static async resolveAovHitLocation(config = {}) {
+    const { COCard } = await getAoVCombatChatApi();
+    return COCard.COHitLoc(config);
+  }
+
+  /**
+   * Read AoV chat-card flags without exposing a mutable fallback object.
+   *
+   * @param {ChatMessage|null|undefined} message Candidate message.
+   * @returns {{rollType: string, cardType: string, state: string, chatTemplate: string, chatCard: object[]}}
+   */
+  static getAovChatCardFlags(message) {
+    const flags = message?.flags?.aov ?? {};
+    return {
+      rollType: String(message?.getFlag?.("aov", "rollType") ?? flags.rollType ?? ""),
+      cardType: String(message?.getFlag?.("aov", "cardType") ?? flags.cardType ?? ""),
+      state: String(message?.getFlag?.("aov", "state") ?? flags.state ?? ""),
+      chatTemplate: String(flags.chatTemplate ?? ""),
+      chatCard: Array.isArray(message?.getFlag?.("aov", "chatCard"))
+        ? message.getFlag("aov", "chatCard")
+        : (Array.isArray(flags.chatCard) ? flags.chatCard : [])
+    };
+  }
+
+  /**
+   * Normalize the AoV weapon data commonly needed by Skjaldborg rules.
+   *
+   * @param {Item|object|null|undefined} item Candidate weapon Item.
+   * @returns {object|null}
+   */
+  static readAovWeaponDamageData(item) {
+    if (!item || item.type !== "weapon") return null;
+    return {
+      id: String(item.id ?? item._id ?? ""),
+      uuid: item.uuid ?? null,
+      name: itemName(item),
+      damage: String(item.system?.damage ?? ""),
+      damageType: String(item.system?.damageType ?? item.system?.damType ?? ""),
+      weaponType: String(item.system?.weaponType ?? ""),
+      weaponCategory: String(item.system?.weaponCat ?? item.system?.weaponCatName ?? ""),
+      currentHp: numberOr(item.system?.currHP, 0),
+      maximumHp: numberOr(item.system?.maxHP ?? item.system?.hp, 0)
+    };
+  }
+
+  /**
+   * Normalize one actor's AoV hit-location Items.
+   *
+   * @param {Actor|object|null|undefined} actor Candidate Actor.
+   * @returns {object[]}
+   */
+  static readAovHitLocationData(actor) {
+    return itemArray(actor?.items)
+      .filter(item => item?.type === "hitloc")
+      .map(item => ({
+        id: String(item.id ?? item._id ?? ""),
+        uuid: item.uuid ?? null,
+        name: itemName(item),
+        locType: String(item.system?.locType ?? ""),
+        lowRoll: numberOr(item.system?.lowRoll, 0),
+        highRoll: numberOr(item.system?.highRoll, 0),
+        map: numberOr(item.system?.map, 0),
+        npcAP: numberOr(item.system?.npcAP, 0),
+        npcDamage: numberOr(item.system?.npcDmg, 0),
+        gridPos: numberOr(item.system?.gridPos, 0)
+      }));
+  }
+
+  /**
+   * Execute AoV's current actor statistic roll router.
+   *
+   * @param {Actor} actor Actor document.
+   * @param {{property: string, characteristic?: string}} detail AoV roll detail.
+   * @param {Event|null} [event=null] Originating interaction event.
+   * @returns {Promise<unknown>}
+   */
+  static async executeAovActorStatCheck(actor, detail, event = null) {
+    const { AOVRollType } = await getAoVRollTypeApi();
+    return AOVRollType._onDetermineCheck(event ?? {}, detail, actor);
   }
 
   /**
@@ -615,18 +880,43 @@ export class AoVAdapter {
     const { AOVCheck, RollType, CardType } = await getAoVCheckApi();
     const modifierEvent = event ?? {};
     const isDamage = property === "damage";
+    const actorToken = this.resolveActorTokenDocument(actor, null);
+    const existingCombatCard = !isDamage ? findOpenCoreCombatCard() : null;
+    const targetToken = Array.from(game.user?.targets ?? [])[0]?.document ?? null;
+    const targetActor = targetToken?.actor ?? null;
+    const proneRules = !isDamage && !existingCombatCard
+      ? proneAttackModifierContext({ attackerActor: actor, attackerToken: actorToken, targetActor, targetToken })
+      : null;
+    const proneDamageRules = !isDamage && !existingCombatCard
+      ? proneDamageContext({ attackerActor: actor, attackerToken: actorToken, targetActor, targetToken, weapon })
+      : null;
 
-    return AOVCheck._trigger({
+    const messageId = await AOVCheck._trigger({
       rollType: isDamage ? RollType.DAMAGE : RollType.WEAPON,
       cardType: isDamage ? CardType.UNOPPOSED : CardType.COMBAT,
       shiftKey: Boolean(modifierEvent.shiftKey),
       actor,
-      token: actor.token ?? null,
+      token: actorToken ?? actor.token ?? null,
       characteristic: false,
       skillId: weapon.id,
       itemId: weapon.id,
+      flatMod: numberOr(proneRules?.total, 0),
       origID: game.user?.id ?? game.user?._id
     });
+
+    if (!isDamage && !existingCombatCard && messageId) {
+      await this.#attachProneAttackModifierFlag(messageId, {
+        actorUuid: actor?.uuid ?? null,
+        sourceTokenUuid: actorToken?.uuid ?? null,
+        weaponUuid: weapon?.uuid ?? null,
+        targetActorUuid: targetActor?.uuid ?? null,
+        targetTokenUuid: targetToken?.uuid ?? null,
+        proneRules: serializeProneAttackModifierContext(proneRules),
+        proneDamageRules: serializeProneDamageContext(proneDamageRules)
+      }, { actor, sourceToken: actorToken, weapon, targetActor, targetToken });
+    }
+
+    return messageId;
   }
 
   static #actorSkillByIdOrCid(actor, skillIdOrCid) {
@@ -785,6 +1075,11 @@ export class AoVAdapter {
     return userOwnsParticipant(game.user, actor, token);
   }
 
+  static userCanDefend(user, actor, token = null) {
+    if (user?.isGM) return true;
+    return userOwnsParticipant(user, actor, token);
+  }
+
   /**
    * Resolve participant documents from a socket-safe defense workflow payload.
    * Token UUID is authoritative for unlinked actors; actor UUID is only a
@@ -817,7 +1112,7 @@ export class AoVAdapter {
    * Documents across the socket; use UUIDs and re-resolve locally on the target
    * user's client.
    *
-   * @param {{targetActor: Actor, targetToken: TokenDocument|null, attackMessageId: string|null}} request Request data.
+   * @param {{targetActor: Actor, targetToken: TokenDocument|null, attackMessageId: string|null, incomingWeaponType?: string}} request Request data.
    * @returns {object}
    */
   static buildDefenseWorkflowPayload(request) {
@@ -826,7 +1121,8 @@ export class AoVAdapter {
     return {
       attackMessageId: request.attackMessageId ?? null,
       tokenUuid: token?.uuid ?? "",
-      actorUuid: token?.actor?.uuid ?? actor?.uuid ?? ""
+      actorUuid: token?.actor?.uuid ?? actor?.uuid ?? "",
+      incomingWeaponType: String(request.incomingWeaponType ?? "").slice(0, 80)
     };
   }
 
@@ -941,6 +1237,10 @@ export class AoVAdapter {
     return this.#combatCardEntry(options);
   }
 
+  static __testAttackFlatModifier(payload = {}, weapon = null) {
+    return this.#attackFlatModifier(payload, weapon);
+  }
+
   static async #aovSelectList(name, ...args) {
     const { AOVSelectLists } = await getAoVRollOptionsApi();
     const fn = AOVSelectLists?.[name];
@@ -951,6 +1251,12 @@ export class AoVAdapter {
     const options = actionOptions && typeof actionOptions === "object" ? actionOptions : {};
     if (Object.keys(options).length) return options;
     return source === "defense" ? { none: game.i18n.localize("AOV.Combat.action.none") } : { attack: game.i18n.localize("AOV.Combat.action.attack") };
+  }
+
+  static #timeoutActionOption(source, options, defaultAction) {
+    if (source === "defense" && Object.hasOwn(options, "none")) return "none";
+    if (source === "attack" && Object.hasOwn(options, "attack")) return "attack";
+    return defaultAction;
   }
 
   static async #promptCoreRollOptions({
@@ -989,11 +1295,29 @@ export class AoVAdapter {
       successLevel: "99"
     };
     const html = await foundry.applications.handlebars.renderTemplate("systems/aov/templates/dialog/rollOptions.hbs", data);
-    const result = await AOVDialog.input({
+    let promptTimedOut = false;
+    const prompt = AOVDialog.input({
       window: { title: game.i18n.localize("AOV.card.rollMods") },
       content: html,
       ok: { label: game.i18n.localize("AOV.rollDice") }
+    }).then(result => ({ type: "input", result })).catch(error => ({ type: "error", error }));
+    const timeout = new Promise(resolve => {
+      globalThis.setTimeout(() => resolve({ type: "timeout", result: null }), CORE_ROLL_PROMPT_TIMEOUT_MS);
     });
+    const promptResult = await Promise.race([prompt, timeout]);
+    if (promptResult.type === "error") throw promptResult.error;
+    if (promptResult.type === "timeout") promptTimedOut = true;
+    const result = promptResult.result;
+    if (promptTimedOut) {
+      const actionOption = this.#timeoutActionOption(source, options, defaultAction);
+      return {
+        cancelled: false,
+        actionOption,
+        checkBonus: 0,
+        raw: null,
+        timedOut: true
+      };
+    }
     if (!result) {
       return {
         cancelled: true,
@@ -1102,25 +1426,47 @@ export class AoVAdapter {
     return message ?? null;
   }
 
-  static async #appendDefenseCard(messageId, card) {
-    const message = game.messages?.get?.(String(messageId ?? "")) ?? null;
-    if (!message?.update) return null;
-    const aovFlags = foundry.utils.deepClone(message.flags?.aov ?? {});
-    const chatCards = Array.isArray(aovFlags.chatCard) ? aovFlags.chatCard : [];
-    if (String(aovFlags.cardType ?? "") !== "CO" || String(aovFlags.state ?? "") === "closed") return null;
-    if (chatCards.length >= 2) {
-      return { messageId: message.id, alreadyDefended: true };
-    }
-    const nextFlags = {
-      ...aovFlags,
-      chatCard: [...chatCards, card]
-    };
-    const content = await this.#renderCombatMessage(nextFlags);
-    await message.update({
-      content,
-      "flags.aov.chatCard": nextFlags.chatCard
+  static async #appendDefenseCard(messageId, card, { requestId = "" } = {}) {
+    return queuedDefenseCardAppend(messageId, async () => {
+      pruneDefenseCommitResults();
+      const commitKey = defenseCommitResultKey(messageId, requestId);
+      const cached = commitKey ? defenseCommitResults.get(commitKey) : null;
+      if (cached?.result) return { ...cached.result, duplicate: true };
+
+      const message = game.messages?.get?.(String(messageId ?? "")) ?? null;
+      if (!message?.update) return null;
+      const aovFlags = foundry.utils.deepClone(message.flags?.aov ?? {});
+      const chatCards = Array.isArray(aovFlags.chatCard) ? aovFlags.chatCard : [];
+      if (String(aovFlags.cardType ?? "") !== "CO" || String(aovFlags.state ?? "") === "closed") return null;
+      if (chatCards.length >= 2) {
+        const result = {
+          accepted: false,
+          messageId: message.id,
+          alreadyDefended: true,
+          alreadyResolved: true,
+          reason: "already-resolved"
+        };
+        if (commitKey) defenseCommitResults.set(commitKey, { result, storedAt: Date.now() });
+        return result;
+      }
+      const nextFlags = {
+        ...aovFlags,
+        chatCard: [...chatCards, card]
+      };
+      const content = await this.#renderCombatMessage(nextFlags);
+      await guardedUpdate(message, {
+        content,
+        "flags.aov.chatCard": nextFlags.chatCard
+      }, { category: "chat.defenseCardAppend" });
+      const result = {
+        accepted: true,
+        messageId: message.id,
+        alreadyDefended: false,
+        alreadyResolved: false
+      };
+      if (commitKey) defenseCommitResults.set(commitKey, { result, storedAt: Date.now() });
+      return result;
     });
-    return { messageId: message.id, alreadyDefended: false };
   }
 
   static #attackFlatModifier(payload, weapon) {
@@ -1138,6 +1484,7 @@ export class AoVAdapter {
       + disarmModifier
       + stunModifier
       + numberOr(payload.augmentModifier, 0)
+      + numberOr(payload.proneModifier, 0)
       + coreModifier;
   }
 
@@ -1171,6 +1518,7 @@ export class AoVAdapter {
     await this.#attachStunFlag(attackMessageId, payload, { actor, sourceToken, weapon, targetActor, targetToken });
     await this.#attachMissileFlags(attackMessageId, payload, { actor, sourceToken, weapon, targetActor, targetToken });
     await this.#attachDamageEffectSourceFlag(attackMessageId, payload, { actor, sourceToken, weapon, targetActor, targetToken });
+    await this.#attachProneAttackModifierFlag(attackMessageId, payload, { actor, sourceToken, weapon, targetActor, targetToken });
     return { actor, weapon, sourceToken, targetActor, targetToken, attackMessageId };
   }
 
@@ -1195,7 +1543,7 @@ export class AoVAdapter {
     return String(item?.system?.weaponType ?? "");
   }
 
-  static async #appendNoDefenseCard({ attackMessageId, actor, token, coreOptions }) {
+  static async #appendNoDefenseCard({ attackMessageId, actor, token, coreOptions, requestId = "" }) {
     const card = this.#combatCardEntry({
       actor,
       token,
@@ -1208,9 +1556,24 @@ export class AoVAdapter {
       encPenalty: 0,
       combatAction: "none"
     });
-    const update = await this.#appendDefenseCard(attackMessageId, card);
-    if (!update || update.alreadyDefended) throw new Error(game.i18n.localize("AOV_SKJALDBORG.Warnings.DefenseCombatCardUnavailable"));
+    const update = await this.#appendDefenseCard(attackMessageId, card, { requestId });
+    if (!update) throw new Error(game.i18n.localize("AOV_SKJALDBORG.Warnings.DefenseCombatCardUnavailable"));
+    if (update.alreadyResolved) {
+      ui.notifications.warn(game.i18n.localize("AOV_SKJALDBORG.Warnings.DefenseAlreadyResolved"));
+      return {
+        accepted: false,
+        alreadyResolved: true,
+        reason: "already-resolved",
+        defenseMode: "none",
+        defenseMessageId: update.messageId ?? attackMessageId ?? null,
+        coreOptions,
+        combatAction: "none",
+        coreDialogSource: "defense",
+        cancelled: false
+      };
+    }
     return {
+      accepted: true,
       defenseMode: "none",
       defenseMessageId: update.messageId ?? attackMessageId ?? null,
       coreOptions,
@@ -1220,7 +1583,7 @@ export class AoVAdapter {
     };
   }
 
-  static async #addDefenseToAttackMessage({ attackMessageId, actor, token, item, mode, coreOptions }) {
+  static async #addDefenseToAttackMessage({ attackMessageId, actor, token, item, mode, coreOptions, requestId = "" }) {
     const isDodge = mode === "dodge";
     const rawScore = isDodge ? skillTotal(actor, item) : numberOr(item?.system?.total, 0);
     const encPenalty = isDodge ? skillEncPenalty(actor, item) : numberOr(actor?.system?.encPenalty, 0);
@@ -1237,9 +1600,24 @@ export class AoVAdapter {
       encPenalty,
       combatAction: mode
     });
-    const update = await this.#appendDefenseCard(attackMessageId, card);
-    if (!update || update.alreadyDefended) throw new Error(game.i18n.localize("AOV_SKJALDBORG.Warnings.DefenseCombatCardUnavailable"));
+    const update = await this.#appendDefenseCard(attackMessageId, card, { requestId });
+    if (!update) throw new Error(game.i18n.localize("AOV_SKJALDBORG.Warnings.DefenseCombatCardUnavailable"));
+    if (update.alreadyResolved) {
+      ui.notifications.warn(game.i18n.localize("AOV_SKJALDBORG.Warnings.DefenseAlreadyResolved"));
+      return {
+        accepted: false,
+        alreadyResolved: true,
+        reason: "already-resolved",
+        defenseMode: isDodge ? "dodge" : "weapon",
+        defenseMessageId: update.messageId ?? attackMessageId ?? null,
+        coreOptions,
+        combatAction: mode,
+        coreDialogSource: "defense",
+        cancelled: false
+      };
+    }
     return {
+      accepted: true,
       defenseMode: isDodge ? "dodge" : "weapon",
       defenseMessageId: update?.messageId ?? attackMessageId ?? null,
       coreOptions,
@@ -1247,6 +1625,105 @@ export class AoVAdapter {
       coreDialogSource: "defense",
       cancelled: false
     };
+  }
+
+  static #defenseCommitPayload({ attackMessageId, actor, token, actionOption, coreOptions, item = null }) {
+    const tokenDocument = token?.document ?? token ?? null;
+    return {
+      attackMessageId: String(attackMessageId ?? "") || null,
+      tokenUuid: tokenDocument?.uuid ?? "",
+      actorUuid: tokenDocument?.actor?.uuid ?? actor?.uuid ?? "",
+      actionOption: ["parry", "dodge", "none"].includes(String(actionOption ?? "")) ? String(actionOption) : "none",
+      checkBonus: numberOr(coreOptions?.checkBonus, 0),
+      itemId: item?.id ?? null
+    };
+  }
+
+  static async #commitDefenseChoice({ attackMessageId, actor, token, actionOption, checkBonus = 0, itemId = null, requestId = "" }) {
+    const coreOptions = {
+      cancelled: false,
+      actionOption: ["parry", "dodge", "none"].includes(String(actionOption ?? "")) ? String(actionOption) : "none",
+      checkBonus: numberOr(checkBonus, 0),
+      raw: null
+    };
+
+    if (coreOptions.actionOption === "none") {
+      return this.#appendNoDefenseCard({
+        attackMessageId,
+        actor,
+        token,
+        coreOptions,
+        requestId
+      });
+    }
+
+    if (coreOptions.actionOption === "dodge") {
+      const dodgeSkill = this.getDodgeSkill(actor);
+      if (dodgeSkill && (!itemId || String(dodgeSkill.id) === String(itemId))) {
+        return this.#addDefenseToAttackMessage({
+          attackMessageId,
+          actor,
+          token,
+          item: dodgeSkill,
+          mode: "dodge",
+          coreOptions,
+          requestId
+        });
+      }
+    }
+
+    if (coreOptions.actionOption === "parry") {
+      const defenseWeapon = this.getDefenseWeapon(actor);
+      if (defenseWeapon && (!itemId || String(defenseWeapon.id) === String(itemId))) {
+        return this.#addDefenseToAttackMessage({
+          attackMessageId,
+          actor,
+          token,
+          item: defenseWeapon,
+          mode: "parry",
+          coreOptions,
+          requestId
+        });
+      }
+    }
+
+    ui.notifications.warn(game.i18n.format("AOV_SKJALDBORG.Warnings.NoDefenderDefense", {
+      actor: actor?.name ?? game.i18n.localize("AOV_SKJALDBORG.ActionHud.UnknownActor")
+    }));
+    return this.#appendNoDefenseCard({
+      attackMessageId,
+      actor,
+      token,
+      coreOptions: {
+        ...coreOptions,
+        actionOption: "none"
+      },
+      requestId
+    });
+  }
+
+  static async commitDefenseCard(payload = {}, options = {}) {
+    const { actor, token } = await this.resolveDefenseParticipant(payload);
+    if (!actor) throw new Error(game.i18n.localize("AOV_SKJALDBORG.Warnings.DefenseActorUnavailable"));
+    const user = options.user ?? game.user;
+    if (!this.userCanDefend(user, actor, token)) {
+      throw new Error(game.i18n.localize("AOV_SKJALDBORG.Warnings.DefenseActorNotOwned"));
+    }
+
+    const combatCard = await waitForOpenCoreCombatCard(payload.attackMessageId);
+    if (!combatCard) {
+      throw new Error(game.i18n.localize("AOV_SKJALDBORG.Warnings.DefenseCombatCardUnavailable"));
+    }
+
+    return this.#commitDefenseChoice({
+      attackMessageId: combatCard.id,
+      actor,
+      token,
+      actionOption: payload.actionOption,
+      checkBonus: payload.checkBonus,
+      itemId: payload.itemId,
+      requestId: options.requestId
+    });
   }
 
   /**
@@ -1291,7 +1768,7 @@ export class AoVAdapter {
         cardCreated: false
       };
     }
-    const { targetActor, targetToken, attackMessageId } = created;
+    const { targetActor, targetToken, attackMessageId, weapon } = created;
 
     if (!targetActor) {
       return {
@@ -1312,7 +1789,12 @@ export class AoVAdapter {
       return { started: true, attackMessageId, defenseMode: null, defenseMessageId: null, defenseUserId: null, coreOptions: promptedPayload.coreOptions, combatAction: promptedPayload.combatAction, coreDialogSource: "attack", cardCreated: true };
     }
 
-    const defensePayload = this.buildDefenseWorkflowPayload({ targetActor, targetToken, attackMessageId });
+    const defensePayload = this.buildDefenseWorkflowPayload({
+      targetActor,
+      targetToken,
+      attackMessageId,
+      incomingWeaponType: weapon?.system?.weaponType
+    });
     if (defenseUser.id !== game.user?.id) {
       if (typeof options.promptDefender !== "function") {
         ui.notifications.warn(game.i18n.localize("AOV_SKJALDBORG.Warnings.NoDefensePromptRoute"));
@@ -1330,6 +1812,8 @@ export class AoVAdapter {
         coreDialogSource: "attack",
         defenseCoreOptions: defenseResult?.coreOptions ?? null,
         defenseCombatAction: defenseResult?.combatAction ?? null,
+        defenseAccepted: defenseResult?.accepted !== false,
+        alreadyResolved: defenseResult?.alreadyResolved === true,
         defenseRouted: true,
         cardCreated: true
       };
@@ -1351,6 +1835,8 @@ export class AoVAdapter {
       coreDialogSource: "attack",
       defenseCoreOptions: defenseResult?.coreOptions ?? null,
       defenseCombatAction: defenseResult?.combatAction ?? null,
+      defenseAccepted: defenseResult?.accepted !== false,
+      alreadyResolved: defenseResult?.alreadyResolved === true,
       defenseRouted: false,
       cardCreated: true
     };
@@ -1431,7 +1917,8 @@ export class AoVAdapter {
         const defensePayload = this.buildDefenseWorkflowPayload({
           targetActor: entry.attack.targetActor,
           targetToken: entry.attack.targetToken,
-          attackMessageId: entry.attack.attackMessageId
+          attackMessageId: entry.attack.attackMessageId,
+          incomingWeaponType: entry.attack.weapon?.system?.weaponType
         });
         try {
           let defenseResult = null;
@@ -1452,6 +1939,8 @@ export class AoVAdapter {
           entry.result.defenseMessageId = defenseResult?.defenseMessageId ?? null;
           entry.result.defenseCoreOptions = defenseResult?.coreOptions ?? null;
           entry.result.defenseCombatAction = defenseResult?.combatAction ?? null;
+          entry.result.defenseAccepted = defenseResult?.accepted !== false;
+          entry.result.alreadyResolved = defenseResult?.alreadyResolved === true;
           entry.result.defenseRouted = group.user.id !== game.user?.id;
         } catch (exception) {
           ui.notifications.warn(exception?.message ?? game.i18n.localize("AOV_SKJALDBORG.Warnings.ActionFailed"));
@@ -1460,6 +1949,84 @@ export class AoVAdapter {
     }));
 
     return created.map(entry => entry.result);
+  }
+
+  /**
+   * Persist the Prone/grounded RAW chance modifier that was already folded into
+   * the core AoV combat card target number. The flag is diagnostic only; the
+   * chat card value remains authoritative for the opposed roll.
+   *
+   * @param {string} messageId Core AoV combat ChatMessage id.
+   * @param {object} payload Attack dialog payload.
+   * @param {{actor: Actor|null, sourceToken: TokenDocument|null, weapon: Item|null, targetActor: Actor|null, targetToken: TokenDocument|null}} context Resolved documents.
+   * @returns {Promise<void>}
+   */
+  static async #attachProneAttackModifierFlag(messageId, payload, context) {
+    const message = game.messages?.get?.(messageId) ?? null;
+    if (!message?.setFlag) return;
+    const aimed = payload.aimedBlow?.enabled === true;
+    const rules = serializeProneAttackModifierContext(
+      payload.proneRules
+        ?? proneAttackModifierContext({
+          attackerActor: context.actor,
+          attackerToken: context.sourceToken,
+          targetActor: context.targetActor,
+          targetToken: context.targetToken
+        })
+    );
+    const damageRules = serializeProneDamageContext(
+      payload.proneDamageRules
+        ?? proneDamageContext({
+          attackerActor: context.actor,
+          attackerToken: context.sourceToken,
+          targetActor: context.targetActor,
+          targetToken: context.targetToken,
+          weapon: context.weapon,
+          aimed
+        })
+    );
+    const hasChanceRule = !!(
+      rules?.total
+      || rules?.attackerProne
+      || rules?.targetProne
+      || rules?.targetImmobilized
+      || rules?.modifiers?.length
+    );
+    const hasDownstreamRule = damageRules?.suppressDamageModifier === true || damageRules?.oneDieHitLocation === true;
+    if (!hasChanceRule && !hasDownstreamRule) return;
+
+    const attackerParticipant = this.#aovParticipantReference(context.actor, context.sourceToken);
+    const targetParticipant = this.#aovParticipantReference(context.targetActor, context.targetToken);
+    await guardedModuleFlag(message, "proneAttackModifier", {
+      ...(rules ?? {
+        total: 0,
+        attackerPenalty: 0,
+        targetBonus: 0,
+        attackerProne: false,
+        targetProne: false,
+        targetImmobilized: false,
+        modifiers: []
+      }),
+      damageRules,
+      resolved: true,
+      createdAt: Date.now(),
+      sourceMessageId: messageId,
+      attackerActorUuid: context.actor?.uuid ?? payload.actorUuid ?? null,
+      attackerActorId: context.actor?.id ?? null,
+      attackerTokenUuid: context.sourceToken?.uuid ?? payload.sourceTokenUuid ?? null,
+      attackerTokenId: context.sourceToken?.id ?? null,
+      attackerParticipantId: attackerParticipant.id,
+      attackerParticipantType: attackerParticipant.type,
+      weaponUuid: context.weapon?.uuid ?? payload.weaponUuid ?? null,
+      weaponId: context.weapon?.id ?? null,
+      weaponName: context.weapon?.name ?? "",
+      targetActorUuid: context.targetActor?.uuid ?? payload.targetActorUuid ?? null,
+      targetActorId: context.targetActor?.id ?? null,
+      targetTokenUuid: context.targetToken?.uuid ?? payload.targetTokenUuid ?? null,
+      targetTokenId: context.targetToken?.id ?? null,
+      targetParticipantId: targetParticipant.id,
+      targetParticipantType: targetParticipant.type
+    }, { category: "chat.proneAttackModifier" });
   }
 
   /**
@@ -1478,7 +2045,7 @@ export class AoVAdapter {
     const attackerParticipant = this.#aovParticipantReference(context.actor, context.sourceToken);
     const targetParticipant = this.#aovParticipantReference(context.targetActor, context.targetToken);
 
-    await message.setFlag(MODULE_ID, "aimedBlow", {
+    await guardedModuleFlag(message, "aimedBlow", {
       resolved: false,
       createdAt: Date.now(),
       sourceMessageId: messageId,
@@ -1507,7 +2074,7 @@ export class AoVAdapter {
       targetWeaponCurrentHp: numberOr(payload.aimedBlow.targetWeaponCurrentHp, 0),
       targetWeaponMaximumHp: numberOr(payload.aimedBlow.targetWeaponMaximumHp, 0),
       penalty: numberOr(payload.aimedBlow.penalty, 0)
-    });
+    }, { category: "chat.aimedBlow" });
   }
 
   /**
@@ -1527,7 +2094,7 @@ export class AoVAdapter {
     const targetParticipant = this.#aovParticipantReference(context.targetActor, context.targetToken);
     const targetWeapon = context.targetActor?.items?.get?.(String(payload.disarm.targetWeaponId ?? "")) ?? null;
 
-    await message.setFlag(MODULE_ID, "disarm", {
+    await guardedModuleFlag(message, "disarm", {
       resolved: false,
       stage: "attack",
       createdAt: Date.now(),
@@ -1555,7 +2122,7 @@ export class AoVAdapter {
       mode: String(payload.disarm.mode ?? "strikeWeapon"),
       targetTwoHanded: payload.disarm.targetTwoHanded === true,
       penalty: numberOr(payload.disarm.penalty, 0)
-    });
+    }, { category: "chat.disarm" });
   }
 
   /**
@@ -1574,7 +2141,7 @@ export class AoVAdapter {
     const attackerParticipant = this.#aovParticipantReference(context.actor, context.sourceToken);
     const targetParticipant = this.#aovParticipantReference(context.targetActor, context.targetToken);
 
-    await message.setFlag(MODULE_ID, "stun", {
+    await guardedModuleFlag(message, "stun", {
       resolved: false,
       stage: "attack",
       createdAt: Date.now(),
@@ -1602,7 +2169,7 @@ export class AoVAdapter {
       hitLocationRange: String(payload.stun.rollLabel ?? ""),
       rollLabel: String(payload.stun.rollLabel ?? ""),
       penalty: numberOr(payload.stun.penalty, 0)
-    });
+    }, { category: "chat.stun" });
   }
 
   /**
@@ -1651,21 +2218,21 @@ export class AoVAdapter {
       aimedTargetWeaponUuid: payload.aimedBlow?.targetWeaponUuid ?? null
     };
 
-    await message.setFlag(MODULE_ID, "missileShot", {
+    await guardedModuleFlag(message, "missileShot", {
       ...common,
       resolved: false,
       range: payload.missileRange?.enabled === true ? foundry.utils.deepClone(payload.missileRange) : null,
       intoMelee: payload.missileIntoMelee?.enabled === true ? foundry.utils.deepClone(payload.missileIntoMelee) : null
-    });
+    }, { category: "chat.missileShot" });
 
     if (payload.missileIntoMelee?.enabled === true) {
-      await message.setFlag(MODULE_ID, "missileIntoMelee", {
+      await guardedModuleFlag(message, "missileIntoMelee", {
         ...common,
         resolved: false,
         combatantCount: Math.max(2, Math.trunc(numberOr(payload.missileIntoMelee.combatantCount, 2))),
         normalChance: numberOr(payload.missileIntoMelee.normalChance, payload.baseChance),
         adjustedChance: numberOr(payload.missileIntoMelee.adjustedChance, payload.targetNumber)
-      });
+      }, { category: "chat.missileIntoMelee" });
     }
   }
 
@@ -1693,7 +2260,7 @@ export class AoVAdapter {
         ?? ""
     ).trim().toLowerCase();
 
-    await message.setFlag(MODULE_ID, DAMAGE_EFFECT_SOURCE_FLAG, {
+    await guardedModuleFlag(message, DAMAGE_EFFECT_SOURCE_FLAG, {
       resolved: false,
       createdAt: Date.now(),
       sourceMessageId: messageId,
@@ -1713,7 +2280,7 @@ export class AoVAdapter {
       targetTokenId: context.targetToken?.id ?? null,
       targetParticipantId: targetParticipant.id,
       targetParticipantType: targetParticipant.type
-    });
+    }, { category: "chat.damageEffectSource" });
   }
 
   /**
@@ -1738,21 +2305,27 @@ export class AoVAdapter {
    * defender prompt appears for that user.
    *
    * @param {object} payload Socket-safe defense workflow payload.
+   * @param {{commitDefenseCard?: Function}} [options={}] Optional GM-authoritative card commit callback.
    * @returns {Promise<{defenseMode: string|null, defenseMessageId: string|null}>}
    */
-  static async rollDialogDefenseWorkflow(payload = {}) {
+  static async rollDialogDefenseWorkflow(payload = {}, options = {}) {
     const { actor, token } = await this.resolveDefenseParticipant(payload);
     if (!actor) throw new Error(game.i18n.localize("AOV_SKJALDBORG.Warnings.DefenseActorUnavailable"));
     if (!this.currentUserCanDefend(actor, token)) {
       throw new Error(game.i18n.localize("AOV_SKJALDBORG.Warnings.DefenseActorNotOwned"));
     }
 
-    const combatCard = await waitForOpenCoreCombatCard(payload.attackMessageId);
-    if (!combatCard) {
+    const remoteCommit = !game.user?.isGM && typeof options.commitDefenseCard === "function";
+    let combatCard = null;
+    let incomingWeaponType = String(payload.incomingWeaponType ?? "");
+    if (!remoteCommit || !incomingWeaponType) {
+      combatCard = await waitForOpenCoreCombatCard(payload.attackMessageId);
+    }
+    if (!remoteCommit && !combatCard) {
       throw new Error(game.i18n.localize("AOV_SKJALDBORG.Warnings.DefenseCombatCardUnavailable"));
     }
+    if (!incomingWeaponType) incomingWeaponType = this.#incomingWeaponType(combatCard);
 
-    const incomingWeaponType = this.#incomingWeaponType(combatCard);
     const defenseWeapon = this.getDefenseWeapon(actor);
     const dodgeSkill = this.getDodgeSkill(actor);
     const actionOptions = await this.#defenseActionOptions(actor, { incomingWeaponType });
@@ -1778,49 +2351,33 @@ export class AoVAdapter {
       };
     }
 
-    if (coreOptions.actionOption === "none") {
-      return this.#appendNoDefenseCard({
-        attackMessageId: combatCard.id,
-        actor,
-        token,
-        coreOptions
-      });
-    }
-
-    if (coreOptions.actionOption === "dodge" && dodgeSkill) {
-      return this.#addDefenseToAttackMessage({
-        attackMessageId: combatCard.id,
-        actor,
-        token,
-        item: dodgeSkill,
-        mode: "dodge",
-        coreOptions
-      });
-    }
-
-    if (coreOptions.actionOption === "parry" && defenseWeapon) {
-      return this.#addDefenseToAttackMessage({
-        attackMessageId: combatCard.id,
-        actor,
-        token,
-        item: defenseWeapon,
-        mode: "parry",
-        coreOptions
-      });
-    }
-
-    ui.notifications.warn(game.i18n.format("AOV_SKJALDBORG.Warnings.NoDefenderDefense", {
-      actor: actor.name ?? game.i18n.localize("AOV_SKJALDBORG.ActionHud.UnknownActor")
-    }));
-    return this.#appendNoDefenseCard({
-      attackMessageId: combatCard.id,
+    const selectedItem = coreOptions.actionOption === "dodge"
+      ? dodgeSkill
+      : (coreOptions.actionOption === "parry" ? defenseWeapon : null);
+    const commitPayload = this.#defenseCommitPayload({
+      attackMessageId: combatCard?.id ?? payload.attackMessageId,
       actor,
       token,
-      coreOptions: {
-        ...coreOptions,
-        actionOption: "none"
-      }
+      actionOption: selectedItem || coreOptions.actionOption === "none" ? coreOptions.actionOption : "none",
+      coreOptions: selectedItem || coreOptions.actionOption === "none"
+        ? coreOptions
+        : { ...coreOptions, actionOption: "none" },
+      item: selectedItem
     });
+    if (!selectedItem && coreOptions.actionOption !== "none") {
+      ui.notifications.warn(game.i18n.format("AOV_SKJALDBORG.Warnings.NoDefenderDefense", {
+        actor: actor.name ?? game.i18n.localize("AOV_SKJALDBORG.ActionHud.UnknownActor")
+      }));
+    }
+
+    if (!game.user?.isGM) {
+      if (typeof options.commitDefenseCard !== "function") {
+        throw new Error(game.i18n.localize("AOV_SKJALDBORG.Warnings.NoDefensePromptRoute"));
+      }
+      return options.commitDefenseCard(commitPayload);
+    }
+
+    return this.commitDefenseCard(commitPayload);
   }
 
   /**
@@ -2431,13 +2988,7 @@ export class AoVAdapter {
    * @returns {Combatant|null}
    */
   static getCombatantForToken(combat, token) {
-    const tokenId = token?.id ?? token?.document?.id;
-    if (!combat || !tokenId) return null;
-    return combat.combatants?.find(combatant => {
-      return combatant.tokenId === tokenId
-        || combatant.token?.id === tokenId
-        || combatant.token?.object?.id === tokenId;
-    }) ?? null;
+    return combatantForTokenDocument(combat, token?.document ?? token) ?? null;
   }
 
   /**
@@ -2493,5 +3044,6 @@ export class AoVAdapter {
 }
 
 export const __test = {
-  combatCardEntry: options => AoVAdapter.__testCombatCardEntry(options)
+  combatCardEntry: options => AoVAdapter.__testCombatCardEntry(options),
+  attackFlatModifier: (payload, weapon = null) => AoVAdapter.__testAttackFlatModifier(payload, weapon)
 };

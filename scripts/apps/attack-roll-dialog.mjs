@@ -3,6 +3,11 @@ import { getAttackWeapons, getCombatOptions, getReadiedWeapon, getReadiedWeaponL
 import { mountedCapSummary, mountedWeaponCap } from "../combat/mounted-combat.mjs";
 import { resolveNaturalWeaponSkill, resolveWeaponSkill } from "../combat/weapon-skill-resolver.mjs";
 import { getCombatantState } from "../combat/state.mjs";
+import { createCombatRuleContext, prepareAttackContext, prepareDamageContext } from "../combat/rule-kernel.mjs";
+import {
+  serializeProneAttackModifierContext,
+  serializeProneDamageContext
+} from "../combat/prone-automation.mjs";
 import { startDialogCombatWorkflowBatch } from "../socket.mjs";
 import { createSplitAttackPrompt } from "../combat/dialog-target-queue.mjs";
 import { error } from "../logger.mjs";
@@ -538,7 +543,7 @@ export class AttackRollDialog extends DialogV2 {
       hasAimedLocations: aimedTargets.length > 0,
       hasDisarmWeapons: disarmWeapons.length > 0,
       hasStunHead: stunState.locations.length > 0,
-      initialSummary: this._formatSummary({ baseChance, mountedCap, targetNumber: baseChance, situationalModifier: 0, aimedModifier: 0, disarmModifier: 0, stunModifier: 0, augmentModifier: 0 })
+      initialSummary: this._formatSummary({ baseChance, mountedCap, targetNumber: baseChance, situationalModifier: 0, aimedModifier: 0, disarmModifier: 0, stunModifier: 0, augmentModifier: 0, proneModifier: 0 })
     };
   }
 
@@ -776,6 +781,18 @@ export class AttackRollDialog extends DialogV2 {
       : 0;
     const damageSelection = this._damageSelectionForWeapon(weapon);
     const damageProfile = buildDamageProfile(this.actor, weapon, damageSelection);
+    const attackerToken = AoVAdapter.resolveActorTokenDocument(this.actor, null);
+    const ruleContext = prepareDamageContext(prepareAttackContext(createCombatRuleContext({
+      attackerActor: this.actor,
+      attackerToken,
+      targetActor,
+      targetToken,
+      weapon,
+      aimed: aimedEnabled
+    })));
+    const proneRules = ruleContext.proneRules ?? null;
+    const proneModifier = Number(proneRules?.total) || 0;
+    const proneDamageRules = ruleContext.proneDamageRules ?? null;
 
     return {
       weapon,
@@ -794,7 +811,10 @@ export class AttackRollDialog extends DialogV2 {
       disarmModifier,
       stunModifier,
       augmentModifier,
-      targetNumber: baseChance + situationalModifier + aimedModifier + disarmModifier + stunModifier + augmentModifier,
+      proneModifier,
+      proneRules,
+      proneDamageRules,
+      targetNumber: baseChance + situationalModifier + aimedModifier + disarmModifier + stunModifier + augmentModifier + proneModifier,
       targetSnapshot,
       targetToken,
       targetActor,
@@ -949,7 +969,7 @@ export class AttackRollDialog extends DialogV2 {
   /**
    * Produce the compact modifier explanation displayed in the footer.
    *
-   * @param {{baseChance: number, mountedCap?: object, situationalModifier: number, aimedModifier: number, disarmModifier: number, stunModifier: number, augmentModifier: number}} state Preview state.
+   * @param {{baseChance: number, mountedCap?: object, situationalModifier: number, aimedModifier: number, disarmModifier: number, stunModifier: number, augmentModifier: number, proneModifier?: number}} state Preview state.
    * @returns {string}
    */
   _formatSummary(state) {
@@ -961,8 +981,12 @@ export class AttackRollDialog extends DialogV2 {
       stun: signed(state.stunModifier),
       augment: signed(state.augmentModifier)
     });
+    const proneModifier = Number(state.proneModifier) || 0;
+    const prone = proneModifier
+      ? ` · ${game.i18n.format("AOV_SKJALDBORG.AttackDialog.ProneSummary", { prone: signed(proneModifier) })}`
+      : "";
     const mounted = mountedCapSummary(state.mountedCap);
-    return mounted ? `${summary} · ${mounted}` : summary;
+    return `${summary}${prone}${mounted ? ` · ${mounted}` : ""}`;
   }
 
   _buildDamageContext(state) {
@@ -1009,6 +1033,9 @@ export class AttackRollDialog extends DialogV2 {
       disarmModifier: state.disarmModifier,
       stunModifier: state.stunModifier,
       augmentModifier: state.augmentModifier,
+      proneModifier: state.proneModifier,
+      proneRules: serializeProneAttackModifierContext(state.proneRules),
+      proneDamageRules: serializeProneDamageContext(state.proneDamageRules),
       targetNumber: state.targetNumber,
       twoWeapon: state.twoWeapon,
       aimedBlow: state.aimedBlow,

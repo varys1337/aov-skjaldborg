@@ -1,9 +1,11 @@
-const DEFAULT_GRID_SIZE = 100;
+import {
+  DEFAULT_OVERLAY_GRID_SIZE,
+  finiteNumber,
+  isSquareGrid,
+  tokenPixelRect
+} from "./overlay-geometry.mjs";
 
-function finiteNumber(value, fallback = null) {
-  const numeric = Number(value);
-  return Number.isFinite(numeric) ? numeric : fallback;
-}
+const DEFAULT_GRID_SIZE = DEFAULT_OVERLAY_GRID_SIZE;
 
 /**
  * Resolve a token's occupied grid rectangle.
@@ -13,18 +15,14 @@ function finiteNumber(value, fallback = null) {
  * @returns {{minX: number, minY: number, maxX: number, maxY: number}|null}
  */
 export function tokenGridRect(token, gridSize = DEFAULT_GRID_SIZE) {
-  const document = token?.document ?? token;
   const size = Math.max(1, finiteNumber(gridSize, DEFAULT_GRID_SIZE) ?? DEFAULT_GRID_SIZE);
-  const x = finiteNumber(token?.position?.x ?? document?.x ?? document?._source?.x);
-  const y = finiteNumber(token?.position?.y ?? document?.y ?? document?._source?.y);
-  if (x === null || y === null) return null;
-  const width = Math.max(1, finiteNumber(document?.width ?? document?._source?.width, 1) ?? 1);
-  const height = Math.max(1, finiteNumber(document?.height ?? document?._source?.height, 1) ?? 1);
+  const rect = tokenPixelRect(token, size);
+  if (!rect) return null;
   return {
-    minX: Math.floor(x / size),
-    minY: Math.floor(y / size),
-    maxX: Math.ceil((x + (width * size)) / size) - 1,
-    maxY: Math.ceil((y + (height * size)) / size) - 1
+    minX: Math.floor(rect.x / size),
+    minY: Math.floor(rect.y / size),
+    maxX: Math.ceil((rect.x + rect.width) / size) - 1,
+    maxY: Math.ceil((rect.y + rect.height) / size) - 1
   };
 }
 
@@ -74,11 +72,10 @@ export function squareReachOutline(token, reachUnits, gridSize = DEFAULT_GRID_SI
  * @returns {{width: number, height: number}}
  */
 export function tokenPixelDimensions(token, gridSize = DEFAULT_GRID_SIZE) {
-  const document = token?.document ?? token;
   const size = Math.max(1, finiteNumber(gridSize, DEFAULT_GRID_SIZE) ?? DEFAULT_GRID_SIZE);
-  const width = Math.max(1, finiteNumber(document?.width ?? document?._source?.width, 1) ?? 1);
-  const height = Math.max(1, finiteNumber(document?.height ?? document?._source?.height, 1) ?? 1);
-  return { width: width * size, height: height * size };
+  const rect = tokenPixelRect(token, size);
+  if (rect) return { width: rect.width, height: rect.height };
+  return { width: size, height: size };
 }
 
 /**
@@ -107,10 +104,7 @@ export function circleReachRadius(token, reachUnits, gridSize = DEFAULT_GRID_SIZ
  * @returns {boolean}
  */
 export function isSquareGridType(gridType) {
-  const square = globalThis.CONST?.GRID_TYPES?.SQUARE;
-  if (square !== undefined && gridType === square) return true;
-  const normalized = String(gridType ?? "").toLowerCase();
-  return normalized === "square" || normalized === "1";
+  return isSquareGrid(gridType);
 }
 
 export const __test = Object.freeze({

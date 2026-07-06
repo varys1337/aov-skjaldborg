@@ -1,5 +1,7 @@
 import {
   MODULE_ID,
+  PHASE_CURRENT_TURN_DEFAULTS,
+  PHASE_CURRENT_TURN_SETTING_KEYS,
   PHASE_ORDER,
   PHASE_STRUCTURE_SETTING_KEYS,
   PHASES
@@ -21,6 +23,26 @@ export function isPhaseEnabled(phase) {
   catch (_exception) {
     return true;
   }
+}
+
+
+/**
+ * Whether the combat tracker should maintain a current-combatant cursor during a phase.
+ * Missing values fall back to the module defaults so older worlds remain stable.
+ *
+ * @param {string} phase Phase id.
+ * @returns {boolean}
+ */
+export function shouldTrackCurrentTurnForPhase(phase) {
+  const key = PHASE_CURRENT_TURN_SETTING_KEYS[phase];
+  if (!key) return true;
+  try {
+    const value = game.settings.get(MODULE_ID, key);
+    if (typeof value === "boolean") return value;
+  } catch (_exception) {
+    // Fall through to the static default when settings are not registered yet.
+  }
+  return PHASE_CURRENT_TURN_DEFAULTS[phase] !== false;
 }
 
 /**

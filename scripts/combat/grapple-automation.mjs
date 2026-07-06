@@ -13,6 +13,7 @@ import {
   effectHasStatus,
   moduleFlag,
   registerStatusEffect,
+  safeDeleteActiveEffect,
   statusEffectConfig,
   upsertActorStatusEffect
 } from "../compat/active-effects.mjs";
@@ -400,14 +401,11 @@ async function removeGrappleEffects(context) {
     attackerActorUuid: context.attackerActorUuid,
     targetActorUuid: context.targetActorUuid
   }));
+  let removed = 0;
   for (const effect of effects) {
-    try {
-      await effect.delete();
-    } catch (exception) {
-      warn("Failed to delete Skjaldborg grapple effect.", exception);
-    }
+    if (await safeDeleteActiveEffect(effect, { reason: "grapple-cleanup" })) removed += 1;
   }
-  return effects.length;
+  return removed;
 }
 
 async function upsertGrappleEffect(actor, statusId, data) {

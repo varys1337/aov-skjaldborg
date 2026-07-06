@@ -156,7 +156,11 @@
         "Standard": "Use all four phases",
         "Streamlined": "Use Streamlined Combat",
         "StreamlinedTitle": "Streamlined Combat",
-        "StreamlinedHint": "The streamlined preset keeps Resolution as the visible DEX countdown. Declarations and movement are handled immediately when announced, while bookkeeping is finalized immediately after each resolved outcome."
+        "StreamlinedHint": "The streamlined preset keeps Resolution as the visible DEX countdown. Declarations and movement are handled immediately when announced, while bookkeeping is finalized immediately after each resolved outcome.",
+        "TrackCurrentTurn": {
+          "Name": "Track current turn",
+          "Hint": "Keep a current-combatant cursor during this phase. Disable for simultaneous phases where Next Turn should advance to the next phase."
+        }
       },
       "CombatTrackingMenu": {
         "Name": "Combat tracking",
@@ -175,6 +179,14 @@
         "Automation": {
           "Name": "Automation references",
           "Hint": "Configure external documents used by Skjaldborg combat automation without hard-coding a single compendium source."
+        },
+        "ReachVisualizer": {
+          "Name": "Reach visualizer",
+          "Hint": "Open the client-side reach visualizer settings from this combat tracking submenu."
+        },
+        "Visuals": {
+          "Name": "Engagement visuals",
+          "Hint": "Choose whether the Engaged marker is mirrored through Actor ActiveEffects, a token-scoped canvas overlay, or both."
         }
       },
       "ReachVisualizerMenu": {
@@ -197,12 +209,31 @@
       },
       "KnockbackFumbleTable": {
         "Name": "Knockback Fumbles table",
-        "Hint": "Optional RollTable reference used by failed knockback fumble prompts. Paste a RollTable UUID, world table ID/name, Chaosium CID, or leave blank to use rt..fumbles / the bundled core UUID fallback.",
-        "DropHint": "Drop a RollTable here to fill this reference automatically."
+        "Hint": "Drop a RollTable here...",
+        "DropHint": "Drop a RollTable here..."
       },
       "EvadeFightingDefensively": {
         "Name": "Treat Evade as Fighting Defensively",
         "Hint": "When enabled, Evade is tagged for the universal Fighting Defensively option: the combatant forfeits attacks/actions for the round and the first substituted Dodge does not increase the cumulative Dodge/Parry penalty. When disabled, Evade is tagged only for AoV ranged moving-target penalties."
+      },
+      "AutoIncrementReactions": {
+        "Name": "Automatically track Parry/Dodge reactions",
+        "Hint": "When enabled during active combat, each committed Parry or Dodge defense prompt increments the defender's reactions used through the same workflow as the manual reaction control."
+      },
+      "EngagementVisualMode": {
+        "Name": "Engaged visual mode",
+        "Hint": "ActiveEffect preserves the legacy token status icon. Overlay avoids Actor ActiveEffect writes for transient engagement and marks only the engaged token copy. Both enables both visual paths.",
+        "ActiveEffect": "ActiveEffect mirror",
+        "Overlay": "Token overlay only",
+        "Both": "Overlay and ActiveEffect"
+      },
+      "AdaptiveCheckpointBatching": {
+        "Name": "Adaptive checkpoint batching",
+        "Hint": "When no hostile token can be reached along the next movement checkpoints, submit several checkpoints in one movement wave. Disable to restore strict one-checkpoint movement."
+      },
+      "AdaptiveCheckpointMaxBatchSize": {
+        "Name": "Maximum checkpoint batch size",
+        "Hint": "Upper limit for adaptive movement checkpoints submitted in one scheduler wave. Small values preserve conservative engagement stopping behavior."
       }
     },
     "Phases": {
@@ -472,6 +503,7 @@
       "InvalidPhase": "That phase transition is not legal from the current phase.",
       "MovementRunning": "Movement automation is still resolving. Wait for movement to complete before advancing.",
       "MovementPlansPending": "Cannot begin Movement: the plans for {names} are still synchronizing or unfinished. Wait for the movement-plan confirmation, or clear and plan those routes again.",
+      "MovementPlanIgnored": "Movement plan ignored because a newer route is already recorded.",
       "MovementRouteTruncated": "A movement route exceeded {limit} points and was truncated. Enable Debug logging for full movement diagnostics.",
       "UnknownMovementPlan": "one or more combatants",
       "NoCombatant": "Select or activate a combatant first.",
@@ -522,6 +554,7 @@
       "DefenseActorUnavailable": "The defender actor is unavailable on this client.",
       "DefenseActorNotOwned": "You do not control the defender actor.",
       "DefenseCombatCardUnavailable": "The AoV combat chat card was not available on this client in time for the defender roll.",
+      "DefenseAlreadyResolved": "The opposed combat card already has a defender response.",
       "DefensePromptCancelled": "No defense was added to the opposed combat card.",
       "EvadeEffectUnavailable": "The Evading status effect could not be applied to this actor."
     },
@@ -802,7 +835,8 @@
       },
       "DamageTypeFixedTooltip": "{label} ({abbreviation})",
       "DamageTypeSwitchTooltip": "{label} ({abbreviation}). Click to switch to {nextLabel} ({nextAbbreviation}). Weapon type: {sourceLabel} ({sourceAbbreviation}).",
-      "MeleeMissileDamageTooltip": "Melee use of {sourceLabel} ({sourceAbbreviation}) is treated as {label} ({abbreviation}). Use the Missile action for the weapon's ranged damage type."
+      "MeleeMissileDamageTooltip": "Melee use of {sourceLabel} ({sourceAbbreviation}) is treated as {label} ({abbreviation}). Use the Missile action for the weapon's ranged damage type.",
+      "ProneSummary": "Prone/ground {prone}%"
     },
     "StunDialog": {
       "ResultTitle": "Stun Result",
@@ -1070,6 +1104,14 @@
       },
       "GraspedLocationInline": "Grappled location: {location}{range}.",
       "GraspedItemInline": "Grappled object: {item}."
+    },
+    "ProneAutomation": {
+      "AttackerPronePenalty": "Attacker prone",
+      "TargetProneBonus": "Target prone/grounded",
+      "TargetImmobilizedBonus": "Target immobilized",
+      "DamageModifierSuppressed": "Prone attack: damage modifier suppressed.",
+      "BasicWeaponDamageOnly": "Prone attack: non-natural weapon is limited to basic weapon damage; damage modifier and special/critical weapon-damage boosts are suppressed.",
+      "OneDieHitLocation": "Prone attack: hit location uses 1D10 against a standing humanoid target."
     }
   },
   "COMBAT": {

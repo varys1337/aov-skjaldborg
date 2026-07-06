@@ -69,7 +69,9 @@ function button({ action, icon, label, phase, disabled = false, active = false }
  * @returns {string}
  */
 function renderPhaseBar(combat, state) {
-  const phaseButtons = getEnabledPhases().map(phase => button({
+  const enabledPhases = getEnabledPhases();
+  const phaseCount = Math.max(1, enabledPhases.length);
+  const phaseButtons = enabledPhases.map(phase => button({
     action: "advance-phase",
     phase,
     icon: {
@@ -89,7 +91,7 @@ function renderPhaseBar(combat, state) {
   return `
     <section class="skj-phasebar" data-combat-id="${combat?.id ?? ""}">
       <nav class="skj-phasebar-main" aria-label="${navigationLabel}">
-        <div class="skj-phase-buttons">${phaseButtons}</div>
+        <div class="skj-phase-buttons" data-phase-count="${phaseCount}" style="--skj-phase-count: ${phaseCount};">${phaseButtons}</div>
         <div class="skj-movement-run">${localize("AOV_SKJALDBORG.Labels.Movement")}: ${movementStatus}</div>
       </nav>
     </section>
@@ -145,6 +147,8 @@ const NATIVE_TRACKER_TOOLTIP_FALLBACKS = Object.freeze({
   "COMBAT.PingCombatant": "Ping combatant"
 });
 const TRACKER_EVENT_BINDING = Symbol("aovSkjaldborgTrackerEventBinding");
+let lastTrackerElement = null;
+let lastTrackerCombat = null;
 
 /**
  * Replace unresolved native AoV/Foundry tracker tooltip keys with readable text.
@@ -307,11 +311,17 @@ function renderCombatantDetails(combatant, state, combatState) {
  * @param {import("../types.mjs").SkjaldborgCombatState} combatState Combat state.
  * @returns {void}
  */
+function clearCombatantRowDecorations(row) {
+  row?.querySelectorAll?.(".skj-combatant-indicators, .skj-combatant-notes, .skj-combatant-status, .skj-combatant-status-fallback, .skj-status-fallback")
+    .forEach(node => node.remove());
+}
+
 function decorateCombatantRow(row, combatant, state, combatState) {
   performanceDiagnostics.count("tracker.decorate.row", 1, {
     combatantId: combatant?.id ?? null,
     phase: combatState?.phase ?? null
   });
+  clearCombatantRowDecorations(row);
   const nameBlock = row.querySelector(".token-name") ?? row;
   const controls = findCombatantControlRow(row);
   if (controls) {
@@ -323,6 +333,35 @@ function decorateCombatantRow(row, combatant, state, combatState) {
     nameBlock.insertAdjacentHTML("beforeend", `<div class="skj-combatant-status-fallback">${renderCombatantStatus(state)}</div>`);
   }
   nameBlock.insertAdjacentHTML("beforeend", renderCombatantDetails(combatant, state, combatState));
+}
+
+function findTrackerRowByCombatantId(element, combatantId) {
+  if (!element || !combatantId) return null;
+  const escaped = globalThis.CSS?.escape?.(String(combatantId)) ?? String(combatantId).replaceAll("\\", "\\\\").replaceAll('"', '\\"');
+  return element.querySelector(`[data-combatant-id="${escaped}"]`);
+}
+
+function decoratePhaseBar(element, combat, state) {
+  element.querySelectorAll(".skj-phasebar").forEach(node => node.remove());
+  const header = trackerHeaderElement(element);
+  header.insertAdjacentHTML("beforeend", renderPhaseBar(combat, state));
+}
+
+function decorateTrackerElement(element, combat) {
+  if (!element || !combat) return 0;
+  element.querySelectorAll(".skj-phasebar, .skj-combatant-row, .skj-combatant-indicators, .skj-combatant-notes, .skj-combatant-status, .skj-combatant-status-fallback, .skj-status-fallback").forEach(node => node.remove());
+  const state = getCombatState(combat);
+  decoratePhaseBar(element, combat, state);
+  let rowCount = 0;
+  for (const row of trackerCombatantRows(element)) {
+    const combatant = combatantFromTrackerRow(combat, row);
+    if (!combatant) continue;
+    rowCount += 1;
+    decorateCombatantRow(row, combatant, getCombatantState(combatant), state);
+  }
+  localizeNativeTrackerTooltips(element);
+  attachTrackerEvents(element, combat);
+  return rowCount;
 }
 
 /**
@@ -348,6 +387,67 @@ function attachTrackerEvents(element, combat) {
   performanceDiagnostics.count("tracker.controls.bound", 1, { combatId: combat?.id ?? null, delegated: true });
 }
 
+
+/**
+ * Apply a RenderCoordinator combat-tracker invalidation as a row/phase delta
+ * when the current tracker DOM is still available. Returns false when the
+ * caller should request a full tracker render instead.
+ *
+ * @param {object} [detail={}] Serialized invalidation detail.
+ * @returns {boolean}
+ */
+export function refreshCombatTrackerDecorations(detail = {}) {
+  const measureId = performanceDiagnostics.markStart("tracker.delta");
+  let rowCount = 0;
+  let fallback = false;
+  try {
+    if (!AoVAdapter.isAoVWorld()) return false;
+    const element = lastTrackerElement instanceof HTMLElement ? lastTrackerElement : ui.combat?.element instanceof HTMLElement ? ui.combat.element : null;
+    const combat = lastTrackerCombat ?? game.combat ?? null;
+    if (!element || !element.isConnected || !combat || detail.full === true) return false;
+    if (!AoVAdapter.enabledSetting) {
+      element.querySelectorAll(".skj-phasebar, .skj-combatant-row, .skj-combatant-indicators, .skj-combatant-notes, .skj-combatant-status, .skj-combatant-status-fallback, .skj-status-fallback").forEach(node => node.remove());
+      return true;
+    }
+
+    const parts = new Set(detail.parts ?? []);
+    const combatantIds = Array.from(new Set(detail.combatantIds ?? [])).filter(Boolean);
+    const phaseOnly = parts.size > 0 && parts.has("phase") && !parts.has("rows") && !combatantIds.length;
+    const state = getCombatState(combat);
+
+    if (parts.has("phase") || phaseOnly) decoratePhaseBar(element, combat, state);
+    if (phaseOnly) return true;
+
+    if (!combatantIds.length) return false;
+    for (const combatantId of combatantIds) {
+      const row = findTrackerRowByCombatantId(element, combatantId);
+      const combatant = combat.combatants?.get?.(combatantId) ?? null;
+      if (!row || !combatant) {
+        fallback = true;
+        return false;
+      }
+      decorateCombatantRow(row, combatant, getCombatantState(combatant), state);
+      rowCount += 1;
+    }
+    localizeNativeTrackerTooltips(element);
+    performanceDiagnostics.count("render.tracker.deltaRows", rowCount, {
+      combatId: combat?.id ?? null,
+      combatantIds,
+      parts: Array.from(parts)
+    });
+    return true;
+  }
+  finally {
+    performanceDiagnostics.markEnd(measureId, {
+      combatId: lastTrackerCombat?.id ?? game.combat?.id ?? null,
+      rowCount,
+      fallback,
+      parts: detail.parts ?? [],
+      combatantIds: detail.combatantIds ?? []
+    });
+  }
+}
+
 /**
  * Register tracker render hooks.
  *
@@ -366,30 +466,18 @@ export function registerTrackerHooks() {
     if (!AoVAdapter.isAoVWorld()) return;
     const element = elementFromTrackerHook(app, html);
     if (!element) return;
-
-    element.querySelectorAll(".skj-phasebar, .skj-combatant-row, .skj-combatant-indicators, .skj-combatant-notes, .skj-combatant-status, .skj-combatant-status-fallback, .skj-status-fallback").forEach(n => n.remove());
-    if (!AoVAdapter.enabledSetting) return;
-
     const combat = combatFromTrackerApp(app);
+    lastTrackerElement = element;
+    lastTrackerCombat = combat;
+
+    if (!AoVAdapter.enabledSetting) {
+      element.querySelectorAll(".skj-phasebar, .skj-combatant-row, .skj-combatant-indicators, .skj-combatant-notes, .skj-combatant-status, .skj-combatant-status-fallback, .skj-status-fallback").forEach(node => node.remove());
+      return;
+    }
     if (!combat) return;
     combatId = combat.id ?? null;
-    const state = getCombatState(combat);
-    const header = trackerHeaderElement(element);
-    header.insertAdjacentHTML("beforeend", renderPhaseBar(combat, state));
-
-    // AoV owns the Adjust Initiative control and its click automation. Do not
-    // phase-gate that native control here: all four Skjaldborg phases belong to
-    // the same logical combat round, so the control remains available wherever
-    // AoV rendered it.
-
-    for (const row of trackerCombatantRows(element)) {
-      const combatant = combatantFromTrackerRow(combat, row);
-      if (!combatant) continue;
-      rowCount += 1;
-      decorateCombatantRow(row, combatant, getCombatantState(combatant), state);
-    }
-    localizeNativeTrackerTooltips(element);
-    attachTrackerEvents(element, combat);
+    rowCount = decorateTrackerElement(element, combat);
+    performanceDiagnostics.count("render.tracker.fullDecorations", 1, { combatId, rowCount });
     } catch (exception) {
       skipped = true;
       throw exception;

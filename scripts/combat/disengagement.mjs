@@ -14,16 +14,18 @@ import {
   effectIsActive,
   moduleFlag,
   registerStatusEffect,
+  safeDeleteActiveEffect,
   statusEffectConfig,
   upsertActorStatusEffect
 } from "../compat/active-effects.mjs";
 import { warn } from "../logger.mjs";
 import { RenderCoordinator } from "../ui/render-coordinator.mjs";
 import { movementDebug } from "./movement-debugger.mjs";
-import { syncEngagedStatusEffect } from "./engagement-status.mjs";
+import { syncEngagementVisuals } from "./engagement-status.mjs";
 import { removeEngagementPartners, uniquePartnerIds } from "./engagement-links.mjs";
 import { measureOccupiedGridSeparation, reachUnitsForCombatant, tokenSourceGridRect } from "./movement-controller.mjs";
 import { getCombatState, getCombatantState, updateCombatantState } from "./state.mjs";
+import { combatantById, combatantValues } from "./combatant-token-resolution.mjs";
 
 const MOUNTED_EFFECT_NAME = "AOV_SKJALDBORG.StatusEffects.Mounted";
 const DISENGAGING_EFFECT_NAME = "AOV_SKJALDBORG.StatusEffects.Disengaging";
@@ -84,7 +86,7 @@ async function syncDisengagingStatusEffect(combatant, active) {
   if (!actor || typeof CONFIG?.ActiveEffect?.documentClass !== "function") return null;
   const effect = Array.from(actor.effects ?? []).find(isDisengagingEffect) ?? null;
   if (!active) {
-    if (effect?.delete) await effect.delete();
+    await safeDeleteActiveEffect(effect, { reason: "disengaging-inactive" });
     return null;
   }
   return upsertActorStatusEffect(actor, {
@@ -94,14 +96,6 @@ async function syncDisengagingStatusEffect(combatant, active) {
     moduleFlags: { [MANAGED_DISENGAGING_FLAG]: true },
     predicate: isDisengagingEffect
   });
-}
-
-function combatantValues(combat) {
-  return Array.from(combat?.combatants ?? []).map(entry => Array.isArray(entry) ? entry[1] : entry);
-}
-
-function combatantById(combat, id) {
-  return combat?.combatants?.get?.(id) ?? combatantValues(combat).find(candidate => candidate?.id === id) ?? null;
 }
 
 function partnerCombatants(combat, combatant, ids = null) {
@@ -165,7 +159,7 @@ async function grantDisengagementEgress(combatant, partnerIds, method, reason) {
 
 async function writeEngagement(combat, combatant, engagement) {
   await updateCombatantState(combatant, { engagement });
-  await syncEngagedStatusEffect(combatant, engagement, combat);
+  await syncEngagementVisuals(combatant, engagement, combat);
 }
 
 /**
@@ -195,7 +189,10 @@ export async function clearEngagementLinks(combat, combatant, partnerIds = null,
       removeEngagementPartners(state.engagement, [combatant.id], reason)
     );
   }
-  RenderCoordinator.invalidateCombatTracker("disengagement-links-cleared");
+  RenderCoordinator.invalidateCombatTracker("disengagement-links-cleared", {
+    combatantIds: [combatant?.id, ...partnerIdsToRemove].filter(Boolean),
+    parts: ["rows"]
+  });
   return partners.length;
 }
 
@@ -310,7 +307,10 @@ export async function declareDisengagement(combat, combatant, { method = DISENGA
     disengagement
   });
   await syncDisengagingStatusEffect(combatant, normalizedMethod === DISENGAGEMENT_METHODS.RETREAT);
-  RenderCoordinator.invalidateCombatTracker("disengagement-declared");
+  RenderCoordinator.invalidateCombatTracker("disengagement-declared", {
+    combatantIds: [combatant?.id].filter(Boolean),
+    parts: ["rows"]
+  });
   return disengagement;
 }
 

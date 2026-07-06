@@ -8,129 +8,47 @@
  * remains only as a fallback for cards that reach the hit-location button.
  */
 import { MODULE_ID } from "../constants.mjs";
+import { AoVAdapter } from "../adapter/aov-adapter.mjs";
 import { warn } from "../logger.mjs";
 import { incrementCounter } from "../performance/performance-monitor.mjs";
+import { guardedUpdate } from "../utils/guarded-document-writes.mjs";
+import { registerCombatRule } from "./rule-kernel.mjs";
 import {
+  actorFromAoVParticipant,
   aovCards,
+  autoDamageEnabled,
+  grossDamage,
   idTypeMatch,
+  locationArmor,
   recentFlaggedMessages,
+  resolveChatMessageElement,
   safeFromUuid
 } from "./automation-helpers.mjs";
 
 const AIMED_MATCH_WINDOW_MS = 10 * 60 * 1000;
 
 let hooksRegistered = false;
-let aovCheckApiPromise = null;
-let aovCombatChatPromise = null;
 
-/**
- * Resolve the pending chat-message HTMLElement defensively.
- *
- * @param {HTMLElement|ArrayLike<HTMLElement>|null|undefined} html Pending message HTML.
- * @returns {HTMLElement|null}
- */
-function resolveChatMessageElement(html) {
-  if (!html) return null;
-  if (typeof html.querySelector === "function") return html;
-  const candidate = html[0];
-  return candidate && typeof candidate.querySelector === "function" ? candidate : null;
-}
-
-/**
- * Load AoV's combat chat renderer without making it a public module contract.
- *
- * @returns {Promise<{AOVCheck: Function}>}
- */
-async function getAoVCheckApi() {
-  if (!aovCheckApiPromise) {
-    const path = "systems/aov/system/apps/checks.mjs";
-    const route = foundry.utils.getRoute?.(path) ?? `/${path}`;
-    aovCheckApiPromise = import(route)
-      .then(module => {
-        if (typeof module.AOVCheck?.startChat !== "function") {
-          throw new Error("The Age of Vikings combat chat renderer is unavailable.");
-        }
-        return { AOVCheck: module.AOVCheck };
-      })
-      .catch(exception => {
-        aovCheckApiPromise = null;
-        throw exception;
-      });
+registerCombatRule({
+  id: "aimed-blow",
+  priority: 200,
+  prepareAttackContext(context) {
+    const aimed = context.aimed === true || context.aimedBlow?.enabled === true;
+    context.ruleMetadata.aimedBlow = {
+      enabled: aimed,
+      targetKind: String(context.aimedBlow?.targetKind ?? "hitLocation")
+    };
+    return context.ruleMetadata.aimedBlow;
+  },
+  prepareHitLocationContext(context) {
+    const aimed = context.aimed === true || context.aimedBlow?.enabled === true;
+    context.ruleMetadata.aimedBlow = {
+      ...(context.ruleMetadata.aimedBlow ?? {}),
+      suppressRandomHitLocation: aimed
+    };
+    return context.ruleMetadata.aimedBlow;
   }
-  return aovCheckApiPromise;
-}
-
-/**
- * Load AoV's core combat chat handler for the normal fallback path.
- *
- * @returns {Promise<{COCard: Function}>}
- */
-async function getAoVCombatChatApi() {
-  if (!aovCombatChatPromise) {
-    const path = "systems/aov/system/chat/combat-chat.mjs";
-    const route = foundry.utils.getRoute?.(path) ?? `/${path}`;
-    aovCombatChatPromise = import(route)
-      .then(module => {
-        if (typeof module.COCard?.COHitLoc !== "function") {
-          throw new Error("The Age of Vikings hit-location workflow is unavailable.");
-        }
-        return { COCard: module.COCard };
-      })
-      .catch(exception => {
-        aovCombatChatPromise = null;
-        throw exception;
-      });
-  }
-  return aovCombatChatPromise;
-}
-
-/**
- * Resolve an AoV participant id/type pair into its Actor document.
- *
- * @param {unknown} participantId AoV participant id.
- * @param {unknown} participantType AoV participant type.
- * @returns {Actor|null}
- */
-function actorFromParticipant(participantId, participantType) {
-  const id = String(participantId ?? "");
-  const type = String(participantType ?? "");
-  if (!id) return null;
-  if (type === "token") return game.actors?.tokens?.[id] ?? null;
-  if (type === "actor") return game.actors?.get?.(id) ?? null;
-  return null;
-}
-
-/**
- * Whether core AoV automatic damage application is currently enabled.
- *
- * @returns {boolean}
- */
-function autoDamageEnabled() {
-  try {
-    return !!game.settings.get("aov", "autoDmg");
-  } catch (_exception) {
-    return false;
-  }
-}
-
-/**
- * Read the current armor points from a target hit location.
- *
- * @param {Actor} actor Target Actor.
- * @param {Item} hitLocation Target hit-location Item.
- * @returns {number}
- */
-function locationArmor(actor, hitLocation) {
-  const value = actor.type === "npc" ? hitLocation.system?.npcAP : hitLocation.system?.map;
-  const number = Number(value);
-  return Number.isFinite(number) ? number : 0;
-}
-
-function grossDamage(card) {
-  const damageBeforeAbsorb = Number(card?.damageBeforeAbsorb);
-  if (Number.isFinite(damageBeforeAbsorb)) return Math.max(0, damageBeforeAbsorb);
-  return Math.max(0, (Number(card?.rollVal ?? 0) || 0) + (Number(card?.armourAbsorb ?? 0) || 0));
-}
+});
 
 /**
  * Locate the first unresolved positive AoV damage card that still needs a hit
@@ -228,7 +146,7 @@ function findMatchingAimedSource(damageMessage, damageCard) {
  */
 async function resolveAimedTarget(aimed, damageCard) {
   const flaggedActor = await safeFromUuid(aimed.targetActorUuid);
-  const targetActor = flaggedActor ?? actorFromParticipant(damageCard.targetId, damageCard.targetType);
+  const targetActor = flaggedActor ?? actorFromAoVParticipant(damageCard.targetId, damageCard.targetType);
   const hitLocation = targetActor?.items?.get?.(String(aimed.hitLocationId)) ?? null;
   return { targetActor, hitLocation };
 }
@@ -242,7 +160,7 @@ async function resolveAimedTarget(aimed, damageCard) {
  */
 async function resolveAimedEquipmentTarget(aimed, damageCard) {
   const flaggedActor = await safeFromUuid(aimed.targetActorUuid);
-  const targetActor = flaggedActor ?? actorFromParticipant(damageCard.targetId, damageCard.targetType);
+  const targetActor = flaggedActor ?? actorFromAoVParticipant(damageCard.targetId, damageCard.targetType);
   const flaggedWeapon = await safeFromUuid(aimed.targetWeaponUuid);
   const targetWeapon = flaggedWeapon ?? targetActor?.items?.get?.(String(aimed.targetWeaponId ?? "")) ?? null;
   return { targetActor, targetWeapon };
@@ -300,9 +218,8 @@ function applyAimedEquipmentToCard(chatCard, targetWeapon, weaponDamage, damage)
  */
 async function rerenderAoVMessage(message) {
   const refreshed = game.messages?.get?.(message.id) ?? message;
-  const { AOVCheck } = await getAoVCheckApi();
-  const content = await AOVCheck.startChat(refreshed.flags.aov);
-  await refreshed.update({ content });
+  const content = await AoVAdapter.createAovCombatCard(refreshed.flags.aov);
+  await guardedUpdate(refreshed, { content }, { category: "chat.aovRerender" });
 }
 
 /**
@@ -314,11 +231,11 @@ async function rerenderAoVMessage(message) {
  */
 async function markAimedSourceResolved(sourceMessage, damageMessage) {
   if (!sourceMessage?.update) return;
-  await sourceMessage.update({
+  await guardedUpdate(sourceMessage, {
     [`flags.${MODULE_ID}.aimedBlow.resolved`]: true,
     [`flags.${MODULE_ID}.aimedBlow.damageMessageId`]: damageMessage.id,
     [`flags.${MODULE_ID}.aimedBlow.resolvedAt`]: Date.now()
-  });
+  }, { category: "chat.aimedSourceResolved" });
 }
 
 /**
@@ -381,11 +298,11 @@ async function resolveAimedHitLocation(message, options = {}) {
     cards[located.index] = applyAimedLocationToCard(chatCard, targetActor, hitLocation);
   }
 
-  await message.update({
+  await guardedUpdate(message, {
     "flags.aov.chatCard": cards,
     "flags.aov.state": newState,
     [`flags.${MODULE_ID}.aimedBlowDamage`]: damageFlag
-  });
+  }, { category: "chat.aimedDamage" });
   if (source?.message?.id && source.message.id !== message.id) {
     await markAimedSourceResolved(source.message, message);
   } else if (message.getFlag?.(MODULE_ID, "aimedBlow")) {
@@ -425,8 +342,7 @@ async function resolveAimedDamageMessage(message) {
  * @returns {Promise<void>}
  */
 async function runCoreHitLocationFallback(message, button, event) {
-  const { COCard } = await getAoVCombatChatApi();
-  await COCard.COHitLoc({
+  await AoVAdapter.resolveAovHitLocation({
     presetType: String(button.dataset.preset ?? "roll-hitloc-card"),
     targetChatId: message.id,
     origin: game.user?.id ?? null,
@@ -438,6 +354,9 @@ async function runCoreHitLocationFallback(message, button, event) {
 
 /**
  * Bind aimed-blow hit-location override to one rendered AoV damage card.
+ *
+ * Render-safe: this function only reads message flags/card data and binds an
+ * explicit user action. Automatic resolution belongs to create/update hooks.
  *
  * @param {ChatMessage} message Rendered ChatMessage.
  * @param {HTMLElement|ArrayLike<HTMLElement>} html Rendered HTML.
@@ -451,15 +370,10 @@ function bindAimedHitLocationOverride(message, html) {
   const button = element?.querySelector?.("button[data-preset='roll-hitloc-card']");
   if (!button) return;
 
-  if (game.user?.isGM) {
-    void resolveAimedDamageMessage(message).catch(exception => {
-      warn(exception);
-      ui.notifications.error(game.i18n.localize("AOV_SKJALDBORG.Warnings.ActionFailed"));
-    });
-  }
-
   const source = findMatchingAimedSource(message, located.card);
   if (!source || !game.user?.isGM) return;
+  if (button.dataset.skjAimedBlowBound === "true") return;
+  button.dataset.skjAimedBlowBound = "true";
 
   button.addEventListener("click", event => {
     event.preventDefault();

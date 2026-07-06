@@ -56,16 +56,7 @@
     {{#if showModeSelector}}
     <div class="skj-roll-dialog__row skj-runic-magic-dialog__mode-row">
       <label>{{localize "AOV_SKJALDBORG.RunicMagic.Mode"}}</label>
-      <div class="skj-roll-dialog__segments skj-runic-magic-dialog__mode">
-        <label class="skj-roll-dialog__segment">
-          <input type="radio" name="magicMode" value="runescript" {{#if selectedRuneMode}}checked{{/if}}>
-          <span>{{localize "AOV_SKJALDBORG.RunicMagic.RuneScripts"}}</span>
-        </label>
-        <label class="skj-roll-dialog__segment">
-          <input type="radio" name="magicMode" value="seidur" {{#if selectedSeidurMode}}checked{{/if}}>
-          <span>{{localize "AOV_SKJALDBORG.RunicMagic.Seidur"}}</span>
-        </label>
-      </div>
+      {{> "modules/aov-skjaldborg/templates/partials/dialog/segmented-controls.hbs" name="magicMode" controls=magicModeControls class="skj-roll-dialog__segments skj-runic-magic-dialog__mode"}}
     </div>
     {{/if}}
 
@@ -107,24 +98,7 @@
 
     <fieldset class="skj-roll-dialog__augment skj-runic-magic-dialog__panel skj-runic-magic-dialog__options-panel">
       <legend>{{localize "AOV_SKJALDBORG.RunicMagic.Options"}}</legend>
-      <div class="skj-roll-dialog__segments skj-runic-magic-dialog__options">
-        <label class="skj-roll-dialog__segment" data-rune-only>
-          <input type="checkbox" name="prepared" {{#if preparedDefault}}checked{{/if}}>
-          <span>{{localize "AOV_SKJALDBORG.RunicMagic.Prepared"}}</span>
-        </label>
-        <label class="skj-roll-dialog__segment" data-rune-only>
-          <input type="checkbox" name="resistance">
-          <span>{{localize "AOV_SKJALDBORG.RunicMagic.Resistance"}}</span>
-        </label>
-        <label class="skj-roll-dialog__segment" data-rune-only>
-          <input type="checkbox" name="craftEnabled">
-          <span>{{localize "AOV_SKJALDBORG.RunicMagic.CraftRune"}}</span>
-        </label>
-        <label class="skj-roll-dialog__segment">
-          <input type="checkbox" name="customModifierEnabled" {{#if customModifierEnabled}}checked{{/if}}>
-          <span>{{localize "AOV_SKJALDBORG.RunicMagic.CustomModifier"}}</span>
-        </label>
-      </div>
+      {{> "modules/aov-skjaldborg/templates/partials/dialog/segmented-controls.hbs" controls=runicOptionControls class="skj-roll-dialog__segments skj-runic-magic-dialog__options"}}
 
       <section class="skj-roll-dialog__details skj-runic-magic-dialog__details">
         <p class="skj-roll-dialog__note is-warning skj-runic-magic-dialog__craft-warning" data-runic-detail="craft" data-requires-read-write-runes data-has-read-write-runes="{{#if hasReadWriteRunes}}true{{else}}false{{/if}}" hidden>
@@ -144,11 +118,7 @@
           <label>{{localize "AOV_SKJALDBORG.RunicMagic.CustomCraftTarget"}}</label>
           <input type="number" name="customCraftTarget" min="1" max="100" step="1" value="{{customCraftTarget}}">
         </div>
-        <div class="skj-roll-dialog__detail skj-roll-dialog__detail--custom skj-runic-magic-dialog__detail--custom" data-runic-detail="custom" {{#unless customModifierEnabled}}hidden{{/unless}}>
-          <label>{{localize "AOV_SKJALDBORG.RunicMagic.FlatMod"}}</label>
-          <input type="text" name="customModifierReason" value="{{customModifierReason}}" placeholder="{{localize "AOV_SKJALDBORG.AttackDialog.CustomReason"}}" />
-          <input type="number" name="flatMod" value="{{flatMod}}" step="1" />
-        </div>
+        {{> "modules/aov-skjaldborg/templates/partials/dialog/custom-modifier-row.hbs" customModifierRow}}
       </section>
 
       <p class="skj-roll-dialog__note" data-rune-skill-note {{#if selectedSeidurMode}}hidden{{/if}}>{{localize "AOV_SKJALDBORG.RunicMagic.RuneSkill" skill=runeMagicSkillName}}</p>

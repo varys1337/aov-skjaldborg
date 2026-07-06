@@ -1,0 +1,44 @@
+.aov-skjaldborg .skj-dialog-section {
+  border: 1px solid var(--skj-dialog-border);
+  border-radius: var(--skj-dialog-radius-md);
+  display: grid;
+  min-width: 0;
+}
+
+.aov-skjaldborg .skj-dialog-section__header {
+  min-width: 0;
+}
+
+.aov-skjaldborg .skj-dialog-section__header > button {
+  align-items: center;
+  background: var(--skj-dialog-bg-soft);
+  border: 0;
+  border-radius: var(--skj-dialog-radius-md) var(--skj-dialog-radius-md) 0 0;
+  color: inherit;
+  display: grid;
+  gap: var(--skj-dialog-gap-sm);
+  grid-template-columns: auto minmax(0, 1fr);
+  min-height: var(--skj-dialog-control-height);
+  padding: 0.25rem var(--skj-dialog-section-padding);
+  text-align: left;
+  width: 100%;
+}
+
+.aov-skjaldborg .skj-dialog-section__header i {
+  transition: transform 120ms ease;
+}
+
+.aov-skjaldborg .skj-dialog-section.collapsed .skj-dialog-section__header i {
+  transform: rotate(-90deg);
+}
+
+.aov-skjaldborg .skj-dialog-section__body {
+  display: grid;
+  gap: var(--skj-dialog-gap-sm);
+  min-width: 0;
+  padding: var(--skj-dialog-section-padding);
+}
+
+.aov-skjaldborg .skj-dialog-section.collapsed .skj-dialog-section__body {
+  display: none;
+}

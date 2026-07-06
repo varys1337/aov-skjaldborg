@@ -388,7 +388,10 @@ export class UtilityDialog extends DialogV2 {
         update = await setCombatOptions(this.actor, result.combatOptions);
       }
       RenderCoordinator.invalidate("actorHotbar", { parts: ["workflow", "weaponControls"], reason: "utility-options" });
-      RenderCoordinator.invalidateCombatTracker("utility-options");
+      RenderCoordinator.invalidateCombatTracker("utility-options", {
+        combatantIds: this.combatant?.id ? [this.combatant.id] : [],
+        parts: ["rows"]
+      });
       RenderCoordinator.invalidate("intentIndicators", {
         reason: "utility-options",
         combatantIds: this.combatant?.id ? [this.combatant.id] : [],

@@ -3,7 +3,7 @@ import { MODULE_ID, MOVEMENT_PLAN_STATUS, PHASE_ORDER, PHASES, RESOLUTION_STATUS
 import { warn } from "../logger.mjs";
 import { createPhaseReport } from "./chat-report.mjs";
 import { resolvePendingFlees, resolvePendingRetreatDisengagements } from "./disengagement.mjs";
-import { isMovementRunActive, startMovementPhase } from "./movement-controller.mjs";
+import { isMovementRunActive, recoverStaleMovementRun, startMovementPhase } from "./movement-controller.mjs";
 import { settleMovementWrites } from "./authoritative-write-queue.mjs";
 import { pruneStaleEngagements } from "./engagement-reconciliation.mjs";
 import {
@@ -25,7 +25,8 @@ import {
   getEnabledPhases,
   isPhaseEnabled,
   nextEnabledPhase,
-  shouldQueueResolutionImmediately
+  shouldQueueResolutionImmediately,
+  shouldTrackCurrentTurnForPhase
 } from "./phase-structure.mjs";
 import {
   clearCombatState,
@@ -39,6 +40,7 @@ import {
   updateCombatState
 } from "./state.mjs";
 import { RenderCoordinator } from "../ui/render-coordinator.mjs";
+import { runtimeSettings } from "../runtime-settings.mjs";
 
 /**
  * Combat documents currently executing a module-owned core navigation call.
@@ -218,13 +220,13 @@ export class PhaseController {
       enabled: true,
       phase: getEnabledPhases().includes(state.phase) ? state.phase : firstEnabledPhase(),
       logicalRound: state.logicalRound || AoVAdapter.getSystemLogicalRound(combat),
-      requireAllCommit: game.settings.get(MODULE_ID, "requireAllCommit"),
+      requireAllCommit: runtimeSettings.requireAllCommit === true,
       recoverySnapshot: snapshotCombat(combat)
     };
     await setCombatState(combat, next);
-    await this.reconcilePlanningTurnMode(combat);
+    await this.reconcileCurrentTurnTracking(combat);
     await createPhaseReport(combat, next);
-    RenderCoordinator.invalidateCombatTracker("phase-start-workflow");
+    RenderCoordinator.invalidateCombatTracker("phase-start-workflow", { parts: ["phase", "rows"] });
     return next;
   }
 
@@ -237,7 +239,7 @@ export class PhaseController {
   static async disable(combat = game.combat) {
     if (!combat) return null;
     await clearCombatState(combat);
-    RenderCoordinator.invalidateCombatTracker("phase-clear-workflow");
+    RenderCoordinator.invalidateCombatTracker("phase-clear-workflow", { parts: ["phase", "rows"] });
     return true;
   }
 
@@ -248,7 +250,7 @@ export class PhaseController {
    * @returns {{ok: boolean, missing: string[]}}
    */
   static canAdvanceFromIntent(combat) {
-    const requireAllCommit = game.settings.get(MODULE_ID, "requireAllCommit") === true;
+    const requireAllCommit = runtimeSettings.requireAllCommit === true;
     if (!requireAllCommit) return { ok: true, missing: [] };
     const missing = [];
     for (const combatant of combat.combatants) {
@@ -335,6 +337,10 @@ export class PhaseController {
         ui.notifications.warn(game.i18n.format("AOV_SKJALDBORG.Warnings.Uncommitted", { names: validation.missing.join(", ") }));
         return state;
       }
+    }
+
+    if (currentPhase === PHASES.MOVEMENT && isMovementRunActive(combat)) {
+      await recoverStaleMovementRun(combat, { reason: "phase-advance-stale-run" });
     }
 
     if (currentPhase === PHASES.MOVEMENT && isMovementRunActive(combat)) {
@@ -445,14 +451,10 @@ export class PhaseController {
     let next = await updateCombatState(combat, patch);
     if (targetPhase === PHASES.INTENT && isDynamicPlanningInitiativeEnabled()) {
       await initializePlanningInitiativeTracking(combat);
-      await this.clearCurrentTurn(combat, "planning-simultaneous");
-    } else if (targetPhase === PHASES.MOVEMENT) {
-      await this.clearCurrentTurn(combat, "movement-simultaneous");
-    } else {
-      await this.resetTurnToFirst(combat);
     }
+    await this.applyCurrentTurnTracking(combat, targetPhase, "phase-enter");
     await createPhaseReport(combat, next);
-    RenderCoordinator.invalidateCombatTracker("phase-advance");
+    RenderCoordinator.invalidateCombatTracker("phase-advance", { parts: ["phase", "rows"] });
 
     // In the tactical structure, all predeclared routes execute together while
     // Movement remains visibly active. Await completion so another native Next
@@ -511,7 +513,7 @@ export class PhaseController {
     if (!game.user?.isGM || !combat) return null;
     const state = getCombatState(combat);
     if (!state.enabled || getEnabledPhases().includes(state.phase)) {
-      RenderCoordinator.invalidateCombatTracker("phase-structure-reconciled");
+      RenderCoordinator.invalidateCombatTracker("phase-structure-reconciled", { parts: ["phase"] });
       return state;
     }
     return this.advance(combat, nextEnabledPhase(state.phase));
@@ -620,13 +622,10 @@ export class PhaseController {
     let state = getCombatState(combat);
     if (!state.enabled) state = await this.initialize(combat);
 
-    // Simultaneous Planning and visible Movement have no combatant turn cursor.
-    // Native Next Turn therefore means “advance to the next configured phase”;
-    // the relevant phase gates are still enforced by advance().
-    if (
-      (state.phase === PHASES.INTENT && isDynamicPlanningInitiativeEnabled())
-      || state.phase === PHASES.MOVEMENT
-    ) {
+    // Phases configured without current-turn tracking are simultaneous from
+    // the tracker perspective. Native Next Turn therefore means “advance to
+    // the next configured phase”; the relevant gates remain enforced by advance().
+    if (!shouldTrackCurrentTurnForPhase(state.phase)) {
       return this.advance(combat);
     }
 
@@ -644,7 +643,7 @@ export class PhaseController {
 
     if (currentTurn < 0 || nextTurn > currentTurn) {
       await runInternalCombatUpdate(combat, () => combat.nextTurn());
-      RenderCoordinator.invalidateCombatTracker("phase-next-turn");
+      RenderCoordinator.invalidateCombatTracker("phase-next-turn", { full: true, parts: ["phase", "rows"] });
       return getCombatState(combat);
     }
 
@@ -653,23 +652,50 @@ export class PhaseController {
 
   /**
    * Reconcile the active Combat turn cursor with the advanced Planning mode.
-   * When enabled, Planning deliberately has no current combatant; when disabled
-   * again, the first sorted combatant is restored.
+   * Dynamic Planning still refreshes the planning ledger, while the phase
+   * current-turn setting determines whether the tracker shows a cursor.
    *
    * @param {Combat|null} [combat=game.combat] Foundry Combat document.
    * @returns {Promise<void>}
    */
   static async reconcilePlanningTurnMode(combat = game.combat) {
     if (!game.user?.isGM || !combat?.started) return;
+    const state = getCombatState(combat);
+    if (state.phase !== PHASES.INTENT) return;
     if (isDynamicPlanningInitiativeActive(combat)) {
       await initializePlanningInitiativeTracking(combat);
-      await this.clearCurrentTurn(combat, "planning-mode-reconcile");
+    }
+    await this.applyCurrentTurnTracking(combat, PHASES.INTENT, "planning-mode-reconcile");
+  }
+
+  /**
+   * Reconcile the active Combat turn cursor for the currently active phase.
+   *
+   * @param {Combat|null} [combat=game.combat] Foundry Combat document.
+   * @returns {Promise<void>}
+   */
+  static async reconcileCurrentTurnTracking(combat = game.combat) {
+    if (!game.user?.isGM || !combat?.started) return;
+    const state = getCombatState(combat);
+    if (!state.enabled) return;
+    await this.applyCurrentTurnTracking(combat, state.phase, "phase-current-turn-reconcile");
+  }
+
+  /**
+   * Apply the configured current-turn cursor behavior for a phase.
+   *
+   * @param {Combat} combat Foundry Combat document.
+   * @param {string} phase Phase id.
+   * @param {string} reason Diagnostic reason.
+   * @returns {Promise<void>}
+   */
+  static async applyCurrentTurnTracking(combat, phase, reason = "phase-current-turn") {
+    if (!combat?.started) return;
+    if (shouldTrackCurrentTurnForPhase(phase)) {
+      await this.resetTurnToFirst(combat);
       return;
     }
-    const state = getCombatState(combat);
-    if (state.phase === PHASES.INTENT && combat.turn == null) {
-      await this.resetTurnToFirst(combat);
-    }
+    await this.clearCurrentTurn(combat, reason);
   }
 
   /**
@@ -708,7 +734,7 @@ export class PhaseController {
       const direction = turn === current ? 0 : turn > current ? 1 : -1;
       await combat.update({ turn }, internalUpdateOptions("set-current-combatant", direction));
     }
-    RenderCoordinator.invalidateCombatTracker("phase-set-current-combatant");
+    RenderCoordinator.invalidateCombatTracker("phase-set-current-combatant", { full: true, parts: ["phase", "rows"] });
     return combatant;
   }
 
@@ -755,7 +781,7 @@ export class PhaseController {
         action
       });
     }
-    RenderCoordinator.invalidateCombatTracker("phase-reset");
+    RenderCoordinator.invalidateCombatTracker("phase-reset", { full: true, parts: ["phase", "rows"] });
     return updated;
   }
 

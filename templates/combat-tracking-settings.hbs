@@ -60,6 +60,23 @@
   </fieldset>
 
   <fieldset>
+    <legend>{{localize "AOV_SKJALDBORG.Settings.CombatTrackingMenu.Visuals.Name"}}</legend>
+    <p class="hint">{{localize "AOV_SKJALDBORG.Settings.CombatTrackingMenu.Visuals.Hint"}}</p>
+
+    <div class="form-group">
+      <label>{{localize "AOV_SKJALDBORG.Settings.EngagementVisualMode.Name"}}</label>
+      <div class="form-fields">
+        <select name="engagementVisualMode">
+          {{#each engagementVisualModeChoices}}
+            <option value="{{value}}" {{#if selected}}selected{{/if}}>{{label}}</option>
+          {{/each}}
+        </select>
+      </div>
+      <p class="hint">{{localize "AOV_SKJALDBORG.Settings.EngagementVisualMode.Hint"}}</p>
+    </div>
+  </fieldset>
+
+  <fieldset>
     <legend>{{localize "AOV_SKJALDBORG.Settings.CombatTrackingMenu.Automation.Name"}}</legend>
     <p class="hint">{{localize "AOV_SKJALDBORG.Settings.CombatTrackingMenu.Automation.Hint"}}</p>
 
@@ -71,14 +88,30 @@
       <p class="hint">{{localize "AOV_SKJALDBORG.Settings.EvadeFightingDefensively.Hint"}}</p>
     </div>
 
+    <div class="form-group">
+      <label>{{localize "AOV_SKJALDBORG.Settings.AutoIncrementReactions.Name"}}</label>
+      <div class="form-fields">
+        <input type="checkbox" name="autoIncrementReactions" value="true" data-dtype="Boolean" {{checked autoIncrementReactions}}>
+      </div>
+      <p class="hint">{{localize "AOV_SKJALDBORG.Settings.AutoIncrementReactions.Hint"}}</p>
+    </div>
+
     <div class="form-group skj-rolltable-drop-setting" data-skj-rolltable-drop>
       <label>{{localize "AOV_SKJALDBORG.Settings.KnockbackFumbleTable.Name"}}</label>
       <div class="form-fields">
-        <input type="text" name="knockbackFumbleTableReference" value="{{knockbackFumbleTableReference}}" placeholder="Compendium.package.tables.RollTable.id / RollTable.id / rt..fumbles" data-dtype="String">
+        <input type="text" name="knockbackFumbleTableReference" value="{{knockbackFumbleTableReference}}" placeholder="{{localize "AOV_SKJALDBORG.Settings.KnockbackFumbleTable.DropHint"}}" data-dtype="String">
       </div>
-      <p class="hint">{{localize "AOV_SKJALDBORG.Settings.KnockbackFumbleTable.Hint"}}</p>
       <p class="hint skj-rolltable-drop-setting__drop"><i class="fa-solid fa-table-list"></i> {{localize "AOV_SKJALDBORG.Settings.KnockbackFumbleTable.DropHint"}}</p>
     </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>{{localize "AOV_SKJALDBORG.Settings.CombatTrackingMenu.ReachVisualizer.Name"}}</legend>
+    <p class="hint">{{localize "AOV_SKJALDBORG.Settings.CombatTrackingMenu.ReachVisualizer.Hint"}}</p>
+    <button type="button" data-action="reachVisualizer">
+      <i class="fa-solid fa-bullseye"></i>
+      <span>{{localize "AOV_SKJALDBORG.Settings.ReachVisualizerMenu.Label"}}</span>
+    </button>
   </fieldset>
 
 </div>

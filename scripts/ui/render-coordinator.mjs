@@ -65,8 +65,15 @@ export function invalidateRenderSurface(surface, detail = {}) {
   });
 }
 
-export function invalidateCombatTracker(reason = "combat-tracker") {
-  invalidateRenderSurface("combatTracker", { reason });
+export function invalidateCombatTracker(reason = "combat-tracker", detail = {}) {
+  const merged = typeof reason === "object" && reason !== null
+    ? reason
+    : { ...detail, reason };
+  const reasons = Array.isArray(merged?.reasons) ? merged.reasons : [merged?.reason].filter(Boolean);
+  if (reasons.some(entry => String(entry).startsWith("movement") || String(entry).includes("engagement"))) {
+    incrementCounter("movement.tick.trackerInvalidations", 1, serializableDetail(normalizeDetail(merged)));
+  }
+  invalidateRenderSurface("combatTracker", merged);
 }
 
 export function invalidateActorHotbarSurface(parts = ["shell"], reason = "actor-hotbar") {

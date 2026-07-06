@@ -9,7 +9,7 @@ import {
 } from "./settings.mjs";
 import { registerSocket } from "./socket.mjs";
 import { requestGm } from "./socket.mjs";
-import { registerTrackerHooks } from "./hooks/tracker.mjs";
+import { refreshCombatTrackerDecorations, registerTrackerHooks } from "./hooks/tracker.mjs";
 import { registerCombatNavigationHooks } from "./hooks/combat-navigation.mjs";
 import { registerCombatContextHooks } from "./hooks/combat-context.mjs";
 import { ActionRing, registerActionRingHooks } from "./apps/action-ring.mjs";
@@ -27,6 +27,7 @@ import {
 import { registerChatReportHooks } from "./combat/chat-report.mjs";
 import { registerDialogTargetQueueHooks } from "./combat/dialog-target-queue.mjs";
 import { registerAimedBlowAutomationHooks } from "./combat/aimed-blow-automation.mjs";
+import { registerProneDamageAutomationHooks } from "./combat/prone-damage-automation.mjs";
 import { registerDisarmAutomationHooks } from "./combat/disarm-automation.mjs";
 import { registerMissileAutomationHooks } from "./combat/missile-automation.mjs";
 import { registerStunAutomationHooks } from "./combat/stun-automation.mjs";
@@ -42,7 +43,7 @@ import {
 import { reconcileReactionPenaltyEffectsForCombat, registerReactionPenaltyEffectHooks } from "./combat/reaction-penalty-effects.mjs";
 import { registerGrappleAutomationHooks, registerGrappleStatusEffects } from "./combat/grapple-automation.mjs";
 import { registerMovementHooks, startMovementPhase } from "./combat/movement-controller.mjs";
-import { reconcileEngagedStatusEffects, registerEngagedStatusEffect, registerEngagedStatusHooks } from "./combat/engagement-status.mjs";
+import { reconcileEngagedStatusEffects, refreshEngagementVisuals, registerEngagedStatusEffect, registerEngagedStatusHooks } from "./combat/engagement-status.mjs";
 import { pruneStaleEngagements } from "./combat/engagement-reconciliation.mjs";
 import {
   registerDisengagementHooks,
@@ -53,8 +54,10 @@ import { registerReadiedWeaponHooks } from "./combat/weapon-state.mjs";
 import { logMovementDebugExport, logMovementDebugSnapshot, movementDebugExport, movementDebugSnapshot } from "./combat/movement-debugger.mjs";
 import { registerTokenIntentIndicatorHooks, refreshTokenIntentIndicators } from "./canvas/intent-indicators.mjs";
 import { registerMovementPlanPreviewHooks, refreshMovementPlanPreview } from "./canvas/movement-plan-preview.mjs";
+import { registerEngagementIndicatorHooks } from "./canvas/engagement-indicators.mjs";
 import { registerReachVisualizerHooks } from "./canvas/reach-visualizer.mjs";
 import { captureExternalPlanningInitiativeChange } from "./combat/planning-initiative.mjs";
+import { shouldTrackCurrentTurnForPhase } from "./combat/phase-structure.mjs";
 import { registerPreparedIntentHooks } from "./combat/prepared-intent.mjs";
 import {
   capabilityFailureSummary,
@@ -65,12 +68,16 @@ import {
 import { installAoVMessageModeCompatibility } from "./compat/aov-message-mode.mjs";
 import { RenderCoordinator } from "./ui/render-coordinator.mjs";
 import { performanceDiagnostics } from "./performance/performance-monitor.mjs";
+import { refreshRuntimeSettings } from "./runtime-settings.mjs";
+import { getFeatureRegistryReport, initializeRegisteredFeatures, registerFeature } from "./core/feature-registry.mjs";
 
 let adjustInitiativeIntegrationInstalled = false;
 let messageModeCompatibilityInstalled = false;
+let runtimeFeaturesRegistered = false;
 
 RenderCoordinator.register("combatTracker", detail => {
   performanceDiagnostics.count("combatTracker.render.request", 1, detail);
+  if (refreshCombatTrackerDecorations(detail)) return;
   ui.combat?.render?.();
 });
 
@@ -85,6 +92,39 @@ function isAuthoritativeGmClient() {
   if (!game.user?.isGM) return false;
   const activeGm = game.users?.find?.(user => user.active && user.isGM) ?? null;
   return !activeGm || activeGm.id === game.user.id;
+}
+
+function registerRuntimeFeatures() {
+  if (runtimeFeaturesRegistered) return;
+  runtimeFeaturesRegistered = true;
+  [
+    ["readied-weapons", "Readied Weapon Hooks", registerReadiedWeaponHooks, 2],
+    ["prepared-intent", "Prepared Intent Hooks", registerPreparedIntentHooks, 2],
+    ["combat-tracker", "Combat Tracker Decorations", registerTrackerHooks, 2],
+    ["combat-navigation", "Combat Navigation Hooks", registerCombatNavigationHooks, 2],
+    ["movement", "Movement Hooks", () => registerMovementHooks(requestGm), 5],
+    ["engagement-status", "Engagement Status Hooks", registerEngagedStatusHooks, 4],
+    ["disengagement", "Disengagement Hooks", registerDisengagementHooks, 1],
+    ["aimed-blow", "Aimed Blow Automation", registerAimedBlowAutomationHooks, 3],
+    ["prone-damage", "Prone Damage Automation", registerProneDamageAutomationHooks, 3],
+    ["disarm", "Disarm Automation", registerDisarmAutomationHooks, 2],
+    ["missile", "Missile Automation", registerMissileAutomationHooks, 2],
+    ["stun", "Stun Automation", registerStunAutomationHooks, 5],
+    ["knockback", "Knockback Automation", registerKnockbackAutomationHooks, 2],
+    ["runic-magic", "Runic Magic Hooks", registerRunicMagicHooks, 3],
+    ["damage-effects", "Damage Effect Tracking", registerDamageEffectTrackingHooks, 5],
+    ["grapple", "Grapple Automation", registerGrappleAutomationHooks, 1],
+    ["evade", "Evading Status Hooks", registerEvadingStatusHooks, 2],
+    ["reaction-penalties", "Reaction Penalty Hooks", registerReactionPenaltyEffectHooks, 4],
+    ["action-ring", "Action Ring Hooks", registerActionRingHooks, 4],
+    ["actor-hotbar", "Actor Hotbar Hooks", registerActorHotbarHooks, 16],
+    ["intent-indicators", "Token Intent Indicators", registerTokenIntentIndicatorHooks, 17],
+    ["movement-plan-preview", "Movement Plan Preview", registerMovementPlanPreviewHooks, 12],
+    ["engagement-indicators", "Engagement Indicators", registerEngagementIndicatorHooks, 8],
+    ["reach-visualizer", "Reach Visualizer", registerReachVisualizerHooks, 14],
+    ["chat-report", "Chat Report Hooks", registerChatReportHooks, 1],
+    ["dialog-target-queue", "Dialog Target Queue", registerDialogTargetQueueHooks, 1]
+  ].forEach(([id, label, initialize, hookCount]) => registerFeature({ id, label, initialize, hookCount }));
 }
 
 /**
@@ -103,6 +143,7 @@ Hooks.once("init", () => {
 // AoV and other packages may complete CONFIG mutations later in init. Reapply
 // the idempotent status registration before the v14 UI is constructed.
 Hooks.once("setup", () => {
+  refreshRuntimeSettings();
   registerEngagedStatusEffect();
   registerDisengagementStatusEffects();
   registerGrappleStatusEffects();
@@ -117,6 +158,7 @@ Hooks.once("setup", () => {
  * Register runtime integration only in AoV worlds.
  */
 Hooks.once("ready", async () => {
+  refreshRuntimeSettings();
   registerEngagedStatusEffect();
   registerDisengagementStatusEffects();
   registerGrappleStatusEffects();
@@ -138,7 +180,8 @@ Hooks.once("ready", async () => {
       adapter: AoVAdapter,
       diagnostics: {
         run: runDiagnostics,
-        performance: performanceDiagnostics
+        performance: performanceDiagnostics,
+        features: getFeatureRegistryReport
       },
       capabilities
     };
@@ -162,30 +205,9 @@ Hooks.once("ready", async () => {
     installAdjustInitiativeDismissGuard();
     warn("AoV Adjust Initiative weapon integration was unavailable; installed only the dismissal guard.");
   }
-  registerReadiedWeaponHooks();
-  registerPreparedIntentHooks();
-  registerTrackerHooks();
-  registerCombatNavigationHooks();
-  registerMovementHooks(requestGm);
-  registerEngagedStatusHooks();
-  registerDisengagementHooks();
-  registerAimedBlowAutomationHooks();
-  registerDisarmAutomationHooks();
-  registerMissileAutomationHooks();
-  registerStunAutomationHooks();
-  registerKnockbackAutomationHooks();
-  registerRunicMagicHooks();
-  registerDamageEffectTrackingHooks();
-  registerGrappleAutomationHooks();
-  registerEvadingStatusHooks();
-  registerReactionPenaltyEffectHooks();
-  registerActionRingHooks();
-  registerActorHotbarHooks();
-  registerTokenIntentIndicatorHooks();
-  registerMovementPlanPreviewHooks();
-  const reachVisualizer = registerReachVisualizerHooks();
-  registerChatReportHooks();
-  registerDialogTargetQueueHooks();
+  registerRuntimeFeatures();
+  const initializedFeatures = initializeRegisteredFeatures();
+  const reachVisualizer = initializedFeatures.get("reach-visualizer")?.result ?? null;
   await reconcileEngagedStatusEffects(game.combat);
   await reconcileReactionPenaltyEffectsForCombat(game.combat, { reason: "ready" });
   game.aovSkjaldborg = {
@@ -196,7 +218,8 @@ Hooks.once("ready", async () => {
       resolveKnockback: resolveKnockbackDisengagement
     },
     engagement: {
-      pruneStale: pruneStaleEngagements
+      pruneStale: pruneStaleEngagements,
+      redrawVisuals: refreshEngagementVisuals
     },
     grapple: {
       registerStatusEffects: registerGrappleStatusEffects
@@ -228,7 +251,8 @@ Hooks.once("ready", async () => {
     },
     diagnostics: {
       run: runDiagnostics,
-      performance: performanceDiagnostics
+      performance: performanceDiagnostics,
+      features: getFeatureRegistryReport
     }
   };
   debug("ready");
@@ -239,7 +263,7 @@ Hooks.once("ready", async () => {
  */
 Hooks.on("updateCombat", combat => {
   if (!combat?.getFlag?.(MODULE_ID, "combatState")?.enabled) return;
-  RenderCoordinator.invalidate("combatTracker", { reason: "combat-update" });
+  RenderCoordinator.invalidate("combatTracker", { reason: "combat-update", full: true, parts: ["phase", "rows"] });
 });
 
 /**
@@ -256,10 +280,13 @@ Hooks.on("updateCombatant", (combatant, changed, options = {}) => {
     && planningOptions.planningExternalHandled !== true
   ) {
     void captureExternalPlanningInitiativeChange(combatant, changed, options)
-      .then(ledger => ledger
-        ? PhaseController.clearCurrentTurn(combatant.parent, "planning-initiative-update")
-        : undefined)
+      .then(ledger => {
+        const phase = getCombatState(combatant.parent).phase;
+        return ledger && !shouldTrackCurrentTurnForPhase(phase)
+          ? PhaseController.clearCurrentTurn(combatant.parent, "planning-initiative-update")
+          : undefined;
+      })
       .catch(cause => warn(cause));
   }
-  RenderCoordinator.invalidate("combatTracker", { reason: "combatant-update" });
+  RenderCoordinator.invalidate("combatTracker", { reason: "combatant-update", combatantIds: [combatant.id].filter(Boolean), parts: ["rows"] });
 });

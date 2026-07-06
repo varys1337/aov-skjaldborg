@@ -95,44 +95,6 @@
   white-space: nowrap;
 }
 
-.chat-message .aov.aov-skjaldborg-grapple-chat .actor-roll {
-  align-items: center;
-}
-
-.chat-message .aov.aov-skjaldborg-grapple-chat .roll-details,
-.chat-message .aov.aov-skjaldborg-grapple-chat .roll-details .header {
-  min-width: 0;
-}
-
-.chat-message .aov.aov-skjaldborg-grapple-chat .tag {
-  line-height: 1.14;
-  white-space: normal;
-}
-
-.chat-message .aov.aov-skjaldborg-grapple-chat .skj-grapple-chat-result {
-  display: grid;
-  gap: 0.22rem;
-  line-height: 1.22;
-  margin-top: 0.32rem;
-  min-height: auto;
-  overflow: visible;
-  padding: 0.4rem 0.46rem;
-  text-align: center;
-  white-space: normal;
-}
-
-.chat-message .aov.aov-skjaldborg-grapple-chat .skj-grapple-chat-result.is-compact {
-  display: block;
-}
-
-.chat-message .aov.aov-skjaldborg-grapple-chat .skj-grapple-chat-result.is-compact > span {
-  align-items: center;
-  display: flex;
-  gap: 0.32rem;
-  justify-content: center;
-  line-height: 1.15;
-}
-
 .skj-grapple-location-choice-dialog {
   display: grid;
   gap: 0.65rem;

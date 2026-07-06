@@ -1,7 +1,6 @@
 import { DEFENSE_REACTION_STEP, MODULE_ID } from "../constants.mjs";
 import { AoVAdapter } from "../adapter/aov-adapter.mjs";
-import { alwaysShowIconMode, effectIsActive, moduleFlag } from "../compat/active-effects.mjs";
-import { warn } from "../logger.mjs";
+import { alwaysShowIconMode, effectIsActive, moduleFlag, safeDeleteActiveEffect } from "../compat/active-effects.mjs";
 import { RenderCoordinator } from "../ui/render-coordinator.mjs";
 
 const REACTION_EFFECT_FLAG = "managedReactionPenalty";
@@ -11,6 +10,12 @@ const PARRY_BONUS_KEY = "system.parryBonus";
 const DODGE_EFFECTS_KEY = "system.cidFlagItems.i.skill.dodge.system.effects";
 const cleanupLocks = new Map();
 let hooksRegistered = false;
+
+function combatantIdsForCombat(combat) {
+  return Array.from(combat?.combatants ?? [])
+    .map(entry => (Array.isArray(entry) ? entry[1] : entry)?.id)
+    .filter(Boolean);
+}
 
 /**
  * Resolve the represented Actor for a Combatant.
@@ -73,17 +78,16 @@ function reactionPenaltyEffectData(effect) {
  * @returns {object[]}
  */
 function reactionEffectChanges(penalty) {
-  const mode = globalThis.CONST?.ACTIVE_EFFECT_MODES?.ADD ?? 2;
   return [
     {
       key: PARRY_BONUS_KEY,
-      mode,
+      mode: "add",
       type: "add",
       value: penalty
     },
     {
       key: DODGE_EFFECTS_KEY,
-      mode,
+      mode: "add",
       type: "add",
       value: penalty
     }
@@ -121,13 +125,7 @@ function reactionEffectData(combat, combatant, reactionCount, penalty) {
 export async function deleteReactionPenaltyEffectsForActor(actor) {
   let removed = 0;
   for (const effect of reactionPenaltyEffectsForActor(actor)) {
-    if (typeof effect?.delete !== "function") continue;
-    try {
-      await effect.delete();
-      removed += 1;
-    } catch (exception) {
-      warn(exception);
-    }
+    if (await safeDeleteActiveEffect(effect, { reason: "reaction-penalty-clear" })) removed += 1;
   }
   return removed;
 }
@@ -141,12 +139,7 @@ export async function deleteReactionPenaltyEffectsForActor(actor) {
  */
 async function deleteDuplicateReactionPenaltyEffects(actor, primary) {
   for (const duplicate of reactionPenaltyEffectsForActor(actor).filter(effect => effect && effect !== primary)) {
-    if (typeof duplicate?.delete !== "function") continue;
-    try {
-      await duplicate.delete();
-    } catch (exception) {
-      warn(exception);
-    }
+    await safeDeleteActiveEffect(duplicate, { reason: "reaction-penalty-duplicate" });
   }
 }
 
@@ -166,7 +159,12 @@ export async function reconcileReactionPenaltyEffect(combat, combatant, reaction
   const penalty = reactionPenaltyForCount(count);
   if (penalty === 0) {
     const removed = await deleteReactionPenaltyEffectsForActor(actor);
-    if (removed > 0) RenderCoordinator.invalidateCombatTracker("reaction-penalty-clear");
+    if (removed > 0) {
+      RenderCoordinator.invalidateCombatTracker("reaction-penalty-clear", {
+        combatantIds: [combatant?.id].filter(Boolean),
+        parts: ["rows"]
+      });
+    }
     return { active: false, reactionCount: count, penalty, removed };
   }
   if (typeof actor.createEmbeddedDocuments !== "function") return null;
@@ -210,7 +208,10 @@ export async function reconcileReactionPenaltyEffect(combat, combatant, reaction
   }
 
   await deleteDuplicateReactionPenaltyEffects(actor, effect);
-  RenderCoordinator.invalidateCombatTracker("reaction-penalty-sync");
+  RenderCoordinator.invalidateCombatTracker("reaction-penalty-sync", {
+    combatantIds: [combatant?.id].filter(Boolean),
+    parts: ["rows"]
+  });
   return {
     active: true,
     reactionCount: count,
@@ -241,7 +242,12 @@ export async function clearReactionPenaltyEffectsForCombat(combat, { reason = "c
       seenActors.add(actorKey);
       removed += await deleteReactionPenaltyEffectsForActor(actor);
     }
-    if (removed > 0) RenderCoordinator.invalidateCombatTracker(`reaction-penalty-${reason}`);
+    if (removed > 0) {
+      RenderCoordinator.invalidateCombatTracker(`reaction-penalty-${reason}`, {
+        combatantIds: combatantIdsForCombat(combat),
+        parts: ["rows"]
+      });
+    }
     return removed;
   })().finally(() => {
     if (cleanupLocks.get(lockKey) === operation) cleanupLocks.delete(lockKey);
@@ -273,16 +279,16 @@ export async function removeExpiredReactionPenaltyEffects(combat, { reason = "co
       const data = reactionPenaltyEffectData(effect);
       const effectRound = Number(data?.logicalRound);
       const expired = Number.isFinite(effectRound) ? effectRound < currentRound : true;
-      if (!expired || typeof effect?.delete !== "function") continue;
-      try {
-        await effect.delete();
-        removed += 1;
-      } catch (exception) {
-        warn(exception);
-      }
+      if (!expired) continue;
+      if (await safeDeleteActiveEffect(effect, { reason })) removed += 1;
     }
   }
-  if (removed > 0) RenderCoordinator.invalidateCombatTracker(`reaction-penalty-${reason}`);
+  if (removed > 0) {
+    RenderCoordinator.invalidateCombatTracker(`reaction-penalty-${reason}`, {
+      combatantIds: combatantIdsForCombat(combat),
+      parts: ["rows"]
+    });
+  }
   return removed;
 }
 
@@ -301,7 +307,10 @@ export async function reconcileReactionPenaltyEffectsForCombat(combat, { reason 
     operations.push(reconcileReactionPenaltyEffect(combat, combatant, count));
   }
   const results = await Promise.all(operations);
-  RenderCoordinator.invalidateCombatTracker(`reaction-penalty-${reason}`);
+  RenderCoordinator.invalidateCombatTracker(`reaction-penalty-${reason}`, {
+    combatantIds: combatantIdsForCombat(combat),
+    parts: ["rows"]
+  });
   return results;
 }
 

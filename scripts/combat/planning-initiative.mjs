@@ -38,7 +38,7 @@ export function dexRankFromInitiative(initiative) {
  */
 export function isDynamicPlanningInitiativeEnabled() {
   try {
-    return game.settings.get(MODULE_ID, "dynamicPlanningInitiative") === true;
+    return runtimeSettings.dynamicPlanningInitiative === true;
   }
   catch (_exception) {
     return false;

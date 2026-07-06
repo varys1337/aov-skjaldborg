@@ -7,7 +7,7 @@
 export const MODULE_ID = "aov-skjaldborg";
 export const SOCKET_NAME = `module.${MODULE_ID}`;
 
-export const MODULE_VERSION = "0.5.0";
+export const MODULE_VERSION = "0.3.2";
 export const MINIMUM_FOUNDRY_VERSION = "14.363";
 export const VERIFIED_FOUNDRY_VERSION = "14.364";
 export const MINIMUM_AOV_VERSION = "14.4";
@@ -98,6 +98,19 @@ export const PHASE_STRUCTURE_SETTING_KEYS = Object.freeze({
   [PHASES.BOOKKEEPING]: "phaseBookkeepingEnabled"
 });
 
+export const PHASE_CURRENT_TURN_SETTING_KEYS = Object.freeze({
+  [PHASES.INTENT]: "phaseIntentTrackCurrentTurn",
+  [PHASES.MOVEMENT]: "phaseMovementTrackCurrentTurn",
+  [PHASES.RESOLUTION]: "phaseResolutionTrackCurrentTurn",
+  [PHASES.BOOKKEEPING]: "phaseBookkeepingTrackCurrentTurn"
+});
+
+export const PHASE_CURRENT_TURN_DEFAULTS = Object.freeze({
+  [PHASES.INTENT]: false,
+  [PHASES.MOVEMENT]: false,
+  [PHASES.RESOLUTION]: true,
+  [PHASES.BOOKKEEPING]: true
+});
 
 export const REPORT_DELIVERY = Object.freeze({
   PUBLIC: "public",
@@ -193,6 +206,14 @@ export const ENGAGEMENT_STATUS = Object.freeze({
   NONE: "none",
   ENGAGED: "engaged"
 });
+
+export const ENGAGEMENT_VISUAL_MODES = Object.freeze({
+  ACTIVE_EFFECT: "activeEffect",
+  OVERLAY: "overlay",
+  BOTH: "both"
+});
+
+export const ENGAGEMENT_VISUAL_MODE_DEFAULT = ENGAGEMENT_VISUAL_MODES.ACTIVE_EFFECT;
 
 export const ENGAGED_STATUS_ID = `${MODULE_ID}-engaged`;
 export const MOUNTED_STATUS_ID = `${MODULE_ID}-mounted`;

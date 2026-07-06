@@ -1,0 +1,11 @@
+<div class="skj-dialog-footer skj-roll-dialog__footer {{class}}">
+  {{#if summaryText}}
+  <div class="skj-roll-dialog__summary">
+    <span>{{summaryText}}</span>
+  </div>
+  {{/if}}
+  <button type="button" class="skj-roll-dialog__action {{buttonClass}}" data-action="{{action}}" {{#if disabled}}disabled{{/if}}>
+    {{#if icon}}<i class="{{icon}}" aria-hidden="true"></i>{{/if}}
+    <span>{{label}}</span>
+  </button>
+</div>

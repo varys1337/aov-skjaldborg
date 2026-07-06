@@ -3,11 +3,15 @@ import {
   ACTION_UI_LIMITS,
   ACTION_UI_MIGRATION_VERSION,
   ACTION_UI_THEMES,
+  ENGAGEMENT_VISUAL_MODE_DEFAULT,
+  ENGAGEMENT_VISUAL_MODES,
   MODULE_ID,
   MOVEMENT_DEBUG_DEFAULT_CATEGORIES,
   MOVEMENT_DEBUG_LEVELS,
   MOVEMENT_PLAN_VISIBILITY,
   MOVEMENT_PLAN_VISIBILITY_DEFAULT,
+  PHASE_CURRENT_TURN_DEFAULTS,
+  PHASE_CURRENT_TURN_SETTING_KEYS,
   PHASE_ORDER,
   PHASE_STRUCTURE_SETTING_KEYS,
   REPORT_DELIVERY,
@@ -23,10 +27,19 @@ import { ActionUiSettings } from "./apps/action-ui-settings.mjs";
 import { CombatTrackingSettings } from "./apps/combat-tracking-settings.mjs";
 import { ReportSettings } from "./apps/report-settings.mjs";
 import { PhaseStructureSettings } from "./apps/phase-structure-settings.mjs";
-import { ReachVisualizerSettings } from "./apps/reach-visualizer-settings.mjs";
 import { debug } from "./logger.mjs";
 import { RenderCoordinator } from "./ui/render-coordinator.mjs";
 import { normalizeReachVisualizerSettings } from "./canvas/reach-visualizer-config.mjs";
+import { refreshRuntimeSetting, refreshRuntimeSettings } from "./runtime-settings.mjs";
+
+
+function cacheSettingOnChange(key, handler = null) {
+  return value => {
+    refreshRuntimeSetting(key, value);
+    if (typeof handler === "function") return handler(value);
+    return undefined;
+  };
+}
 
 /**
  * Register all world and client settings used by the module.
@@ -50,15 +63,6 @@ export function registerSettings() {
     icon: "fa-solid fa-list-check",
     type: CombatTrackingSettings,
     restricted: true
-  });
-
-  game.settings.registerMenu(MODULE_ID, "reachVisualizerConfiguration", {
-    name: "AOV_SKJALDBORG.Settings.ReachVisualizerMenu.Name",
-    label: "AOV_SKJALDBORG.Settings.ReachVisualizerMenu.Label",
-    hint: "AOV_SKJALDBORG.Settings.ReachVisualizerMenu.Hint",
-    icon: "fa-solid fa-bullseye",
-    type: ReachVisualizerSettings,
-    restricted: false
   });
 
   game.settings.registerMenu(MODULE_ID, "phaseStructureConfiguration", {
@@ -220,9 +224,9 @@ export function registerSettings() {
     config: true,
     type: Boolean,
     default: false,
-    onChange: () => {
-      RenderCoordinator.invalidateCombatTracker("setting-enabled");
-    }
+    onChange: cacheSettingOnChange("enabled", () => {
+      RenderCoordinator.invalidateCombatTracker("setting-enabled", { full: true, parts: ["phase", "rows"] });
+    })
   });
 
   game.settings.register(MODULE_ID, "dynamicPlanningInitiative", {
@@ -232,12 +236,12 @@ export function registerSettings() {
     config: false,
     type: Boolean,
     default: false,
-    onChange: () => {
+    onChange: cacheSettingOnChange("dynamicPlanningInitiative", () => {
       if (game.user?.isGM) {
         void game.aovSkjaldborg?.phase?.reconcilePlanningTurnMode?.(game.combat);
       }
-      RenderCoordinator.invalidateCombatTracker("setting-dynamic-planning");
-    }
+      RenderCoordinator.invalidateCombatTracker("setting-dynamic-planning", { parts: ["rows"] });
+    })
   });
 
   game.settings.register(MODULE_ID, "requireAllCommit", {
@@ -247,13 +251,13 @@ export function registerSettings() {
     config: false,
     type: Boolean,
     default: false,
-    onChange: value => {
+    onChange: cacheSettingOnChange("requireAllCommit", value => {
       const combat = game.combat;
       if (game.user?.isGM && combat?.getFlag?.(MODULE_ID, "combatState")?.enabled) {
         void game.aovSkjaldborg?.phase?.synchronizeRequireAllCommit?.(combat, value === true);
       }
-      RenderCoordinator.invalidateCombatTracker("setting-require-all-commit");
-    }
+      RenderCoordinator.invalidateCombatTracker("setting-require-all-commit", { parts: ["phase", "rows"] });
+    })
   });
 
   for (const phase of PHASE_ORDER) {
@@ -263,7 +267,22 @@ export function registerSettings() {
       config: false,
       type: Boolean,
       default: true,
-      onChange: () => RenderCoordinator.invalidateCombatTracker("setting-phase-structure")
+      onChange: () => RenderCoordinator.invalidateCombatTracker("setting-phase-structure", { parts: ["phase"] })
+    });
+
+    game.settings.register(MODULE_ID, PHASE_CURRENT_TURN_SETTING_KEYS[phase], {
+      name: "AOV_SKJALDBORG.Settings.PhaseStructureMenu.TrackCurrentTurn.Name",
+      hint: "AOV_SKJALDBORG.Settings.PhaseStructureMenu.TrackCurrentTurn.Hint",
+      scope: "world",
+      config: false,
+      type: Boolean,
+      default: PHASE_CURRENT_TURN_DEFAULTS[phase] !== false,
+      onChange: () => {
+        if (game.user?.isGM) {
+          void game.aovSkjaldborg?.phase?.reconcileCurrentTurnTracking?.(game.combat);
+        }
+        RenderCoordinator.invalidateCombatTracker("setting-phase-current-turn", { parts: ["phase"] });
+      }
     });
   }
 
@@ -278,7 +297,8 @@ export function registerSettings() {
       [ROUNDING_POLICIES.FLOOR]: "AOV_SKJALDBORG.Settings.MovementRounding.Floor",
       [ROUNDING_POLICIES.NEAREST]: "AOV_SKJALDBORG.Settings.MovementRounding.Nearest"
     },
-    default: ROUNDING_POLICIES.CEIL
+    default: ROUNDING_POLICIES.CEIL,
+    onChange: cacheSettingOnChange("movementRounding")
   });
 
   game.settings.register(MODULE_ID, "movementTickDelayMs", {
@@ -288,7 +308,47 @@ export function registerSettings() {
     config: false,
     type: Number,
     range: { min: 0, max: 1000, step: 50 },
-    default: 250
+    default: 250,
+    onChange: cacheSettingOnChange("movementTickDelayMs")
+  });
+
+  game.settings.register(MODULE_ID, "adaptiveCheckpointBatching", {
+    name: "AOV_SKJALDBORG.Settings.AdaptiveCheckpointBatching.Name",
+    hint: "AOV_SKJALDBORG.Settings.AdaptiveCheckpointBatching.Hint",
+    scope: "world",
+    config: false,
+    type: Boolean,
+    default: false,
+    onChange: cacheSettingOnChange("adaptiveCheckpointBatching")
+  });
+
+  game.settings.register(MODULE_ID, "adaptiveCheckpointMaxBatchSize", {
+    name: "AOV_SKJALDBORG.Settings.AdaptiveCheckpointMaxBatchSize.Name",
+    hint: "AOV_SKJALDBORG.Settings.AdaptiveCheckpointMaxBatchSize.Hint",
+    scope: "world",
+    config: false,
+    type: Number,
+    range: { min: 1, max: 5, step: 1 },
+    default: 1,
+    onChange: cacheSettingOnChange("adaptiveCheckpointMaxBatchSize")
+  });
+
+  game.settings.register(MODULE_ID, "engagementVisualMode", {
+    name: "AOV_SKJALDBORG.Settings.EngagementVisualMode.Name",
+    hint: "AOV_SKJALDBORG.Settings.EngagementVisualMode.Hint",
+    scope: "world",
+    config: false,
+    type: String,
+    choices: {
+      [ENGAGEMENT_VISUAL_MODES.ACTIVE_EFFECT]: "AOV_SKJALDBORG.Settings.EngagementVisualMode.ActiveEffect",
+      [ENGAGEMENT_VISUAL_MODES.OVERLAY]: "AOV_SKJALDBORG.Settings.EngagementVisualMode.Overlay",
+      [ENGAGEMENT_VISUAL_MODES.BOTH]: "AOV_SKJALDBORG.Settings.EngagementVisualMode.Both"
+    },
+    default: ENGAGEMENT_VISUAL_MODE_DEFAULT,
+    onChange: cacheSettingOnChange("engagementVisualMode", () => {
+      game.aovSkjaldborg?.engagement?.redrawVisuals?.();
+      RenderCoordinator.invalidateCombatTracker("setting-engagement-visual-mode", { parts: ["rows"] });
+    })
   });
 
   game.settings.register(MODULE_ID, "movementPlanVisibility", {
@@ -303,7 +363,7 @@ export function registerSettings() {
       [MOVEMENT_PLAN_VISIBILITY.NONE]: "AOV_SKJALDBORG.Settings.MovementPlanVisibility.None"
     },
     default: MOVEMENT_PLAN_VISIBILITY_DEFAULT,
-    onChange: () => game.aovSkjaldborg?.ui?.refreshMovementPlanPreview?.()
+    onChange: cacheSettingOnChange("movementPlanVisibility", () => game.aovSkjaldborg?.ui?.refreshMovementPlanPreview?.())
   });
 
   game.settings.register(MODULE_ID, "evadeFightingDefensively", {
@@ -313,7 +373,17 @@ export function registerSettings() {
     config: false,
     type: Boolean,
     default: false,
-    onChange: () => RenderCoordinator.invalidateCombatTracker("setting-evade-fighting-defensively")
+    onChange: cacheSettingOnChange("evadeFightingDefensively", () => RenderCoordinator.invalidateCombatTracker("setting-evade-fighting-defensively", { parts: ["rows"] }))
+  });
+
+  game.settings.register(MODULE_ID, "autoIncrementReactions", {
+    name: "AOV_SKJALDBORG.Settings.AutoIncrementReactions.Name",
+    hint: "AOV_SKJALDBORG.Settings.AutoIncrementReactions.Hint",
+    scope: "world",
+    config: false,
+    type: Boolean,
+    default: false,
+    onChange: cacheSettingOnChange("autoIncrementReactions", () => RenderCoordinator.invalidateCombatTracker("setting-auto-increment-reactions", { parts: ["rows"] }))
   });
 
   game.settings.register(MODULE_ID, "knockbackFumbleTableReference", {
@@ -404,7 +474,8 @@ export function registerSettings() {
     scope: "world",
     config: true,
     type: Boolean,
-    default: false
+    default: false,
+    onChange: cacheSettingOnChange("debug")
   });
 
   game.settings.register(MODULE_ID, "movementDebugEnabled", {
@@ -412,7 +483,8 @@ export function registerSettings() {
     scope: "world",
     config: false,
     type: Boolean,
-    default: false
+    default: false,
+    onChange: cacheSettingOnChange("movementDebugEnabled")
   });
 
   game.settings.register(MODULE_ID, "movementDebugLevel", {
@@ -424,7 +496,8 @@ export function registerSettings() {
       level,
       `AOV_SKJALDBORG.Settings.MovementDebugMenu.Levels.${level}`
     ])),
-    default: MOVEMENT_DEBUG_LEVELS.SUMMARY
+    default: MOVEMENT_DEBUG_LEVELS.SUMMARY,
+    onChange: cacheSettingOnChange("movementDebugLevel")
   });
 
   game.settings.register(MODULE_ID, "movementDebugCategories", {
@@ -432,7 +505,8 @@ export function registerSettings() {
     scope: "world",
     config: false,
     type: Object,
-    default: MOVEMENT_DEBUG_DEFAULT_CATEGORIES
+    default: MOVEMENT_DEBUG_DEFAULT_CATEGORIES,
+    onChange: cacheSettingOnChange("movementDebugCategories")
   });
 
   game.settings.register(MODULE_ID, "movementDebugLastRunId", {
@@ -449,7 +523,8 @@ export function registerSettings() {
     scope: "client",
     config: false,
     type: Boolean,
-    default: false
+    default: false,
+    onChange: cacheSettingOnChange("performanceDiagnostics")
   });
 
   game.settings.register(MODULE_ID, "combatTrackingMigrationVersion", {
@@ -483,6 +558,7 @@ export function registerSettings() {
     type: String,
     default: ""
   });
+  refreshRuntimeSettings();
 }
 
 /**
@@ -532,17 +608,26 @@ export async function migrateLegacyReportSettings() {
  * Apply one-time world migrations for combat-tracking defaults.
  *
  * Version 1 changes the former mandatory all-intents gate to an opt-in rule.
+ * Version 2 restores natural one-checkpoint movement by disabling adaptive
+ * checkpoint batching settings that are retained only as hidden compatibility
+ * keys.
  *
  * @returns {Promise<void>}
  */
 export async function migrateCombatTrackingSettings() {
   if (!game.user?.isGM) return;
   const version = Number(game.settings.get(MODULE_ID, "combatTrackingMigrationVersion")) || 0;
-  if (version >= 1) return;
-  await Promise.all([
-    game.settings.set(MODULE_ID, "requireAllCommit", false),
-    game.settings.set(MODULE_ID, "combatTrackingMigrationVersion", 1)
-  ]);
+  if (version >= 2) return;
+  const writes = [];
+  if (version < 1) writes.push(game.settings.set(MODULE_ID, "requireAllCommit", false));
+  if (version < 2) {
+    writes.push(
+      game.settings.set(MODULE_ID, "adaptiveCheckpointBatching", false),
+      game.settings.set(MODULE_ID, "adaptiveCheckpointMaxBatchSize", 1)
+    );
+  }
+  writes.push(game.settings.set(MODULE_ID, "combatTrackingMigrationVersion", 2));
+  await Promise.all(writes);
 }
 
 /**

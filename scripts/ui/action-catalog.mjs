@@ -1,5 +1,5 @@
 import { ACTION_CATEGORIES, ACTION_UI_DEFAULTS, ACTION_UI_LIMITS, INTENT_STATUS, MODULE_ID, UTILITY_ACTION_ID } from "../constants.mjs";
-import { AoVAdapter, importAoVSystemModule } from "../adapter/aov-adapter.mjs";
+import { AoVAdapter } from "../adapter/aov-adapter.mjs";
 import { defaultCombatantState, getCombatState, getCombatantState } from "../combat/state.mjs";
 import { requestGm } from "../socket.mjs";
 import { error } from "../logger.mjs";
@@ -273,9 +273,7 @@ export function prepareIntentActions({ selectedCategory = null, otherText = "", 
     };
   });
   if (includeUtility) {
-    const otherIndex = actions.findIndex(action => action.id === ACTION_CATEGORIES.OTHER);
-    const insertIndex = otherIndex >= 0 ? otherIndex : actions.length;
-    actions.splice(insertIndex, 0, {
+    actions.push({
       id: UTILITY_ACTION_ID,
       kind: "utility",
       icon: ACTION_ICONS[UTILITY_ACTION_ID],
@@ -1075,11 +1073,7 @@ export async function executeActorStat(actor, statId, event = null) {
   }
 
   try {
-    const { AOVRollType } = await importAoVSystemModule("systems/aov/system/apps/roll-types.mjs");
-    if (typeof AOVRollType?._onDetermineCheck !== "function") {
-      throw new Error("AoV statistic roll router is unavailable.");
-    }
-    return await AOVRollType._onDetermineCheck(event ?? {}, detail, actor);
+    return await AoVAdapter.executeAovActorStatCheck(actor, detail, event);
   } catch (exception) {
     error(`Failed to execute actor statistic ${statId}.`, exception);
     ui.notifications.error(game.i18n.localize("AOV_SKJALDBORG.Warnings.ActionFailed"));

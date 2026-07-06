@@ -1189,35 +1189,6 @@
   white-space: nowrap;
 }
 
-.chat-message .aov.aov-skjaldborg-knockback-chat .actor-roll {
-  align-items: center;
-}
-
-.chat-message .aov.aov-skjaldborg-knockback-chat .roll-details {
-  min-width: 0;
-}
-
-.chat-message .aov.aov-skjaldborg-knockback-chat .roll-details .header {
-  min-height: 0;
-}
-
-.chat-message .aov.aov-skjaldborg-knockback-chat .tag {
-  line-height: 1.14;
-  white-space: normal;
-}
-
-.chat-message .aov.aov-skjaldborg-knockback-chat .skj-knockback-chat-result {
-  display: grid;
-  gap: 0.22rem;
-  line-height: 1.22;
-  margin-top: 0.32rem;
-  min-height: auto;
-  overflow: visible;
-  padding: 0.4rem 0.46rem;
-  text-align: center;
-  white-space: normal;
-}
-
 .chat-message .aov.aov-skjaldborg-knockback-chat .skj-knockback-chat-result > strong {
   color: inherit;
   display: block;
@@ -1244,18 +1215,6 @@
 }
 
 
-.chat-message .aov.aov-skjaldborg-knockback-chat .skj-knockback-chat-result.is-compact {
-  display: block;
-}
-
-.chat-message .aov.aov-skjaldborg-knockback-chat .skj-knockback-chat-result.is-compact > span {
-  align-items: center;
-  display: flex;
-  gap: 0.32rem;
-  justify-content: center;
-  line-height: 1.15;
-}
-
 .chat-message .aov.aov-skjaldborg-knockback-chat .skj-knockback-chat-line--inline {
   align-items: center;
   display: inline-flex;
@@ -1267,18 +1226,6 @@
 .chat-message .aov.aov-skjaldborg-knockback-chat .skj-knockback-chat-line--inline .result-success,
 .chat-message .aov.aov-skjaldborg-knockback-chat .skj-knockback-chat-line--inline .result-fail {
   margin-inline-start: 0;
-}
-
-.chat-message .aov.aov-skjaldborg-missile-chat .actor-roll {
-  align-items: center;
-}
-
-.chat-message .aov.aov-skjaldborg-missile-chat .roll-details {
-  min-width: 0;
-}
-
-.chat-message .aov.aov-skjaldborg-missile-chat .roll-details .header {
-  min-height: 0;
 }
 
 .chat-message .aov.aov-skjaldborg-missile-chat .tag {
@@ -1301,18 +1248,6 @@
   display: block;
   line-height: 1.18;
   overflow-wrap: anywhere;
-}
-
-.chat-message .aov.aov-skjaldborg-shield-cover-chat .actor-roll {
-  align-items: center;
-}
-
-.chat-message .aov.aov-skjaldborg-shield-cover-chat .roll-details {
-  min-width: 0;
-}
-
-.chat-message .aov.aov-skjaldborg-shield-cover-chat .roll-details .header {
-  min-height: 0;
 }
 
 .chat-message .aov.aov-skjaldborg-shield-cover-chat .skj-shield-cover-details {
@@ -1442,4 +1377,27 @@
   min-height: 2.15rem;
   position: static;
   width: 100%;
+}
+
+.skj-prone-raw-note {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.45rem;
+  align-items: start;
+  margin: 0.45rem 0 0;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid rgba(120, 80, 40, 0.35);
+  border-radius: 4px;
+  background: rgba(120, 80, 40, 0.08);
+  font-size: 0.86em;
+  line-height: 1.25;
+}
+
+.skj-prone-raw-note i {
+  margin-top: 0.12rem;
+}
+
+.skj-prone-raw-note div {
+  display: grid;
+  gap: 0.2rem;
 }

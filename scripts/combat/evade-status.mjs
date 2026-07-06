@@ -1,14 +1,15 @@
 import { ACTION_CATEGORIES, EVADING_STATUS_ID, MODULE_ID } from "../constants.mjs";
+import { runtimeSettings } from "../runtime-settings.mjs";
 import { AoVAdapter } from "../adapter/aov-adapter.mjs";
 import {
   effectHasStatus,
   effectIsActive,
   moduleFlag,
   registerStatusEffect,
+  safeDeleteActiveEffect,
   statusEffectConfig,
   upsertActorStatusEffect
 } from "../compat/active-effects.mjs";
-import { warn } from "../logger.mjs";
 import { RenderCoordinator } from "../ui/render-coordinator.mjs";
 
 export const EVADE_MODES = Object.freeze({
@@ -66,7 +67,7 @@ export function getEvadingStatusEffectMode() {
  */
 export function evadeFightingDefensivelyEnabled() {
   try {
-    return game.settings.get(MODULE_ID, "evadeFightingDefensively") === true;
+    return runtimeSettings.evadeFightingDefensively === true;
   } catch (_exception) {
     return false;
   }
@@ -259,12 +260,7 @@ export async function activateEvadingForCombatant(combat, combatant) {
 async function deleteDuplicateEvadingEffects(actor, primary) {
   const duplicates = evadingEffectsForActor(actor).filter(effect => effect && effect !== primary);
   for (const duplicate of duplicates) {
-    if (typeof duplicate?.delete !== "function") continue;
-    try {
-      await duplicate.delete();
-    } catch (exception) {
-      warn(exception);
-    }
+    await safeDeleteActiveEffect(duplicate, { reason: "evading-duplicate" });
   }
 }
 
@@ -313,13 +309,7 @@ export async function removeExpiredEvadingEffects(combat, { logicalRound = null,
       seenActors.add(actorKey);
       const expired = evadingEffectsForActor(actor).filter(effect => evadingEffectExpired(effect, combat, round));
       for (const effect of expired) {
-        if (typeof effect?.delete !== "function") continue;
-        try {
-          await effect.delete();
-          removed += 1;
-        } catch (exception) {
-          warn(exception);
-        }
+        if (await safeDeleteActiveEffect(effect, { reason })) removed += 1;
       }
     }
     if (removed > 0) RenderCoordinator.invalidateCombatTracker(`evade-status-${reason}`);

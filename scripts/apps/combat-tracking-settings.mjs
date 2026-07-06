@@ -1,4 +1,6 @@
 import {
+  ENGAGEMENT_VISUAL_MODE_DEFAULT,
+  ENGAGEMENT_VISUAL_MODES,
   MODULE_ID,
   MOVEMENT_PLAN_VISIBILITY,
   MOVEMENT_PLAN_VISIBILITY_DEFAULT,
@@ -6,6 +8,7 @@ import {
 } from "../constants.mjs";
 import { normalizeNumberSetting } from "../utils/settings.mjs";
 import { RenderCoordinator } from "../ui/render-coordinator.mjs";
+import { ReachVisualizerSettings } from "./reach-visualizer-settings.mjs";
 
 const { ApplicationV2, HandlebarsApplicationMixin } = foundry.applications.api;
 
@@ -51,6 +54,9 @@ export class CombatTrackingSettings extends HandlebarsApplicationMixin(Applicati
   static DEFAULT_OPTIONS = {
     classes: ["aov-skjaldborg", "skj-combat-tracking-settings"],
     id: "aov-skjaldborg-combat-tracking-settings",
+    actions: {
+      reachVisualizer: CombatTrackingSettings.onReachVisualizer
+    },
     form: {
       handler: CombatTrackingSettings.formHandler,
       closeOnSubmit: true,
@@ -76,11 +82,24 @@ export class CombatTrackingSettings extends HandlebarsApplicationMixin(Applicati
     return game.i18n.localize(this.options.window.title);
   }
 
+
+  /**
+   * Open the client-side reach visualizer settings from the combat submenu.
+   *
+   * @param {PointerEvent} event Click event.
+   * @returns {void}
+   */
+  static onReachVisualizer(event) {
+    event.preventDefault();
+    void new ReachVisualizerSettings().render(true);
+  }
+
   /** @override */
   async _prepareContext(options) {
     const context = await super._prepareContext(options);
     const currentRounding = game.settings.get(MODULE_ID, "movementRounding");
     const currentMovementPlanVisibility = game.settings.get(MODULE_ID, "movementPlanVisibility");
+    const currentEngagementVisualMode = game.settings.get(MODULE_ID, "engagementVisualMode");
     return {
       ...context,
       dynamicPlanningInitiative: game.settings.get(MODULE_ID, "dynamicPlanningInitiative") === true,
@@ -88,7 +107,9 @@ export class CombatTrackingSettings extends HandlebarsApplicationMixin(Applicati
       movementRounding: currentRounding,
       movementTickDelayMs: game.settings.get(MODULE_ID, "movementTickDelayMs"),
       movementPlanVisibility: currentMovementPlanVisibility,
+      engagementVisualMode: currentEngagementVisualMode,
       evadeFightingDefensively: game.settings.get(MODULE_ID, "evadeFightingDefensively") === true,
+      autoIncrementReactions: game.settings.get(MODULE_ID, "autoIncrementReactions") === true,
       knockbackFumbleTableReference: game.settings.get(MODULE_ID, "knockbackFumbleTableReference"),
       roundingChoices: [
         ROUNDING_POLICIES.CEIL,
@@ -102,6 +123,15 @@ export class CombatTrackingSettings extends HandlebarsApplicationMixin(Applicati
           [ROUNDING_POLICIES.NEAREST]: "Nearest"
         }[value]}`),
         selected: currentRounding === value
+      })),
+      engagementVisualModeChoices: Object.values(ENGAGEMENT_VISUAL_MODES).map(value => ({
+        value,
+        label: game.i18n.localize(`AOV_SKJALDBORG.Settings.EngagementVisualMode.${{
+          [ENGAGEMENT_VISUAL_MODES.ACTIVE_EFFECT]: "ActiveEffect",
+          [ENGAGEMENT_VISUAL_MODES.OVERLAY]: "Overlay",
+          [ENGAGEMENT_VISUAL_MODES.BOTH]: "Both"
+        }[value]}`),
+        selected: currentEngagementVisualMode === value
       })),
       movementPlanVisibilityChoices: Object.values(MOVEMENT_PLAN_VISIBILITY).map(value => ({
         value,
@@ -159,13 +189,18 @@ export class CombatTrackingSettings extends HandlebarsApplicationMixin(Applicati
     const movementPlanVisibility = Object.values(MOVEMENT_PLAN_VISIBILITY).includes(data.movementPlanVisibility)
       ? data.movementPlanVisibility
       : MOVEMENT_PLAN_VISIBILITY_DEFAULT;
+    const engagementVisualMode = Object.values(ENGAGEMENT_VISUAL_MODES).includes(data.engagementVisualMode)
+      ? data.engagementVisualMode
+      : ENGAGEMENT_VISUAL_MODE_DEFAULT;
     const values = {
       dynamicPlanningInitiative: data.dynamicPlanningInitiative === true,
       requireAllCommit: data.requireAllCommit === true,
       movementRounding: rounding,
       movementTickDelayMs: normalizeNumberSetting(data.movementTickDelayMs, 250, LIMITS.movementTickDelayMs),
       movementPlanVisibility,
+      engagementVisualMode,
       evadeFightingDefensively: data.evadeFightingDefensively === true,
+      autoIncrementReactions: data.autoIncrementReactions === true,
       knockbackFumbleTableReference: String(data.knockbackFumbleTableReference ?? "").trim()
     };
 

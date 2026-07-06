@@ -1,4 +1,5 @@
 import { MOVEMENT_PLAN_VISIBILITY, MOVEMENT_PLAN_VISIBILITY_DEFAULT, MODULE_ID } from "./constants.mjs";
+import { runtimeSettings } from "./runtime-settings.mjs";
 
 /**
  * Resolve the TokenDocument represented by a Combatant.
@@ -46,14 +47,10 @@ export function canUserViewMovementDetails(user, combatant) {
  * @returns {string}
  */
 export function movementPlanVisibilitySetting() {
-  try {
-    const value = game.settings.get(MODULE_ID, "movementPlanVisibility");
-    return Object.values(MOVEMENT_PLAN_VISIBILITY).includes(value)
-      ? value
-      : MOVEMENT_PLAN_VISIBILITY_DEFAULT;
-  } catch (_error) {
-    return MOVEMENT_PLAN_VISIBILITY_DEFAULT;
-  }
+  const value = runtimeSettings.movementPlanVisibility;
+  return Object.values(MOVEMENT_PLAN_VISIBILITY).includes(value)
+    ? value
+    : MOVEMENT_PLAN_VISIBILITY_DEFAULT;
 }
 
 /**

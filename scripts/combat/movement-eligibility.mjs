@@ -42,14 +42,14 @@ export function movementAllowanceGridUnits(combatant) {
 
 /**
  * A combatant can establish close-combat engagement only after moving no more
- * than their RAW half-move allowance. In AoV terms this is the actor's MOV
- * value measured in neutral grid units.
+ * than their RAW half-move allowance. In AoV terms this is half the actor's
+ * MOV value measured in neutral grid units.
  *
  * @param {Combatant|object|null} combatant Combatant document.
  * @returns {number}
  */
 export function engagementMovementLimitGridUnits(combatant) {
-  return movementAllowanceGridUnits(combatant);
+  return movementAllowanceGridUnits(combatant) / 2;
 }
 
 /**

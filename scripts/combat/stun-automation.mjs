@@ -14,6 +14,7 @@ import {
   effectIsActive,
   getStatusEffectConfig,
   moduleFlag,
+  safeDeleteActiveEffect,
   upsertActorStatusEffect
 } from "../compat/active-effects.mjs";
 import { warn } from "../logger.mjs";
@@ -536,7 +537,7 @@ async function resolveRecoveryPrompt(message) {
   const effect = Array.from(actor.effects ?? []).find(candidate => String(candidate?.id ?? "") === String(recovery.effectId ?? ""))
     ?? stunEffectsForActor(actor)[0]
     ?? null;
-  if (success && typeof effect?.delete === "function") await effect.delete();
+  if (success) await safeDeleteActiveEffect(effect, { reason: "stun-recovery" });
 
   const text = game.i18n.format(success
     ? "AOV_SKJALDBORG.StunDialog.RecoverySuccess"

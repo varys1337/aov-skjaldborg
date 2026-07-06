@@ -1,0 +1,96 @@
+.aov-skjaldborg .skj-dialog-segments {
+  display: grid;
+  gap: var(--skj-dialog-gap-sm);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  min-width: 0;
+}
+
+.aov-skjaldborg .skj-dialog-segment {
+  margin: 0;
+  min-width: 0;
+  position: relative;
+}
+
+.aov-skjaldborg .skj-dialog-segment input {
+  height: 1px;
+  min-height: 0;
+  opacity: 0;
+  padding: 0;
+  position: absolute;
+  width: 1px;
+}
+
+.aov-skjaldborg .skj-dialog-segment span {
+  align-items: center;
+  background: var(--skj-roll-surface-soft, var(--skj-dialog-bg-soft));
+  border: 1px solid var(--skj-roll-frame-soft, var(--skj-dialog-border));
+  border-radius: 999px;
+  color: var(--skj-roll-muted, inherit);
+  cursor: pointer;
+  display: flex;
+  justify-content: center;
+  min-height: var(--skj-dialog-control-height);
+  min-width: 0;
+  overflow: hidden;
+  padding: 0.2rem 0.4rem;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aov-skjaldborg .skj-dialog-segment input:checked + span {
+  background: var(--skj-roll-active, var(--skj-dialog-bg-strong));
+  border-color: var(--skj-roll-frame, var(--skj-dialog-border));
+  color: var(--skj-roll-text, inherit);
+}
+
+.aov-skjaldborg .skj-dialog-segment:not(.is-disabled) span:hover,
+.aov-skjaldborg .skj-dialog-segment input:focus-visible + span {
+  background: var(--skj-roll-hover, var(--skj-dialog-bg-strong));
+  border-color: var(--skj-roll-frame, var(--skj-dialog-border));
+  color: var(--skj-roll-text, inherit);
+}
+
+.aov-skjaldborg .skj-dialog-segment.is-disabled {
+  opacity: 0.42;
+}
+
+.aov-skjaldborg .skj-dialog-custom-modifier-row {
+  align-items: center;
+  display: grid;
+  gap: var(--skj-dialog-gap-sm);
+  grid-template-columns: 80px minmax(0, 1fr) 60px;
+  min-width: 0;
+}
+
+.aov-skjaldborg .skj-dialog-custom-modifier-row > label {
+  margin: 0;
+}
+
+.aov-skjaldborg .skj-dialog-custom-modifier-row input {
+  min-width: 0;
+  width: 100%;
+}
+
+.aov-skjaldborg .skj-dialog-target-pills {
+  align-content: start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--skj-dialog-gap-xs);
+  min-width: 0;
+}
+
+.aov-skjaldborg .skj-dialog-target-pill {
+  align-items: center;
+  display: inline-grid;
+  gap: var(--skj-dialog-gap-xs);
+  grid-template-columns: 28px minmax(0, 1fr);
+  min-width: 0;
+}
+
+@media (max-width: 460px) {
+  .aov-skjaldborg .skj-dialog-segments,
+  .aov-skjaldborg .skj-dialog-custom-modifier-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

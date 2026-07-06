@@ -1,9 +1,10 @@
-import { ENGAGED_STATUS_ID, ENGAGEMENT_STATUS, MODULE_ID, MOVEMENT_DEBUG_CATEGORIES, MOVEMENT_DEBUG_LEVELS } from "../constants.mjs";
+import { ENGAGED_STATUS_ID, ENGAGEMENT_STATUS, ENGAGEMENT_VISUAL_MODE_DEFAULT, ENGAGEMENT_VISUAL_MODES, MODULE_ID, MOVEMENT_DEBUG_CATEGORIES, MOVEMENT_DEBUG_LEVELS } from "../constants.mjs";
 import {
   effectHasStatus,
   effectIsActive,
   moduleFlag,
   registerStatusEffect,
+  safeDeleteActiveEffect,
   statusEffectConfig,
   upsertActorStatusEffect
 } from "../compat/active-effects.mjs";
@@ -11,6 +12,14 @@ import { warn } from "../logger.mjs";
 import { getCombatantState, updateCombatantState } from "./state.mjs";
 import { movementDebug, movementDebugWarn } from "./movement-debugger.mjs";
 import { RenderCoordinator } from "../ui/render-coordinator.mjs";
+import { combatantById, combatantFromEngagementRecord, combatantValues, tokenDocumentForCombatant } from "./combatant-token-resolution.mjs";
+import {
+  clearEngagementOverlayVisualsForCombat,
+  engagementVisualMode,
+  refreshEngagementOverlayVisuals,
+  syncEngagementOverlayVisual,
+  usesEngagementOverlay
+} from "../canvas/engagement-indicators.mjs";
 
 const ENGAGED_EFFECT_NAME = "AOV_SKJALDBORG.StatusEffects.Engaged";
 const ENGAGED_EFFECT_ICON = "icons/svg/combat.svg";
@@ -84,6 +93,20 @@ export function registerEngagedStatusEffect() {
  */
 export function getEngagedStatusEffectMode() {
   return statusEffectMode;
+}
+
+/**
+ * Return the configured engagement visual strategy.
+ *
+ * @returns {"activeEffect"|"overlay"|"both"}
+ */
+export function getEngagementVisualMode() {
+  const value = engagementVisualMode();
+  return Object.values(ENGAGEMENT_VISUAL_MODES).includes(value) ? value : ENGAGEMENT_VISUAL_MODE_DEFAULT;
+}
+
+function usesActiveEffectMirror(mode = getEngagementVisualMode()) {
+  return mode === ENGAGEMENT_VISUAL_MODES.ACTIVE_EFFECT || mode === ENGAGEMENT_VISUAL_MODES.BOTH;
 }
 
 /**
@@ -189,7 +212,7 @@ async function deleteDuplicateEngagedEffects(actor, primary, effects, combat, re
   for (const duplicate of duplicates) {
     if (typeof duplicate?.delete !== "function") continue;
     try {
-      await duplicate.delete();
+      await safeDeleteActiveEffect(duplicate, { reason });
     }
     catch (err) {
       warn(err);
@@ -236,6 +259,7 @@ function buildEngagementRecord(combatant, engagement, combat) {
     combatantId: combatant?.id ?? null,
     tokenId: combatant?.tokenId ?? combatant?.token?.id ?? null,
     actorId: combatant?.actorId ?? combatant?.actor?.id ?? null,
+    sceneId: tokenDocumentForCombatant(combatant)?.parent?.id ?? combatant?.sceneId ?? combat?.scene?.id ?? null,
     status: engagement?.status ?? ENGAGEMENT_STATUS.NONE,
     engaged: engagement?.engaged === true,
     partnerIds,
@@ -273,6 +297,34 @@ export async function syncEngagedStatusEffect(combatant, engagement, combat = ga
   const actor = effectActorForCombatant(combatant);
   if (!actor) return null;
   return withActorEngagedEffectLock(actor, () => syncEngagedStatusEffectUnlocked(combatant, engagement, combat, actor));
+}
+
+/**
+ * Synchronize all configured visual representations for one engagement state.
+ *
+ * Combatant flags remain authoritative. This function only updates the chosen
+ * visual surface, allowing overlay-only mode to avoid Actor ActiveEffect churn
+ * during transient movement engagement changes.
+ *
+ * @param {Combatant|object} combatant Combatant document.
+ * @param {object} engagement Authoritative engagement state.
+ * @param {Combat|null} [combat=game.combat] Active combat.
+ * @returns {Promise<ActiveEffect|object|null>}
+ */
+export async function syncEngagementVisuals(combatant, engagement, combat = game.combat) {
+  const mode = getEngagementVisualMode();
+  if (usesEngagementOverlay(mode)) syncEngagementOverlayVisual(combatant, engagement, combat);
+  if (!usesActiveEffectMirror(mode)) {
+    movementDebug(MOVEMENT_DEBUG_CATEGORIES.STATUS, "sync-engagement-visuals-overlay-only", () => ({
+      combatantId: combatant?.id ?? null,
+      tokenId: combatant?.tokenId ?? combatant?.token?.id ?? null,
+      mode,
+      engaged: engagement?.engaged === true,
+      partnerIds: engagement?.partnerIds ?? []
+    }), { combatId: combat?.id ?? null, combatantId: combatant?.id ?? null, level: MOVEMENT_DEBUG_LEVELS.VERBOSE });
+    return null;
+  }
+  return syncEngagedStatusEffect(combatant, engagement, combat);
 }
 
 /**
@@ -369,32 +421,6 @@ async function syncEngagedStatusEffectUnlocked(combatant, engagement, combat, ac
 }
 
 /**
- * Iterate combatants from either Foundry Collections or plain Maps.
- *
- * @param {Combat|null|undefined} combat Combat document.
- * @returns {Combatant[]}
- */
-function combatantValues(combat) {
-  return Array.from(combat?.combatants ?? []).map(entry => Array.isArray(entry) ? entry[1] : entry);
-}
-
-/**
- * Resolve a combatant referenced by an engagement effect record.
- *
- * @param {object} record Engagement record.
- * @param {Combat|null} combat Active combat.
- * @returns {Combatant|object|null}
- */
-function combatantFromRecord(record, combat) {
-  const combatants = combatantValues(combat);
-  return combatants.find(combatant => {
-    return combatant?.id === record?.combatantId
-      || combatant?.tokenId === record?.tokenId
-      || combatant?.actorId === record?.actorId;
-  }) ?? null;
-}
-
-/**
  * Clear one combatant's engagement and repair reciprocal partner flags.
  *
  * @param {Combatant|object} combatant Combatant whose effect was removed.
@@ -420,7 +446,7 @@ async function clearCombatantEngagement(combatant, combat) {
   });
 
   for (const partnerId of partners) {
-    const partner = combatantValues(combat).find(candidate => candidate?.id === partnerId);
+    const partner = combatantById(combat, partnerId);
     if (!partner) continue;
     const partnerState = getCombatantState(partner);
     const partnerIds = (partnerState.engagement?.partnerIds ?? []).filter(id => id !== combatant.id);
@@ -438,7 +464,7 @@ async function clearCombatantEngagement(combatant, combat) {
       after: engagement
     }), { combatId: combat?.id ?? null, combatantId: partnerId, level: MOVEMENT_DEBUG_LEVELS.VERBOSE });
     await updateCombatantState(partner, { engagement });
-    await syncEngagedStatusEffect(partner, engagement, combat);
+    await syncEngagementVisuals(partner, engagement, combat);
   }
 }
 
@@ -451,6 +477,8 @@ async function clearCombatantEngagement(combatant, combat) {
 async function clearEngagementFromEffect(effect) {
   if (!game.user?.isGM || !effect || engagementEffectSyncDepth > 0) return;
   const records = engagementRecords(effect);
+  const mode = getEngagementVisualMode();
+  if (!usesActiveEffectMirror(mode) && !Object.keys(records).length) return;
   const combat = game.combat;
   movementDebug(MOVEMENT_DEBUG_CATEGORIES.STATUS, "clear-effect-records", () => ({
     effectId: effect.id ?? effect._id ?? null,
@@ -465,7 +493,7 @@ async function clearEngagementFromEffect(effect) {
   engagementEffectSyncDepth += 1;
   try {
     for (const record of Object.values(records)) {
-      const combatant = combatantFromRecord(record, combat);
+      const combatant = combatantFromEngagementRecord(record, combat);
       if (!combatant) {
         movementDebugWarn(MOVEMENT_DEBUG_CATEGORIES.STATUS, "effect-record-no-combatant", () => ({
           record
@@ -481,7 +509,7 @@ async function clearEngagementFromEffect(effect) {
   finally {
     engagementEffectSyncDepth = Math.max(0, engagementEffectSyncDepth - 1);
   }
-  RenderCoordinator.invalidateCombatTracker("engagement-effect-cleanup");
+  RenderCoordinator.invalidateCombatTracker("engagement-effect-cleanup", { parts: ["rows"] });
 }
 
 /**
@@ -506,8 +534,7 @@ async function deleteEngagedEffectsFromActor(actor, combat, reason = "combat-cle
     engagementEffectSyncDepth += 1;
     try {
       for (const effect of effects) {
-        if (typeof effect?.delete !== "function") continue;
-        await effect.delete();
+        await safeDeleteActiveEffect(effect, { reason });
       }
     }
     finally {
@@ -528,6 +555,8 @@ async function deleteEngagedEffectsFromActor(actor, combat, reason = "combat-cle
  */
 export async function clearEngagedStatusEffectsForCombat(combat, { reason = "combat-ended" } = {}) {
   if (!game.user?.isGM || !combat) return;
+  clearEngagementOverlayVisualsForCombat(combat, { reason });
+  if (!usesActiveEffectMirror()) return;
   const actors = new Map();
   for (const combatant of combatantValues(combat)) {
     const actor = effectActorForCombatant(combatant);
@@ -554,9 +583,10 @@ async function clearDeletedCombatantEngagement(combatant) {
   if (!deletedId) return;
   const state = getCombatantState(combatant);
   const partners = Array.from(new Set(state.engagement?.partnerIds ?? []));
-  await deleteEngagedEffectsFromActor(effectActorForCombatant(combatant), combat, "combatant-deleted");
+  clearEngagementOverlayVisualsForCombat(combat, { reason: "combatant-deleted" });
+  if (usesActiveEffectMirror()) await deleteEngagedEffectsFromActor(effectActorForCombatant(combatant), combat, "combatant-deleted");
   for (const partnerId of partners) {
-    const partner = combatantValues(combat).find(candidate => candidate?.id === partnerId);
+    const partner = combatantById(combat, partnerId);
     if (!partner) continue;
     const partnerState = getCombatantState(partner);
     const partnerIds = (partnerState.engagement?.partnerIds ?? []).filter(id => id !== deletedId);
@@ -568,9 +598,9 @@ async function clearDeletedCombatantEngagement(combatant) {
       reason: partnerIds.length ? partnerState.engagement?.reason : "partner-combatant-deleted"
     };
     await updateCombatantState(partner, { engagement });
-    await syncEngagedStatusEffect(partner, engagement, combat);
+    await syncEngagementVisuals(partner, engagement, combat);
   }
-  RenderCoordinator.invalidateCombatTracker("engagement-combatant-deleted");
+  RenderCoordinator.invalidateCombatTracker("engagement-combatant-deleted", { parts: ["rows"] });
 }
 
 /**
@@ -579,16 +609,17 @@ async function clearDeletedCombatantEngagement(combatant) {
  * @returns {void}
  */
 export function registerEngagedStatusHooks() {
-  if (statusEffectMode === "disabled" || typeof CONFIG?.ActiveEffect?.documentClass !== "function") return;
-  Hooks.on("deleteActiveEffect", effect => {
-    if (!isEngagedEffect(effect)) return;
-    void clearEngagementFromEffect(effect);
-  });
+  if (statusEffectMode !== "disabled" && typeof CONFIG?.ActiveEffect?.documentClass === "function") {
+    Hooks.on("deleteActiveEffect", effect => {
+      if (!isEngagedEffect(effect)) return;
+      void clearEngagementFromEffect(effect);
+    });
 
-  Hooks.on("updateActiveEffect", effect => {
-    if (!isEngagedEffect(effect) || hasActiveEngagedStatus(effect)) return;
-    void clearEngagementFromEffect(effect);
-  });
+    Hooks.on("updateActiveEffect", effect => {
+      if (!isEngagedEffect(effect) || hasActiveEngagedStatus(effect)) return;
+      void clearEngagementFromEffect(effect);
+    });
+  }
 
   Hooks.on("deleteCombat", combat => {
     void clearEngagedStatusEffectsForCombat(combat, { reason: "combat-deleted" });
@@ -609,10 +640,14 @@ export async function reconcileEngagedStatusEffects(combat = game.combat) {
   if (!game.user?.isGM || !combat) return;
   for (const combatant of Array.from(combat.combatants ?? [])) {
     try {
-      await syncEngagedStatusEffect(combatant, getCombatantState(combatant).engagement, combat);
+      await syncEngagementVisuals(combatant, getCombatantState(combatant).engagement, combat);
     }
     catch (err) {
       warn(err);
     }
   }
+}
+
+export function refreshEngagementVisuals(reason = "api") {
+  refreshEngagementOverlayVisuals(reason);
 }

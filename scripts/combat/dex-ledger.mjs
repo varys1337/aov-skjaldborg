@@ -11,6 +11,7 @@ import {
   ROUNDING_POLICIES
 } from "../constants.mjs";
 import { movementDebug } from "./movement-debugger.mjs";
+import { runtimeSettings } from "../runtime-settings.mjs";
 
 /**
  * Convert a value to a finite number.
@@ -46,7 +47,7 @@ function movementUnitDistance() {
  * @returns {number}
  */
 function roundMovementUnits(rawUnits) {
-  const policy = game.settings.get(MODULE_ID, "movementRounding");
+  const policy = runtimeSettings.movementRounding;
   if (policy === ROUNDING_POLICIES.FLOOR) return Math.floor(rawUnits);
   if (policy === ROUNDING_POLICIES.NEAREST) return Math.round(rawUnits);
   return Math.ceil(rawUnits);
@@ -87,13 +88,7 @@ export function computeDexLedger(
   const modifiers = [];
 
   const intentModifiers = intent.modifiers ?? {};
-  let dynamicPlanningEnabled = false;
-  try {
-    dynamicPlanningEnabled = game.settings.get(MODULE_ID, "dynamicPlanningInitiative") === true;
-  }
-  catch (_exception) {
-    dynamicPlanningEnabled = false;
-  }
+  const dynamicPlanningEnabled = runtimeSettings.dynamicPlanningInitiative === true;
   const planningAdjustment = includePlanningAdjustment && dynamicPlanningEnabled
     ? numberOr(combatantState.planningInitiative?.externalAdjustment, 0)
     : 0;

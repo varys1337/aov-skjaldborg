@@ -21,6 +21,7 @@ import {
   safeFromUuid
 } from "./automation-helpers.mjs";
 import { warn } from "../logger.mjs";
+import { guardedUpdate } from "../utils/guarded-document-writes.mjs";
 
 const IMPALED_EFFECT_NAME = "AOV_SKJALDBORG.StatusEffects.Impaled";
 const INJURY_EFFECT_NAME = "AOV_SKJALDBORG.StatusEffects.Injury";
@@ -527,9 +528,9 @@ async function resolvePendingDamageEntry(message, entryKey, pending, appliedItem
     appliedItemUuid: appliedItem?.uuid ?? null,
     results
   };
-  await message.update({
+  await guardedUpdate(message, {
     [`flags.${MODULE_ID}.${DAMAGE_EFFECT_TRACKING_FLAG}`]: tracking
-  });
+  }, { category: "chat.damageEffectTracking" });
   return tracking.cards[entryKey];
 }
 
@@ -568,9 +569,9 @@ async function handleMessageUpdate(message) {
       changed = true;
     }
     if (changed) {
-      await message.update({
+      await guardedUpdate(message, {
         [`flags.${MODULE_ID}.${DAMAGE_EFFECT_TRACKING_FLAG}`]: tracking
-      });
+      }, { category: "chat.damageEffectTracking" });
     }
   } finally {
     processingMessages.delete(key);

@@ -1,0 +1,21 @@
+:root {
+  --aov-skjaldborg-surface: rgba(26, 23, 22, 0.92);
+  --aov-skjaldborg-border: rgba(255, 255, 255, 0.16);
+  --aov-skjaldborg-accent: #db5c28;
+  --aov-skjaldborg-muted: #d7cbc1;
+  --aov-skjaldborg-radius: 6px;
+  --aov-skjaldborg-gap: 6px;
+}
+
+.aov-skjaldborg {
+  --skj-dialog-gap-xs: 0.25rem;
+  --skj-dialog-gap-sm: 0.375rem;
+  --skj-dialog-gap-md: 0.5rem;
+  --skj-dialog-radius-sm: 4px;
+  --skj-dialog-radius-md: 6px;
+  --skj-dialog-control-height: 1.9rem;
+  --skj-dialog-section-padding: 0.5rem;
+  --skj-dialog-border: rgba(255, 255, 255, 0.16);
+  --skj-dialog-bg-soft: rgba(0, 0, 0, 0.18);
+  --skj-dialog-bg-strong: rgba(0, 0, 0, 0.28);
+}

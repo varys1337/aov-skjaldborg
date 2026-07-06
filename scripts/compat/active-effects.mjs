@@ -56,6 +56,41 @@ function clone(value) {
   return foundry.utils.deepClone(value);
 }
 
+function staleDeleteMessage(exception) {
+  return /ActiveEffect\s+"[^"]+"\s+does not exist/i.test(String(exception?.message ?? exception));
+}
+
+function effectStillEmbedded(effect) {
+  const id = String(effect?.id ?? effect?._id ?? "");
+  if (!id) return false;
+  const parent = effect?.parent ?? effect?.actor ?? effect?.item ?? null;
+  const effects = parent?.effects ?? null;
+  if (!effects) return true;
+  if (typeof effects.get === "function") return !!effects.get(id);
+  return Array.from(effects ?? []).some(candidate => String(candidate?.id ?? candidate?._id ?? "") === id);
+}
+
+/**
+ * Delete an ActiveEffect if it still exists, tolerating stale duplicate cleanup.
+ *
+ * @param {ActiveEffect|object|null} effect Candidate ActiveEffect.
+ * @param {{reason?: string}} [options={}] Deletion context.
+ * @returns {Promise<boolean>} Whether a delete request succeeded.
+ */
+export async function safeDeleteActiveEffect(effect, { reason = "active-effect-cleanup" } = {}) {
+  if (typeof effect?.delete !== "function") return false;
+  if (!effectStillEmbedded(effect)) return false;
+  try {
+    await effect.delete();
+    return true;
+  }
+  catch (exception) {
+    if (staleDeleteMessage(exception)) return false;
+    warn(`Failed to delete Skjaldborg ActiveEffect during ${reason}.`, exception);
+    return false;
+  }
+}
+
 /**
  * Build Foundry's conventional localization key for a core status id when the
  * active catalog cannot provide a configured name.
@@ -549,5 +584,6 @@ export const __test = {
   injuryThresholdSeverityFromEffects,
   MODULE_MANAGED_FLAGS,
   PRIORITY_STATUS_IDS,
-  STATUS_EFFECT_DOCUMENT_IDS
+  STATUS_EFFECT_DOCUMENT_IDS,
+  safeDeleteActiveEffect
 };

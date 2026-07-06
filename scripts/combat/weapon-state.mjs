@@ -5,6 +5,7 @@ import {
   actorItems,
   normalizeDescriptor as normalizeWeaponDescriptor
 } from "../utils/document-data.mjs";
+import { guardedSetFlag } from "../utils/guarded-document-writes.mjs";
 
 export const READIED_WEAPON_FLAG = "readiedWeaponId";
 export const READIED_WEAPONS_FLAG = "readiedWeapons";
@@ -320,7 +321,7 @@ export async function setReadiedWeaponInHand(actor, hand, weaponId) {
   next[side] = item.id;
   const other = side === "right" ? "left" : "right";
   if (next[other] === item.id) next[other] = null;
-  await actor.setFlag(MODULE_ID, READIED_WEAPONS_FLAG, next);
+  await guardedSetFlag(actor, MODULE_ID, READIED_WEAPONS_FLAG, next, { category: "weapon.readied" });
   if (typeof actor.unsetFlag === "function" && actor.getFlag?.(MODULE_ID, READIED_WEAPON_FLAG)) {
     await actor.unsetFlag(MODULE_ID, READIED_WEAPON_FLAG);
   }
@@ -338,11 +339,11 @@ export async function clearReadiedWeapon(actor) {
   const current = getReadiedWeaponIds(actor);
   const hasState = current.right || current.left || current.unlimited || actor.getFlag?.(MODULE_ID, READIED_WEAPON_FLAG);
   if (!hasState) return actor;
-  await actor.setFlag(MODULE_ID, READIED_WEAPONS_FLAG, {
+  await guardedSetFlag(actor, MODULE_ID, READIED_WEAPONS_FLAG, {
     right: null,
     left: null,
     unlimited: current.unlimited === true
-  });
+  }, { category: "weapon.readied" });
   if (typeof actor.unsetFlag === "function" && actor.getFlag?.(MODULE_ID, READIED_WEAPON_FLAG)) {
     await actor.unsetFlag(MODULE_ID, READIED_WEAPON_FLAG);
   }
@@ -366,7 +367,7 @@ export async function clearReadiedWeaponInHand(actor, hand) {
     unlimited: current.unlimited === true
   };
   next[side] = null;
-  await actor.setFlag(MODULE_ID, READIED_WEAPONS_FLAG, next);
+  await guardedSetFlag(actor, MODULE_ID, READIED_WEAPONS_FLAG, next, { category: "weapon.readied" });
   if (typeof actor.unsetFlag === "function" && actor.getFlag?.(MODULE_ID, READIED_WEAPON_FLAG)) {
     await actor.unsetFlag(MODULE_ID, READIED_WEAPON_FLAG);
   }
@@ -390,7 +391,7 @@ export async function setReadiedWeapons(actor, value = {}) {
     unlimited: value.unlimited === true
   };
   if (next.left && next.left === next.right) next.left = null;
-  await actor.setFlag(MODULE_ID, READIED_WEAPONS_FLAG, next);
+  await guardedSetFlag(actor, MODULE_ID, READIED_WEAPONS_FLAG, next, { category: "weapon.readied" });
   if (typeof actor.unsetFlag === "function" && actor.getFlag?.(MODULE_ID, READIED_WEAPON_FLAG)) {
     await actor.unsetFlag(MODULE_ID, READIED_WEAPON_FLAG);
   }
@@ -453,7 +454,7 @@ export async function setCombatOptions(actor, value = {}) {
   next.shieldwall = {
     enabled: next.shieldwall?.enabled === true
   };
-  return actor.setFlag(MODULE_ID, COMBAT_OPTIONS_FLAG, next);
+  return guardedSetFlag(actor, MODULE_ID, COMBAT_OPTIONS_FLAG, next, { category: "weapon.combatOptions" });
 }
 
 /**

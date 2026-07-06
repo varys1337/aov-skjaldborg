@@ -3,55 +3,44 @@ import {
   REACH_VISUALIZER_SHAPE,
   REACH_VISUALIZER_VISIBILITY
 } from "../constants.mjs";
-import { AoVAdapter } from "../adapter/aov-adapter.mjs";
 import {
   getReachVisualizerSettings,
   normalizeReachVisualizerSettings,
   setReachVisualizerSettings
 } from "./reach-visualizer-config.mjs";
-import { circleReachRadius, isSquareGridType, squareReachOutline } from "./reach-visualizer-geometry.mjs";
+import { colorForToken } from "./overlay-colors.mjs";
+import {
+  gridSizePixels,
+  isSquareGrid as sceneIsSquareGrid,
+  sceneGridDistance as sceneDistance,
+  tokenCenterPoint,
+  tokenVisibleToUser
+} from "./overlay-geometry.mjs";
+import { CanvasOverlayManager } from "./overlay-manager.mjs";
+import { circleReachRadius, squareReachOutline } from "./reach-visualizer-geometry.mjs";
 import { drawSolidCircle, drawSolidGridSegments } from "./reach-visualizer-render.mjs";
 import { reachUnitsForActor, reachUnitsForCombatant } from "../combat/movement-controller.mjs";
+import { combatantForTokenDocument } from "../combat/combatant-token-resolution.mjs";
 
 const OVERLAY_NAME = "aov-skjaldborg-reach-visualizer-overlay";
 const CONTROL_TOOL_NAME = "aov-skjaldborg-reach-visualizer";
-const DEFAULT_GRID_SIZE = 100;
-const DISPOSITION_COLORS = Object.freeze({
-  friendly: 0x42d392,
-  neutral: 0xf0c04a,
-  hostile: 0xff5c5c,
-  fallback: 0x7cc7ff
-});
 
 let hooksRegistered = false;
 let settings = normalizeReachVisualizerSettings({});
 let enabled = false;
-let overlayContainer = null;
 let hoveredTokenId = null;
-let pendingRedraw = false;
 const tokenOverlays = new Map();
 
-function pixi() {
-  return globalThis.PIXI ?? null;
-}
-
 function gridSize() {
-  return Number(canvas?.scene?.grid?.size ?? canvas?.grid?.size) || DEFAULT_GRID_SIZE;
+  return gridSizePixels();
 }
 
 function sceneGridDistance() {
-  return Number(canvas?.scene?.grid?.distance) || 1;
-}
-
-function isCanvasReady() {
-  return Boolean(canvas?.ready !== false && canvas?.scene && canvas?.tokens && typeof canvas.tokens.addChild === "function");
+  return sceneDistance();
 }
 
 function isVisibleToken(token) {
-  if (!token?.actor || !token?.document) return false;
-  if (token.document.hidden && !game.user?.isGM) return false;
-  if (token.visible === false || token.isVisible === false) return false;
-  return true;
+  return tokenVisibleToUser(token, game.user);
 }
 
 function tokenId(token) {
@@ -59,73 +48,24 @@ function tokenId(token) {
 }
 
 function tokenCenter(token) {
-  const center = token?.center;
-  if (Number.isFinite(Number(center?.x)) && Number.isFinite(Number(center?.y))) return center;
-  const document = token?.document ?? token;
-  const size = gridSize();
-  const x = Number(token?.position?.x ?? document?.x ?? document?._source?.x);
-  const y = Number(token?.position?.y ?? document?.y ?? document?._source?.y);
-  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
-  const width = Math.max(1, Number(document?.width ?? document?._source?.width) || 1);
-  const height = Math.max(1, Number(document?.height ?? document?._source?.height) || 1);
-  return {
-    x: x + ((width * size) / 2),
-    y: y + ((height * size) / 2)
-  };
+  return tokenCenterPoint(token, gridSize());
 }
 
 function tokenDispositionColor(token) {
-  const disposition = Number(token?.document?.disposition);
-  const friendly = globalThis.CONST?.TOKEN_DISPOSITIONS?.FRIENDLY ?? 1;
-  const hostile = globalThis.CONST?.TOKEN_DISPOSITIONS?.HOSTILE ?? -1;
-  if (disposition === friendly) return DISPOSITION_COLORS.friendly;
-  if (disposition === hostile) return DISPOSITION_COLORS.hostile;
-  if (disposition === 0) return DISPOSITION_COLORS.neutral;
-  return DISPOSITION_COLORS.fallback;
-}
-
-function resolveCombatantForToken(token, combat = game.combat) {
-  if (!token || !combat?.started) return null;
-  const byAdapter = AoVAdapter.getCombatantForToken?.(combat, token);
-  if (byAdapter) return byAdapter;
-  const id = tokenId(token);
-  return id
-    ? Array.from(combat.combatants ?? []).find(combatant => (combatant.tokenId ?? combatant.token?.id) === id) ?? null
-    : null;
+  return colorForToken(token);
 }
 
 function reachUnitsForToken(token) {
-  const combatant = resolveCombatantForToken(token);
+  const combat = game.combat;
+  const combatant = token && combat?.started
+    ? combatantForTokenDocument(combat, token?.document ?? token)
+    : null;
   if (combatant) return reachUnitsForCombatant(combatant);
   return reachUnitsForActor(token?.actor);
 }
 
 function isSquareGrid() {
-  return isSquareGridType(canvas?.scene?.grid?.type);
-}
-
-function ensureOverlayContainer() {
-  if (!isCanvasReady()) return null;
-  if (overlayContainer && !overlayContainer.destroyed) return overlayContainer;
-  const PIXI = pixi();
-  if (!PIXI?.Container) return null;
-  overlayContainer = new PIXI.Container();
-  overlayContainer.name = OVERLAY_NAME;
-  overlayContainer.sortableChildren = true;
-  overlayContainer.zIndex = -1000;
-  overlayContainer.interactiveChildren = false;
-  try {
-    overlayContainer.eventMode = "none";
-  } catch (_exception) {
-    // Older PIXI builds ignore eventMode.
-  }
-  try {
-    if (typeof canvas.tokens.addChildAt === "function") canvas.tokens.addChildAt(overlayContainer, 0);
-    else canvas.tokens.addChild(overlayContainer);
-  } catch (_exception) {
-    overlayContainer = null;
-  }
-  return overlayContainer;
+  return sceneIsSquareGrid(canvas?.scene?.grid);
 }
 
 function destroyChild(child) {
@@ -136,26 +76,12 @@ function destroyChild(child) {
   }
 }
 
-function destroyOverlayContainer() {
-  if (overlayContainer && !overlayContainer.destroyed) {
-    try {
-      overlayContainer.parent?.removeChild?.(overlayContainer);
-    } catch (_exception) {
-      // no-op
-    }
-    destroyChild(overlayContainer);
-  }
-  overlayContainer = null;
-  tokenOverlays.clear();
-}
-
-function ensureOverlayEntry(token) {
+function ensureOverlayEntry(token, parent = overlayManager.container) {
   const id = tokenId(token);
   if (!id) return null;
   const existing = tokenOverlays.get(id);
   if (existing?.container && !existing.container.destroyed) return existing;
-  const parent = ensureOverlayContainer();
-  const PIXI = pixi();
+  const PIXI = globalThis.PIXI ?? null;
   if (!parent || !PIXI?.Container || !PIXI?.Graphics) return null;
   const container = new PIXI.Container();
   container.name = `${OVERLAY_NAME}-${id}`;
@@ -257,33 +183,36 @@ function syncOverlayEntries(tokens) {
   for (const id of Array.from(tokenOverlays.keys())) {
     if (!wanted.has(id)) destroyOverlayEntry(id);
   }
-  for (const token of tokens) ensureOverlayEntry(token);
+  const parent = overlayManager.container;
+  for (const token of tokens) ensureOverlayEntry(token, parent);
 }
 
-function redrawReachOverlays() {
-  pendingRedraw = false;
+function drawReachOverlays({ container }) {
   if (!enabled || !settings.enabled) {
     syncOverlayEntries([]);
+    if (container) container.visible = false;
     return;
   }
-  const overlay = ensureOverlayContainer();
-  if (!overlay) return;
-  overlay.visible = true;
+  container.visible = true;
   const display = displayTokens(candidateTokens());
   syncOverlayEntries(display);
   for (const token of display) drawTokenOverlay(token);
 }
 
-function scheduleRedraw() {
-  if (pendingRedraw) return;
-  pendingRedraw = true;
-  const requestFrame = globalThis.requestAnimationFrame ?? (callback => globalThis.setTimeout(callback, 16));
-  requestFrame(redrawReachOverlays);
+const overlayManager = new CanvasOverlayManager({
+  id: OVERLAY_NAME,
+  layer: "tokens",
+  zIndex: -1000,
+  draw: drawReachOverlays
+});
+
+function scheduleRedraw(reason = "reach-visualizer") {
+  overlayManager.scheduleRedraw(reason);
 }
 
 function setEnabled(value) {
   enabled = Boolean(value);
-  const overlay = ensureOverlayContainer();
+  const overlay = overlayManager.container;
   if (overlay) overlay.visible = enabled;
   if (!enabled) syncOverlayEntries([]);
 }
@@ -309,7 +238,7 @@ export async function toggleReachVisualizer(value) {
 export function applyReachVisualizerSettings(value = null) {
   settings = normalizeReachVisualizerSettings(value ?? getReachVisualizerSettings());
   setEnabled(settings.enabled);
-  scheduleRedraw();
+  scheduleRedraw("settings");
 }
 
 /**
@@ -335,7 +264,7 @@ function refreshTokenIds(ids) {
     const entry = tokenOverlays.get(String(id));
     if (entry) entry.lastKey = "";
   }
-  scheduleRedraw();
+  scheduleRedraw("tokens");
 }
 
 function registerControlsHook() {
@@ -369,18 +298,19 @@ function registerControlsHook() {
 export function registerReachVisualizerHooks() {
   if (!hooksRegistered) {
     hooksRegistered = true;
+    overlayManager.registerHooks(Hooks);
     registerControlsHook();
     Hooks.on("canvasReady", () => {
       applyReachVisualizerSettings();
     });
     Hooks.on("canvasTearDown", () => {
-      destroyOverlayContainer();
-      pendingRedraw = false;
+      tokenOverlays.clear();
+      hoveredTokenId = null;
     });
     Hooks.on("hoverToken", (token, hovered) => {
       const id = tokenId(token);
       hoveredTokenId = hovered ? id : hoveredTokenId === id ? null : hoveredTokenId;
-      if (settings.visibility === REACH_VISUALIZER_VISIBILITY.HOVER) scheduleRedraw();
+      if (settings.visibility === REACH_VISUALIZER_VISIBILITY.HOVER) scheduleRedraw("hover-token");
       else refreshTokenIds([id]);
     });
     Hooks.on("controlToken", token => refreshTokenIds([tokenId(token)]));
@@ -389,7 +319,7 @@ export function registerReachVisualizerHooks() {
     Hooks.on("createToken", scheduleRedraw);
     Hooks.on("deleteToken", document => {
       destroyOverlayEntry(String(document?.id ?? document?._id ?? ""));
-      scheduleRedraw();
+      scheduleRedraw("delete-token");
     });
     Hooks.on("updateCombatant", combatant => refreshTokenIds([String(combatant?.tokenId ?? combatant?.token?.id ?? "")]));
     Hooks.on("updateCombat", scheduleRedraw);
@@ -416,7 +346,7 @@ export function registerReachVisualizerHooks() {
     applySettings: applyReachVisualizerSettings,
     redraw: () => {
       for (const entry of tokenOverlays.values()) entry.lastKey = "";
-      scheduleRedraw();
+      scheduleRedraw("api");
     },
     isEnabled: isReachVisualizerEnabled
   };
@@ -425,6 +355,7 @@ export function registerReachVisualizerHooks() {
 export const __test = Object.freeze({
   candidateTokens,
   displayTokens,
+  overlayManager,
   reachUnitsForToken,
   tokenDispositionColor
 });

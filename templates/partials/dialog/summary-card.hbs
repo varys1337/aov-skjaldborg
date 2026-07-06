@@ -1,0 +1,21 @@
+<div class="skj-dialog-summary-card {{class}}">
+  {{#if baseChance}}
+  <strong>{{baseChance}}</strong>
+  {{/if}}
+  {{#if targetNumber}}
+  <strong>{{targetNumber}}</strong>
+  {{/if}}
+  {{#if rows}}
+  <div class="skj-dialog-summary-card__rows">
+    {{#each rows}}
+    <div class="skj-dialog-summary-card__row {{#if muted}}is-muted{{/if}}">
+      <span>{{label}}</span>
+      <strong>{{value}}</strong>
+    </div>
+    {{/each}}
+  </div>
+  {{/if}}
+  {{#if summaryText}}
+  <span>{{summaryText}}</span>
+  {{/if}}
+</div>

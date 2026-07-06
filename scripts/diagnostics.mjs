@@ -78,7 +78,10 @@ export async function runDiagnostics() {
   results.push(check("action-ring-setting", typeof game.settings.get(MODULE_ID, "enableActionRing") === "boolean"));
   results.push(check("actor-hotbar-setting", typeof game.settings.get(MODULE_ID, "enableActorHotbar") === "boolean"));
   results.push(check("appv2", capabilities.applications.applicationV2));
-  results.push(check("document-sheet-v2", capabilities.applications.documentSheetV2));
+  results.push(optionalCheck("document-sheet-v2", capabilities.sheets?.documentSheetV2 ? "available" : "unavailable"));
+  results.push(optionalCheck("document-sheet-integrations", capabilities.sheets?.integrationsUsed
+    ? (capabilities.sheets?.documentSheetV2 ? "enabled" : "disabled")
+    : "not used"));
   results.push(check("dialogv2", capabilities.applications.dialogV2));
   results.push(check("scene-move-tokens", true, capabilities.movement.sceneMoveTokens ? "native" : "per-token fallback"));
   results.push(check("token-move", capabilities.movement.tokenMove));

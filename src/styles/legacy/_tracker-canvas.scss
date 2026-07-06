@@ -2,25 +2,6 @@
 /* v0.2.26 restored tracker intent and workflow indicators                    */
 /* ------------------------------------------------------------------------- */
 
-.skj-combatant-status {
-  align-items: center;
-  display: inline-flex;
-  gap: 3px;
-  justify-content: center;
-}
-
-.skj-combatant-status > i {
-  flex: 0 0 auto;
-  font-size: 9px;
-  line-height: 1;
-}
-
-.skj-combatant-status > span {
-  min-width: max-content;
-  overflow: visible;
-  white-space: nowrap;
-}
-
 .skj-combatant-indicators {
   align-items: center;
   display: flex;
@@ -82,24 +63,6 @@ body.theme-dark .skj-tracker-indicator {
 /* ------------------------------------------------------------------------- */
 /* v0.2.27 compact tracker intent labels and actor-HUD geometry correction    */
 /* ------------------------------------------------------------------------- */
-
-/*
- * Keep the persisted intent status available through icon, CSS state, and
- * tooltip while displaying only the selected action name in the tracker row.
- * Long localized action names may shrink rather than displacing initiative.
- */
-.skj-combatant-status {
-  flex: 0 1 auto;
-  max-width: 92px;
-  min-width: 0;
-  overflow: hidden;
-}
-
-.skj-combatant-status > span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
 
 /* ------------------------------------------------------------------------- */
 /* v0.2.28 intent-grid spacing and compact tracker workflow row               */

@@ -19,6 +19,7 @@ import { requestGm } from "../socket.mjs";
 import { RenderCoordinator } from "../ui/render-coordinator.mjs";
 import { actionThemeClass, actorPortraitSource, isVideoSource } from "../ui/dom-utils.mjs";
 import { error } from "../logger.mjs";
+import { ensureDialogPartialsLoaded } from "./base/dialog-partials.mjs";
 
 const { DialogV2 } = foundry.applications.api;
 
@@ -98,6 +99,55 @@ function firstAvailableCraftMode(craftChoices) {
     ?? CRAFT_RUNE_MODES.CUSTOM;
 }
 
+function magicModeControls(selectedMagicType) {
+  return [
+    {
+      value: "runescript",
+      label: game.i18n.localize("AOV_SKJALDBORG.RunicMagic.RuneScripts"),
+      checked: selectedMagicType === "runescript"
+    },
+    {
+      value: "seidur",
+      label: game.i18n.localize("AOV_SKJALDBORG.RunicMagic.Seidur"),
+      checked: selectedMagicType === "seidur"
+    }
+  ];
+}
+
+function runicOptionControls({ preparedDefault, customModifierEnabled }) {
+  return [
+    {
+      type: "checkbox",
+      name: "prepared",
+      value: "on",
+      label: game.i18n.localize("AOV_SKJALDBORG.RunicMagic.Prepared"),
+      checked: preparedDefault,
+      dataRuneOnly: true
+    },
+    {
+      type: "checkbox",
+      name: "resistance",
+      value: "on",
+      label: game.i18n.localize("AOV_SKJALDBORG.RunicMagic.Resistance"),
+      dataRuneOnly: true
+    },
+    {
+      type: "checkbox",
+      name: "craftEnabled",
+      value: "on",
+      label: game.i18n.localize("AOV_SKJALDBORG.RunicMagic.CraftRune"),
+      dataRuneOnly: true
+    },
+    {
+      type: "checkbox",
+      name: "customModifierEnabled",
+      value: "on",
+      label: game.i18n.localize("AOV_SKJALDBORG.RunicMagic.CustomModifier"),
+      checked: customModifierEnabled
+    }
+  ];
+}
+
 function resultSucceeded(result) {
   if (result?.resultLevel === null || result?.resultLevel === undefined) return false;
   return Number(result.resultLevel) >= 2;
@@ -159,6 +209,7 @@ export class RunicMagicDialog extends DialogV2 {
   }
 
   async _renderHTML() {
+    await ensureDialogPartialsLoaded();
     return foundry.applications.handlebars.renderTemplate(
       "modules/aov-skjaldborg/templates/runic-magic-dialog.hbs",
       this._prepareDialogContext()
@@ -195,6 +246,8 @@ export class RunicMagicDialog extends DialogV2 {
       ? tracked.craftMode
       : firstAvailableCraftMode(craftChoices);
 
+    const preparedDefault = ready || selectedRune?.prepared === true;
+    const customModifierEnabled = Number(tracked.flatMod ?? 0) !== 0 || !!tracked.customModifierReason;
     return {
       actorName: actor.name ?? "",
       actorInitial: String(actor.name ?? "?").trim().charAt(0).toUpperCase() || "?",
@@ -216,10 +269,26 @@ export class RunicMagicDialog extends DialogV2 {
       selectedSeidurMode: selectedMagicType === "seidur",
       selectedRune,
       selectedSeidur,
+      magicModeControls: magicModeControls(selectedMagicType),
       dexPenalty: Math.max(1, Number(tracked.dexPenalty || selectedRune?.dexPenalty || 1)),
       flatMod: Number(tracked.flatMod ?? 0) || 0,
-      customModifierEnabled: Number(tracked.flatMod ?? 0) !== 0 || !!tracked.customModifierReason,
+      customModifierEnabled,
       customModifierReason: String(tracked.customModifierReason ?? ""),
+      customModifierRow: {
+        class: "skj-runic-magic-dialog__detail--custom",
+        detailName: "custom",
+        hidden: !customModifierEnabled,
+        label: game.i18n.localize("AOV_SKJALDBORG.RunicMagic.FlatMod"),
+        reasonName: "customModifierReason",
+        reasonValue: String(tracked.customModifierReason ?? ""),
+        reasonPlaceholder: game.i18n.localize("AOV_SKJALDBORG.AttackDialog.CustomReason"),
+        valueName: "flatMod",
+        value: Number(tracked.flatMod ?? 0) || 0,
+        min: -200,
+        max: 200,
+        step: 1
+      },
+      runicOptionControls: runicOptionControls({ preparedDefault, customModifierEnabled }),
       craftChoices: craftChoices.map(choice => ({
         ...choice,
         selected: choice.mode === selectedCraftMode
@@ -232,7 +301,7 @@ export class RunicMagicDialog extends DialogV2 {
       seidurMagicSkillName: seidurSkill?.name ?? game.i18n.localize("AOV_SKJALDBORG.RunicMagic.SeidurMagicSkillMissing"),
       tracked,
       isReady: ready,
-      preparedDefault: ready || selectedRune?.prepared === true,
+      preparedDefault,
       isCarving: tracked.status === RUNE_MAGIC_STATUSES.CARVING && !ready,
       isFailed: tracked.status === RUNE_MAGIC_STATUSES.FAILED,
       isDisrupted: tracked.status === RUNE_MAGIC_STATUSES.DISRUPTED,
@@ -460,7 +529,10 @@ export class RunicMagicDialog extends DialogV2 {
           || (state.status === RUNE_MAGIC_STATUSES.CARVING && Number(state.readyRound ?? 0) <= Number(safeCombatState(this.combat).logicalRound ?? 1))
         ) action = "castRuneScript";
         result = await requestGm(action, payload);
-        RenderCoordinator.invalidate("combatTracker", { reason: `runic-magic-${action}` });
+        RenderCoordinator.invalidateCombatTracker(`runic-magic-${action}`, {
+          combatantIds: [this.combatant.id],
+          parts: ["rows"]
+        });
       }
       await this.close();
       return result;

@@ -13,7 +13,6 @@ import {
   isSkjaldborgCombatActive,
   openActorItem,
   prepareActorQuickAccess,
-  promptOtherIntentText,
   toggleIntentCategory
 } from "../ui/action-catalog.mjs";
 
@@ -460,15 +459,11 @@ export class ActionRing extends HandlebarsApplicationMixin(ApplicationV2) {
     const actionId = target.dataset.actionId;
 
     if (kind === "intent") {
-      let publicText = "";
       if (actionId === ACTION_CATEGORIES.OTHER) {
-        const currentText = isSkjaldborgCombatActive(this.combat) && this.combatant
-          ? getCombatantState(this.combatant).intent?.publicText
-          : getActorPreparedIntent(this.actor)?.publicText;
-        const entered = await promptOtherIntentText(currentText ?? "");
-        if (entered === null) return null;
-        publicText = entered;
+        await ActionRing.closeAll();
+        return toggleIntentCategory(this.actor, this.combatant, this.combat, actionId, { promptOther: true });
       }
+      const publicText = "";
       await ActionRing.closeAll();
       if (actionId === ACTION_CATEGORIES.RETREAT) {
         return openDisengageDialog({ actor: this.actor, combatant: this.combatant, combat: this.combat, originEvent: event });

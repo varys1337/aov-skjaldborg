@@ -5,6 +5,7 @@ import {
   MOVEMENT_DEBUG_DEFAULT_CATEGORIES,
   MOVEMENT_DEBUG_LEVELS
 } from "../constants.mjs";
+import { runtimeSetting, runtimeSettings } from "../runtime-settings.mjs";
 
 const PREFIX = `${MODULE_ID} | movement-debug`;
 const LEVEL_WEIGHT = Object.freeze({
@@ -16,31 +17,15 @@ const MAX_DEBUG_EVENTS = 2000;
 const debugEvents = [];
 
 /**
- * Read a module setting defensively.
- *
- * @param {string} key Setting key.
- * @param {unknown} fallback Fallback value.
- * @returns {unknown}
- */
-function setting(key, fallback) {
-  try {
-    return game.settings?.get?.(MODULE_ID, key) ?? fallback;
-  }
-  catch (_err) {
-    return fallback;
-  }
-}
-
-/**
  * Normalize movement-debug category settings.
  *
  * @returns {Record<string, boolean>}
  */
 export function movementDebugCategories() {
-  if (setting("debug", false) === true) {
+  if (runtimeSettings.debug === true) {
     return Object.fromEntries(Object.keys(MOVEMENT_DEBUG_DEFAULT_CATEGORIES).map(category => [category, true]));
   }
-  const configured = setting("movementDebugCategories", MOVEMENT_DEBUG_DEFAULT_CATEGORIES);
+  const configured = runtimeSettings.movementDebugCategories;
   return {
     ...MOVEMENT_DEBUG_DEFAULT_CATEGORIES,
     ...(configured && typeof configured === "object" && !Array.isArray(configured) ? configured : {})
@@ -55,13 +40,13 @@ export function movementDebugCategories() {
  * @returns {boolean}
  */
 export function movementDebugEnabled(category, minimumLevel = MOVEMENT_DEBUG_LEVELS.SUMMARY) {
-  const masterDebug = setting("debug", false) === true;
-  if (!masterDebug && setting("movementDebugEnabled", false) !== true) return false;
+  const masterDebug = runtimeSettings.debug === true;
+  if (!masterDebug && runtimeSettings.movementDebugEnabled !== true) return false;
   const categories = movementDebugCategories();
   if (categories[category] !== true) return false;
   const configuredLevel = masterDebug
     ? MOVEMENT_DEBUG_LEVELS.TRACE
-    : setting("movementDebugLevel", MOVEMENT_DEBUG_LEVELS.SUMMARY);
+    : runtimeSettings.movementDebugLevel;
   return (LEVEL_WEIGHT[configuredLevel] ?? 1) >= (LEVEL_WEIGHT[minimumLevel] ?? 1);
 }
 
@@ -78,6 +63,7 @@ export function newMovementDebugRunId(combat = game.combat) {
     String(combat?.round ?? 0),
     String(Date.now())
   ].join(":");
+  runtimeSettings.movementDebugLastRunId = runId;
   void game.settings?.set?.(MODULE_ID, "movementDebugLastRunId", runId);
   return runId;
 }
@@ -88,7 +74,7 @@ export function newMovementDebugRunId(combat = game.combat) {
  * @returns {string|null}
  */
 function currentRunId() {
-  return setting("movementDebugLastRunId", null);
+  return runtimeSetting("movementDebugLastRunId", null);
 }
 
 /**
@@ -137,12 +123,12 @@ export function movementDebugSnapshot(combat = game.combat) {
       sceneId: canvas?.scene?.id ?? null
     },
     settings: {
-      enabled: setting("debug", false) === true,
-      level: setting("debug", false) === true
+      enabled: runtimeSettings.debug === true,
+      level: runtimeSettings.debug === true
         ? MOVEMENT_DEBUG_LEVELS.TRACE
-        : setting("movementDebugLevel", MOVEMENT_DEBUG_LEVELS.SUMMARY),
+        : runtimeSettings.movementDebugLevel,
       categories: movementDebugCategories(),
-      movementTickDelayMs: setting("movementTickDelayMs", null)
+      movementTickDelayMs: runtimeSettings.movementTickDelayMs
     },
     combat: combat ? {
       id: combat.id ?? null,

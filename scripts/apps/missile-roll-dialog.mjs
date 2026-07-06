@@ -1,8 +1,14 @@
+import { AoVAdapter } from "../adapter/aov-adapter.mjs";
 import { getReadiedWeapon } from "../combat/weapon-state.mjs";
 import { mountedCapSummary, mountedWeaponCap } from "../combat/mounted-combat.mjs";
 import { resolveNaturalWeaponSkill } from "../combat/weapon-skill-resolver.mjs";
 import { startDialogCombatWorkflowBatch } from "../socket.mjs";
 import { createSplitAttackPrompt } from "../combat/dialog-target-queue.mjs";
+import { createCombatRuleContext, prepareAttackContext, prepareDamageContext } from "../combat/rule-kernel.mjs";
+import {
+  serializeProneAttackModifierContext,
+  serializeProneDamageContext
+} from "../combat/prone-automation.mjs";
 import { error } from "../logger.mjs";
 import { actionThemeClass, actorPortraitSource, isVideoSource } from "../ui/dom-utils.mjs";
 import {
@@ -766,7 +772,18 @@ export class MissileRollDialog extends DialogV2 {
     const augmentModifier = augmentOptions.has("custom")
       ? (Number(data.get("customAugmentValue")) || 0)
       : 0;
-    const preMultiplierChance = baseChance + situationalModifier + aimedModifier + augmentModifier;
+    const attackerToken = AoVAdapter.resolveActorTokenDocument(this.actor, null);
+    const ruleContext = prepareDamageContext(prepareAttackContext(createCombatRuleContext({
+      attackerActor: this.actor,
+      attackerToken,
+      targetActor,
+      targetToken,
+      weapon: weapon ?? this.weapon,
+      aimed: aimedEnabled
+    })));
+    const proneRules = ruleContext.proneRules ?? null;
+    const proneModifier = Number(proneRules?.total) || 0;
+    const preMultiplierChance = baseChance + situationalModifier + aimedModifier + augmentModifier + proneModifier;
     const rangeEnabled = augmentOptions.has("range") && isProjectileWeapon(weapon ?? this.weapon);
     const selectedRangeBand = missileRangeBand(data.get("missileRangeBand"));
     const rangeMultiplier = rangeEnabled ? missileRangeMultiplier(selectedRangeBand) : 1;
@@ -778,6 +795,7 @@ export class MissileRollDialog extends DialogV2 {
       : rangedChance;
     const damageSelection = this._damageSelectionForWeapon(weapon ?? this.weapon);
     const damageProfile = buildDamageProfile(this.actor, weapon ?? this.weapon, damageSelection);
+    const proneDamageRules = ruleContext.proneDamageRules ?? null;
 
     return {
       weapon,
@@ -799,6 +817,9 @@ export class MissileRollDialog extends DialogV2 {
       targetActor,
       situationalModifier,
       aimedModifier,
+      proneModifier,
+      proneRules,
+      proneDamageRules,
       rangeModifier: rangedChance - preMultiplierChance,
       intoMeleeModifier: targetNumber - rangedChance,
       augmentModifier,
@@ -916,7 +937,7 @@ export class MissileRollDialog extends DialogV2 {
   }
 
   /**
-   * @param {{baseChance: number, mountedCap?: object, situationalModifier: number, aimedModifier: number, rangeLabel: string, intoMeleeLabel: string, augmentModifier: number}} state Preview state.
+   * @param {{baseChance: number, mountedCap?: object, situationalModifier: number, aimedModifier: number, rangeLabel: string, intoMeleeLabel: string, augmentModifier: number, proneModifier?: number}} state Preview state.
    * @returns {string}
    */
   _formatSummary(state) {
@@ -928,8 +949,12 @@ export class MissileRollDialog extends DialogV2 {
       intoMelee: state.intoMeleeLabel,
       augment: signed(state.augmentModifier)
     });
+    const proneModifier = Number(state.proneModifier) || 0;
+    const prone = proneModifier
+      ? ` · ${game.i18n.format("AOV_SKJALDBORG.AttackDialog.ProneSummary", { prone: signed(proneModifier) })}`
+      : "";
     const mounted = mountedCapSummary(state.mountedCap);
-    return mounted ? `${summary} · ${mounted}` : summary;
+    return `${summary}${prone}${mounted ? ` · ${mounted}` : ""}`;
   }
 
   _buildDamageContext(state, ammunitionChange = null) {
@@ -981,6 +1006,9 @@ export class MissileRollDialog extends DialogV2 {
       baseChance: state.baseChance,
       situationalModifier: state.situationalModifier,
       aimedModifier: state.aimedModifier,
+      proneModifier: state.proneModifier,
+      proneRules: serializeProneAttackModifierContext(state.proneRules),
+      proneDamageRules: serializeProneDamageContext(state.proneDamageRules),
       rangeModifier: state.rangeModifier,
       intoMeleeModifier: state.intoMeleeModifier,
       augmentModifier: state.augmentModifier,

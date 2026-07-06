@@ -1,0 +1,8 @@
+<div class="skj-dialog-segments {{class}}" {{#if ariaLabel}}aria-label="{{ariaLabel}}"{{/if}}>
+  {{#each controls}}
+  <label class="skj-dialog-segment skj-roll-dialog__segment {{class}} {{#if disabled}}is-disabled{{/if}}" {{#if tooltip}}data-tooltip="{{tooltip}}"{{/if}} {{#if dataRuneOnly}}data-rune-only{{/if}} {{#if hidden}}hidden{{/if}}>
+    <input type="{{#if type}}{{type}}{{else}}radio{{/if}}" name="{{#if name}}{{name}}{{else}}{{../name}}{{/if}}" value="{{value}}" {{#if checked}}checked{{/if}} {{#if selected}}checked{{/if}} {{#if disabled}}disabled{{/if}}>
+    <span>{{label}}</span>
+  </label>
+  {{/each}}
+</div>

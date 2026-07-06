@@ -1,6 +1,6 @@
 import { AoVAdapter } from "../adapter/aov-adapter.mjs";
 import { PhaseController } from "../combat/phase-controller.mjs";
-import { isDynamicPlanningInitiativeEnabled } from "../combat/planning-initiative.mjs";
+import { shouldTrackCurrentTurnForPhase } from "../combat/phase-structure.mjs";
 import { getCombatState } from "../combat/state.mjs";
 import { PHASES } from "../constants.mjs";
 import { error } from "../logger.mjs";
@@ -8,7 +8,7 @@ import { requestGm } from "../socket.mjs";
 
 
 /**
- * Prepare Foundry's initial Combat update for simultaneous Planning.
+ * Prepare Foundry's initial Combat update for turnless Planning.
  *
  * Core Combat#startCombat starts round 1 with the first sorted Combatant as the
  * active turn. Foundry's documented `combatStart` hook runs before that update
@@ -22,8 +22,8 @@ import { requestGm } from "../socket.mjs";
  */
 export function prepareInitialPlanningTurn(combat, updateData) {
   if (!AoVAdapter.isAoVWorld() || !AoVAdapter.enabledSetting) return false;
-  if (!isDynamicPlanningInitiativeEnabled()) return false;
   if (getCombatState(combat).phase !== PHASES.INTENT) return false;
+  if (shouldTrackCurrentTurnForPhase(PHASES.INTENT)) return false;
   if (!updateData || typeof updateData !== "object") return false;
 
   updateData.turn = null;

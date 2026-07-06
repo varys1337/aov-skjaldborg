@@ -1,0 +1,20 @@
+<div class="skj-dialog-target-pills {{class}}" {{#if ariaLabel}}aria-label="{{ariaLabel}}"{{/if}}>
+  {{#each targets}}
+  <button type="button" class="skj-dialog-target-pill skj-roll-dialog__target-chip {{#if active}}is-active{{/if}}" data-target-key="{{key}}" title="{{name}}">
+    <span class="skj-roll-dialog__target-portrait" aria-hidden="true">
+      {{#if img}}
+        {{#if imgIsVideo}}
+        <video src="{{img}}" autoplay muted loop playsinline></video>
+        {{else}}
+        <img src="{{img}}" alt="" />
+        {{/if}}
+      {{else}}
+      <i class="fa-solid fa-user" aria-hidden="true"></i>
+      {{/if}}
+    </span>
+    <span>{{name}}</span>
+  </button>
+  {{else}}
+  <span class="skj-roll-dialog__target-empty">{{emptyLabel}}</span>
+  {{/each}}
+</div>

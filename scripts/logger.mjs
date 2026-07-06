@@ -1,4 +1,5 @@
 import { MODULE_ID } from "./constants.mjs";
+import { runtimeSettings } from "./runtime-settings.mjs";
 
 /**
  * Emit a debug log only when the module debug setting is enabled.
@@ -7,7 +8,7 @@ import { MODULE_ID } from "./constants.mjs";
  * @returns {void}
  */
 export function debug(...args) {
-  if (!game.settings?.get(MODULE_ID, "debug")) return;
+  if (runtimeSettings.debug !== true) return;
   console.debug(`${MODULE_ID} |`, ...args);
 }
 

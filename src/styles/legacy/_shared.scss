@@ -7,8 +7,28 @@
 .skj-phase-buttons {
   display: grid;
   gap: 4px;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(var(--skj-phase-count, 4), minmax(0, 1fr));
+  justify-content: center;
+  margin-inline: auto;
   min-width: 0;
+  width: 100%;
+}
+
+.skj-phase-buttons[data-phase-count="1"] {
+  min-width: 2.5rem;
+  width: 25%;
+}
+
+.skj-phase-buttons[data-phase-count="2"] {
+  width: 50%;
+}
+
+.skj-phase-buttons[data-phase-count="3"] {
+  width: 75%;
+}
+
+.skj-phase-buttons[data-phase-count="4"] {
+  width: 100%;
 }
 
 .skj-movement-run {
@@ -75,15 +95,31 @@
 }
 
 .skj-combatant-status {
-  display: inline-block;
-  flex: 0 0 auto;
+  align-items: center;
+  display: inline-flex;
+  flex: 0 1 auto;
   font-size: 10px;
+  gap: 3px;
+  justify-content: center;
   line-height: 1.25;
   margin-inline-start: 2px;
-  max-width: none;
-  min-width: max-content;
-  overflow: visible;
+  max-width: 92px;
+  min-width: 0;
+  overflow: hidden;
   vertical-align: middle;
+  white-space: nowrap;
+}
+
+.skj-combatant-status > i {
+  flex: 0 0 auto;
+  font-size: 9px;
+  line-height: 1;
+}
+
+.skj-combatant-status > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -229,6 +265,48 @@
 .chat-message .aov-skjaldborg-chat .skj-muted {
   color: inherit;
   opacity: 0.72;
+}
+
+.chat-message .aov:is(.aov-skjaldborg-knockback-chat, .aov-skjaldborg-grapple-chat, .aov-skjaldborg-missile-chat, .aov-skjaldborg-shield-cover-chat) .actor-roll {
+  align-items: center;
+}
+
+.chat-message .aov:is(.aov-skjaldborg-knockback-chat, .aov-skjaldborg-grapple-chat, .aov-skjaldborg-missile-chat, .aov-skjaldborg-shield-cover-chat) .roll-details {
+  min-width: 0;
+}
+
+.chat-message .aov:is(.aov-skjaldborg-knockback-chat, .aov-skjaldborg-grapple-chat, .aov-skjaldborg-missile-chat, .aov-skjaldborg-shield-cover-chat) .roll-details .header {
+  min-height: 0;
+  min-width: 0;
+}
+
+.chat-message .aov:is(.aov-skjaldborg-knockback-chat, .aov-skjaldborg-grapple-chat) .tag {
+  line-height: 1.14;
+  white-space: normal;
+}
+
+.chat-message .aov:is(.aov-skjaldborg-knockback-chat, .aov-skjaldborg-grapple-chat) :is(.skj-knockback-chat-result, .skj-grapple-chat-result) {
+  display: grid;
+  gap: 0.22rem;
+  line-height: 1.22;
+  margin-top: 0.32rem;
+  min-height: auto;
+  overflow: visible;
+  padding: 0.4rem 0.46rem;
+  text-align: center;
+  white-space: normal;
+}
+
+.chat-message .aov:is(.aov-skjaldborg-knockback-chat, .aov-skjaldborg-grapple-chat) :is(.skj-knockback-chat-result, .skj-grapple-chat-result).is-compact {
+  display: block;
+}
+
+.chat-message .aov:is(.aov-skjaldborg-knockback-chat, .aov-skjaldborg-grapple-chat) :is(.skj-knockback-chat-result, .skj-grapple-chat-result).is-compact > span {
+  align-items: center;
+  display: flex;
+  gap: 0.32rem;
+  justify-content: center;
+  line-height: 1.15;
 }
 
 @media (max-width: 480px) {

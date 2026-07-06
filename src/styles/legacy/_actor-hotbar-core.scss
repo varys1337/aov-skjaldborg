@@ -28,7 +28,7 @@
   --skj-slot-gap: 4px;
   --skj-hotbar-stage-height: 211px;
   contain: layout style paint;
-  color: #eee8e2;
+  color: var(--skj-text);
   font-family: var(--aov-primary-font, var(--font-primary));
   margin: 0 !important;
   position: fixed !important;

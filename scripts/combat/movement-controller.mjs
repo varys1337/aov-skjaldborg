@@ -8,8 +8,8 @@ import {
   PHASES
 } from "../constants.mjs";
 import { debug, warn } from "../logger.mjs";
-import { getCombatState, getCombatantState, updateCombatantState, updateCombatState } from "./state.mjs";
-import { syncEngagedStatusEffect } from "./engagement-status.mjs";
+import { getCombatState, getCombatantState, updateCombatantState, updateCombatantStates, updateCombatState } from "./state.mjs";
+import { syncEngagementVisuals } from "./engagement-status.mjs";
 import { getReadiedWeapon } from "./weapon-state.mjs";
 import {
   appendRoutePoint,
@@ -29,19 +29,31 @@ import {
   sceneDistanceToGridUnits
 } from "./movement-eligibility.mjs";
 import { addEngagementPartner } from "./engagement-links.mjs";
+import {
+  combatantForTokenDocument,
+  combatantValues,
+  tokenDocumentForCombatant
+} from "./combatant-token-resolution.mjs";
+import { runtimeSettings } from "../runtime-settings.mjs";
+import {
+  foundryMovementSummary,
+  storedMovementRoute,
+  storedMovementSummary
+} from "./movement-debug-reporting.mjs";
+import { notifyMovementPlanCaptured } from "./movement-capture-notifications.mjs";
 
 export { cleanMovementPoint, normalizeMovementRoute } from "./movement-route.mjs";
+export { tokenDocumentForCombatant } from "./combatant-token-resolution.mjs";
 
 const activeRuns = new Map();
 const movementRunLocks = new Map();
 const activeEngagementPairs = new Map();
 const movementRulerDrafts = new Map();
-const movementCaptureNotificationBatches = new Map();
 const MOVEMENT_RULER_CAPTURE_PATCH = Symbol.for("aov-skjaldborg.movement-ruler-capture");
 const DEFAULT_GRID_SIZE = 100;
 const DEFAULT_MOVEMENT_TICK_DELAY_MS = 250;
-const MOVEMENT_CAPTURE_NOTIFICATION_WINDOW_MS = 350;
 const MAX_BLOCKED_TICKS = 8;
+const DEFAULT_ADAPTIVE_CHECKPOINT_BATCH_SIZE = 1;
 const FRIENDLY_DISPOSITION = 1;
 const HOSTILE_DISPOSITION = -1;
 const DEFAULT_ENGAGEMENT_REACH_UNITS = 1;
@@ -60,55 +72,28 @@ function gridSize() {
 }
 
 /**
- * Batch movement-captured confirmations without flooding the UI during rapid
- * ruler corrections.
- *
- * @param {{combatId?: string|null, combatantId?: string|null, tokenId?: string|null}} detail Capture detail.
- * @returns {void}
- */
-function notifyMovementPlanCaptured(detail = {}) {
-  const notificationKey = detail.combatId || "no-combat";
-  const batch = movementCaptureNotificationBatches.get(notificationKey) ?? {
-    combatantIds: new Set(),
-    tokenIds: new Set(),
-    count: 0,
-    timer: null
-  };
-  batch.count += 1;
-  if (detail.combatantId) batch.combatantIds.add(detail.combatantId);
-  if (detail.tokenId) batch.tokenIds.add(detail.tokenId);
-  if (batch.timer) {
-    performanceDiagnostics.count("movement.capture.notification.suppressed", 1, {
-      combatId: detail.combatId ?? null,
-      combatantId: detail.combatantId ?? null,
-      tokenId: detail.tokenId ?? null
-    });
-    return;
-  }
-
-  batch.timer = globalThis.setTimeout(() => {
-    movementCaptureNotificationBatches.delete(notificationKey);
-    const combatantCount = Math.max(batch.combatantIds.size, batch.tokenIds.size, batch.count);
-    const message = combatantCount > 1
-      ? game.i18n.format("AOV_SKJALDBORG.MovementAutomation.PlansCaptured", { count: combatantCount })
-      : game.i18n.localize("AOV_SKJALDBORG.MovementAutomation.PlanCaptured");
-    ui.notifications.info(message);
-    performanceDiagnostics.count("movement.capture.notification.shown", 1, {
-      combatId: detail.combatId ?? null,
-      count: combatantCount
-    });
-  }, MOVEMENT_CAPTURE_NOTIFICATION_WINDOW_MS);
-
-  movementCaptureNotificationBatches.set(notificationKey, batch);
-}
-
-/**
  * Resolve the scene-unit distance represented by one grid space.
  *
  * @returns {number}
  */
 function gridDistance() {
   return Number(canvas.scene?.grid?.distance) || 1;
+}
+
+/**
+ * Resolve whether the active scene is explicitly gridless.
+ *
+ * Foundry stores scene grid types as CONST.GRID_TYPES values; GRIDLESS is 0
+ * in v14. Treat missing scene grid data as non-gridless so headless tests and
+ * non-canvas utility calls retain the square-grid fallback behavior.
+ *
+ * @returns {boolean}
+ */
+function isGridlessScene() {
+  const type = canvas?.scene?.grid?.type ?? canvas?.grid?.type;
+  const gridless = globalThis.CONST?.GRID_TYPES?.GRIDLESS;
+  if (gridless !== undefined && Number(type) === Number(gridless)) return true;
+  return String(type ?? "").toLowerCase() === "gridless";
 }
 
 /**
@@ -191,33 +176,58 @@ export function tokenSourceGridRect(document, sourcePoint = null) {
   const width = Math.max(1, Number(document?.width ?? document?._source?.width) || 1);
   const height = Math.max(1, Number(document?.height ?? document?._source?.height) || 1);
   const size = gridSize();
+
+  if (isGridlessScene()) {
+    const pixelWidth = width * size;
+    const pixelHeight = height * size;
+    return {
+      minX: origin.x,
+      minY: origin.y,
+      maxX: origin.x + pixelWidth,
+      maxY: origin.y + pixelHeight,
+      width: pixelWidth,
+      height: pixelHeight,
+      gridSize: size,
+      metric: "gridless-pixels"
+    };
+  }
+
   return {
     minX: Math.floor(origin.x / size),
     minY: Math.floor(origin.y / size),
     maxX: Math.ceil((origin.x + (width * size)) / size) - 1,
-    maxY: Math.ceil((origin.y + (height * size)) / size) - 1
+    maxY: Math.ceil((origin.y + (height * size)) / size) - 1,
+    gridSize: size,
+    metric: "grid-spaces"
   };
 }
 
+function axisGap(firstMin, firstMax, secondMin, secondMax) {
+  if (firstMax < secondMin) return secondMin - firstMax;
+  if (secondMax < firstMin) return firstMin - secondMax;
+  return 0;
+}
+
 /**
- * Measure occupied-grid separation. Diagonal adjacency counts as 1.
+ * Measure occupied-rectangle separation in engagement grid units.
  *
- * @param {object|null} first First occupied grid rectangle.
- * @param {object|null} second Second occupied grid rectangle.
+ * Square grids preserve the existing occupied-grid Chebyshev separation where
+ * diagonal adjacency counts as 1. Gridless scenes use source pixel rectangles
+ * and Euclidean edge-to-edge separation, preventing a token from being engaged
+ * merely because it shares or touches a coarse invisible grid cell.
+ *
+ * @param {object|null} first First occupied rectangle.
+ * @param {object|null} second Second occupied rectangle.
  * @returns {number}
  */
 export function measureOccupiedGridSeparation(first, second) {
   if (!first || !second) return Number.POSITIVE_INFINITY;
-  const gapX = first.maxX < second.minX
-    ? second.minX - first.maxX
-    : second.maxX < first.minX
-      ? first.minX - second.maxX
-      : 0;
-  const gapY = first.maxY < second.minY
-    ? second.minY - first.maxY
-    : second.maxY < first.minY
-      ? first.minY - second.maxY
-      : 0;
+  const gapX = axisGap(first.minX, first.maxX, second.minX, second.maxX);
+  const gapY = axisGap(first.minY, first.maxY, second.minY, second.maxY);
+  if (first.metric === "gridless-pixels" || second.metric === "gridless-pixels") {
+    const size = Math.max(1, Number(first.gridSize ?? second.gridSize) || gridSize());
+    return Math.hypot(gapX, gapY) / size;
+  }
   return Math.max(gapX, gapY);
 }
 
@@ -230,6 +240,190 @@ export function measureOccupiedGridSeparation(first, second) {
  */
 function gridRectsOverlap(first, second) {
   return measureOccupiedGridSeparation(first, second) === 0;
+}
+
+function expandEngagementRect(rect, reachUnits) {
+  if (!rect || !Number.isFinite(reachUnits)) return null;
+  const expansion = rect.metric === "gridless-pixels"
+    ? reachUnits * (Number(rect.gridSize) || gridSize())
+    : reachUnits;
+  return {
+    minX: rect.minX - expansion,
+    minY: rect.minY - expansion,
+    maxX: rect.maxX + expansion,
+    maxY: rect.maxY + expansion
+  };
+}
+
+function spatialCellSizeForSnapshot(snapshot) {
+  if (!snapshot?.gridless) return 1;
+  return Math.max(1, Math.round(Math.max(snapshot.gridSize, snapshot.maxReachUnits * snapshot.gridSize)));
+}
+
+function spatialCellRange(rect, cellSize) {
+  if (!rect || !Number.isFinite(cellSize) || cellSize <= 0) return null;
+  return {
+    minX: Math.floor(rect.minX / cellSize),
+    minY: Math.floor(rect.minY / cellSize),
+    maxX: Math.floor(rect.maxX / cellSize),
+    maxY: Math.floor(rect.maxY / cellSize)
+  };
+}
+
+function spatialCellKey(x, y) {
+  return `${x}:${y}`;
+}
+
+function indexRect(index, combatantId, rect, cellSize) {
+  const range = spatialCellRange(rect, cellSize);
+  if (!range) return false;
+  for (let x = range.minX; x <= range.maxX; x += 1) {
+    for (let y = range.minY; y <= range.maxY; y += 1) {
+      const key = spatialCellKey(x, y);
+      let bucket = index.get(key);
+      if (!bucket) {
+        bucket = new Set();
+        index.set(key, bucket);
+      }
+      bucket.add(combatantId);
+    }
+  }
+  return true;
+}
+
+function querySpatialIndex(index, rect, cellSize) {
+  const range = spatialCellRange(rect, cellSize);
+  if (!range) return [];
+  const ids = new Set();
+  for (let x = range.minX; x <= range.maxX; x += 1) {
+    for (let y = range.minY; y <= range.maxY; y += 1) {
+      const bucket = index.get(spatialCellKey(x, y));
+      if (!bucket) continue;
+      for (const id of bucket) ids.add(id);
+    }
+  }
+  return Array.from(ids);
+}
+
+function rectsUnion(first, second) {
+  if (!first || !second) return null;
+  return {
+    minX: Math.min(first.minX, second.minX),
+    minY: Math.min(first.minY, second.minY),
+    maxX: Math.max(first.maxX, second.maxX),
+    maxY: Math.max(first.maxY, second.maxY),
+    gridSize: first.gridSize ?? second.gridSize,
+    metric: first.metric ?? second.metric
+  };
+}
+
+function scanOpposingCandidatesForRect(snapshot, mover, rect, reachUnits = snapshot?.maxReachUnits) {
+  if (!snapshot || !mover?.id || !rect) return [];
+  const expanded = expandEngagementRect(rect, Number.isFinite(reachUnits) ? reachUnits : snapshot.maxReachUnits);
+  const allOpposing = () => snapshot.combatants.filter(candidate => {
+    if (!candidate || candidate.id === mover.id) return false;
+    return areOpposingDispositions(
+      snapshot.dispositionByCombatantId.get(mover.id),
+      snapshot.dispositionByCombatantId.get(candidate.id)
+    );
+  });
+  if (!expanded || snapshot.fallback || !snapshot.spatialIndex?.size) return allOpposing();
+  const ids = querySpatialIndex(snapshot.spatialIndex, expanded, snapshot.cellSize);
+  return ids
+    .filter(id => id !== mover.id)
+    .map(id => snapshot.combatantById.get(id))
+    .filter(candidate => {
+      if (!candidate) return false;
+      return areOpposingDispositions(
+        snapshot.dispositionByCombatantId.get(mover.id),
+        snapshot.dispositionByCombatantId.get(candidate.id)
+      );
+    });
+}
+
+/**
+ * Build a scan-local engagement snapshot and spatial candidate index.
+ *
+ * All state, token, reach, disposition, and geometry lookups are performed
+ * once per capable combatant for the current engagement pass. The index only
+ * narrows possible opposing pairs; exact reach and egress rules remain the
+ * final authority before engagement is written.
+ *
+ * @param {Combat|null} combat Active combat.
+ * @param {{includeStationary?: boolean}} [options={}] Scan options.
+ * @returns {object}
+ */
+export function buildEngagementSnapshot(combat, { includeStationary = false } = {}) {
+  const combatants = combatantValues(combat).filter(AoVAdapter.isCombatantCapable.bind(AoVAdapter));
+  const stateById = new Map();
+  const tokenByCombatantId = new Map();
+  const rectByCombatantId = new Map();
+  const reachByCombatantId = new Map();
+  const dispositionByCombatantId = new Map();
+  const combatantById = new Map();
+  const movingCombatantIds = new Set();
+  const gridless = isGridlessScene();
+  const size = gridSize();
+  let maxReachUnits = DEFAULT_ENGAGEMENT_REACH_UNITS;
+  let invalidGeometry = false;
+
+  for (const combatant of combatants) {
+    combatantById.set(combatant.id, combatant);
+    const state = getCombatantState(combatant);
+    stateById.set(combatant.id, state);
+    if (state.movement?.planStatus === MOVEMENT_PLAN_STATUS.EXECUTING) movingCombatantIds.add(combatant.id);
+    const token = tokenDocumentForCombatant(combatant);
+    tokenByCombatantId.set(combatant.id, token);
+    dispositionByCombatantId.set(combatant.id, token?.disposition);
+    const rect = tokenSourceGridRect(token);
+    if (!rect) invalidGeometry = true;
+    else rectByCombatantId.set(combatant.id, rect);
+    const reach = reachUnitsForCombatant(combatant);
+    reachByCombatantId.set(combatant.id, reach);
+    if (Number.isFinite(reach)) maxReachUnits = Math.max(maxReachUnits, reach);
+  }
+
+  const spatialIndex = new Map();
+  const cellSize = spatialCellSizeForSnapshot({ gridless, gridSize: size, maxReachUnits });
+  let indexedCombatants = 0;
+  try {
+    for (const combatant of combatants) {
+      const rect = rectByCombatantId.get(combatant.id);
+      if (!rect) continue;
+      if (indexRect(spatialIndex, combatant.id, rect, cellSize)) indexedCombatants += 1;
+    }
+  }
+  catch (err) {
+    warn(err);
+    invalidGeometry = true;
+    spatialIndex.clear();
+  }
+
+  return {
+    combat,
+    combatants,
+    combatantById,
+    stateById,
+    tokenByCombatantId,
+    rectByCombatantId,
+    reachByCombatantId,
+    dispositionByCombatantId,
+    movingCombatantIds,
+    maxReachUnits,
+    gridless,
+    gridSize: size,
+    cellSize,
+    spatialIndex,
+    indexedCombatants,
+    includeStationary,
+    fallback: invalidGeometry || indexedCombatants < rectByCombatantId.size,
+    candidateCombatantsFor(mover) {
+      return scanOpposingCandidatesForRect(this, mover, rectByCombatantId.get(mover?.id), maxReachUnits);
+    },
+    candidateCombatantsForRect(mover, rect, reachUnits = maxReachUnits) {
+      return scanOpposingCandidatesForRect(this, mover, rect, reachUnits);
+    }
+  };
 }
 
 /**
@@ -606,68 +800,6 @@ function annotateMovementPlan(plan, metadata) {
 }
 
 /**
- * Read the stored module route from a combatant movement flag.
- *
- * `movement.route` is canonical. `movement.waypoints` remains a compatibility
- * alias for movement plans written by earlier builds.
- *
- * @param {object|null} movement Combatant movement state.
- * @returns {object[]}
- */
-function storedMovementRoute(movement) {
-  if (Array.isArray(movement?.route) && movement.route.length) return movement.route;
-  return Array.isArray(movement?.waypoints) ? movement.waypoints : [];
-}
-
-/**
- * Return compact route-state data for movement diagnostics.
- *
- * @param {object|null} movement Combatant movement state.
- * @returns {object|null}
- */
-function storedMovementSummary(movement) {
-  if (!movement || typeof movement !== "object") return null;
-  const route = storedMovementRoute(movement);
-  return {
-    planStatus: movement.planStatus ?? "",
-    draft: movement.draft === true,
-    routeId: movement.routeId ?? "",
-    routeRevision: Number(movement.routeRevision) || 0,
-    captureSource: movement.captureSource ?? "",
-    origin: cleanMovementPoint(movement.origin),
-    destination: cleanMovementPoint(movement.destination),
-    routeCount: route.length,
-    distance: Number(movement.distance) || 0,
-    stoppedReason: movement.stoppedReason ?? ""
-  };
-}
-
-/**
- * Return compact Foundry movement-shape diagnostics without preserving stale
- * history arrays in high-frequency console logs.
- *
- * @param {object|null} movement Foundry movement-like object.
- * @returns {object|null}
- */
-function foundryMovementSummary(movement) {
-  if (!movement || typeof movement !== "object") return null;
-  const count = value => Array.isArray(value?.waypoints) ? value.waypoints.length : 0;
-  return {
-    id: movement.id ?? null,
-    state: movement.state ?? null,
-    method: movement.method ?? null,
-    destination: cleanMovementPoint(movement.destination),
-    routeCount: Array.isArray(movement.route) ? movement.route.length : 0,
-    waypointCount: Array.isArray(movement.waypoints) ? movement.waypoints.length : 0,
-    pathCount: Array.isArray(movement.path) ? movement.path.length : 0,
-    pendingWaypointCount: count(movement.pending),
-    passedWaypointCount: count(movement.passed),
-    unrecordedHistoryWaypointCount: count(movement.history?.unrecorded),
-    recordedHistoryWaypointCount: count(movement.history?.recorded)
-  };
-}
-
-/**
  * Bank a newly created explicit ruler waypoint as a draft movement revision.
  *
  * Draft revisions are persisted so the HUD and Combatant flag reflect every
@@ -792,8 +924,9 @@ function bankRulerMovementDraft(document, rulerData, requestGm) {
     combatId: decision.combat.id,
     combatantId: decision.combatant.id,
     movement: draftPlan
-  }).then(() => {
-    RenderCoordinator.invalidateCombatTracker("movement-plan-recorded");
+  }).then(result => {
+    if (result?.accepted === false) return;
+    RenderCoordinator.invalidateCombatTracker("movement-plan-recorded", { combatantIds: [decision.combatant.id].filter(Boolean), parts: ["rows"] });
   }).catch(warn);
 }
 
@@ -844,7 +977,10 @@ function restoreCancelledRulerDraft(draft, requestGm) {
     combatId: combat.id,
     combatantId: combatant.id,
     movement: restored
-  }).then(() => RenderCoordinator.invalidateCombatTracker("movement-plan-cancelled")).catch(warn);
+  }).then(result => {
+    if (result?.accepted === false) return;
+    RenderCoordinator.invalidateCombatTracker("movement-plan-cancelled", { combatantIds: [combatant?.id].filter(Boolean), parts: ["rows"] });
+  }).catch(warn);
 }
 
 /**
@@ -1105,48 +1241,6 @@ export function areOpposingDispositions(a, b) {
     || (Number(a) === hostile && Number(b) === friendly);
 }
 
-/**
- * Resolve a TokenDocument for a combatant.
- *
- * @param {Combatant|object|null} combatant Foundry Combatant.
- * @returns {TokenDocument|object|null}
- */
-function tokenDocumentForCombatant(combatant) {
-  return combatant?.token?.object?.document
-    ?? combatant?.token?.document
-    ?? combatant?.token
-    ?? canvas.scene?.tokens?.get?.(combatant?.tokenId)
-    ?? null;
-}
-
-/**
- * Iterate combatants from either Foundry Collections or plain Maps.
- *
- * @param {Combat|null|undefined} combat Combat document.
- * @returns {Combatant[]}
- */
-function combatantValues(combat) {
-  return Array.from(combat?.combatants ?? []).map(entry => Array.isArray(entry) ? entry[1] : entry);
-}
-
-/**
- * Resolve a combatant for a TokenDocument.
- *
- * @param {Combat|null} combat Active combat.
- * @param {TokenDocument|object|null} document Token document.
- * @returns {Combatant|null}
- */
-function combatantForTokenDocument(combat, document) {
-  const tokenId = document?.id ?? document?._id;
-  if (!combat || !tokenId) return null;
-  return combatantValues(combat).find(combatant => {
-    return combatant.tokenId === tokenId
-      || combatant.token?.id === tokenId
-      || combatant.token?.object?.id === tokenId
-      || combatant.token?.object?.document?.id === tokenId;
-  }) ?? null;
-}
-
 const ENGAGEMENT_EGRESS_ACTIVE = "active";
 
 function activeEgressPartnerIds(state) {
@@ -1247,24 +1341,32 @@ async function finalizeMovementEgresses(combat) {
         continue;
       }
 
-      const threshold = Math.max(reachUnitsForCombatant(combatant), reachUnitsForCombatant(partner));
       const separation = measureOccupiedGridSeparation(rect, partnerRect);
+      const latestState = getCombatantState(combatant);
+      const latestPartnerState = getCombatantState(partner);
+      const pairEligibility = pairCanEstablishEngagement(combat, combatant, latestState, partner, latestPartnerState);
+      const { rawThreshold, effectiveThreshold, threshold } = effectiveEngagementReachThreshold(
+        reachUnitsForCombatant(combatant),
+        reachUnitsForCombatant(partner),
+        pairEligibility
+      );
       if (!Number.isFinite(separation) || !Number.isFinite(threshold) || separation > threshold) {
         if (await clearSeparatedEgressPair(combatant, partner, "egress-final-separated")) resolved += 1;
         continue;
       }
 
-      const latestState = getCombatantState(combatant);
-      const latestPartnerState = getCombatantState(partner);
-      const pairEligibility = pairCanEstablishEngagement(combat, combatant, latestState, partner, latestPartnerState);
       if (!pairEligibility.canEngage) {
         movementDebug(MOVEMENT_DEBUG_CATEGORIES.ENGAGEMENT, "egress-final-still-in-reach-but-cannot-engage", () => ({
           combatantId: combatant.id,
           partnerId: partner.id,
           separation,
+          rawThreshold,
+          effectiveThreshold,
           threshold,
           combatantEligibility: pairEligibility.firstEligibility,
-          partnerEligibility: pairEligibility.secondEligibility
+          partnerEligibility: pairEligibility.secondEligibility,
+          eligibleCombatantIds: pairEligibility.eligibleCombatantIds,
+          ineligibleCombatantIds: pairEligibility.ineligibleCombatantIds
         }), { runId: run?.runId, combatId: combat?.id, combatantId: combatant.id, level: MOVEMENT_DEBUG_LEVELS.VERBOSE });
         if (await clearSeparatedEgressPair(combatant, partner, "egress-final-half-move-ineligible")) resolved += 1;
         continue;
@@ -1274,16 +1376,20 @@ async function finalizeMovementEgresses(combat) {
         combatantId: combatant.id,
         partnerId: partner.id,
         separation,
+        rawThreshold,
+        effectiveThreshold,
         threshold,
         combatantEligibility: pairEligibility.firstEligibility,
-        partnerEligibility: pairEligibility.secondEligibility
+        partnerEligibility: pairEligibility.secondEligibility,
+        eligibleCombatantIds: pairEligibility.eligibleCombatantIds,
+        ineligibleCombatantIds: pairEligibility.ineligibleCombatantIds
       }), { runId: run?.runId, combatId: combat?.id, combatantId: combatant.id, level: MOVEMENT_DEBUG_LEVELS.VERBOSE });
       await engagePair(combat, combatant, partner);
       if (await clearSeparatedEgressPair(combatant, partner, "egress-final-reengaged")) resolved += 1;
     }
   }
 
-  if (resolved) RenderCoordinator.invalidateCombatTracker("movement-egress-finalized");
+  if (resolved) RenderCoordinator.invalidateCombatTracker("movement-egress-finalized", { parts: ["rows"] });
   return resolved;
 }
 
@@ -1402,6 +1508,16 @@ async function showScrollingText(document, text) {
   });
 }
 
+function movementStatusStatePatch(combatant, status, patch = {}, state = getCombatantState(combatant)) {
+  return {
+    movement: {
+      ...state.movement,
+      planStatus: status,
+      ...patch
+    }
+  };
+}
+
 /**
  * Mark a combatant's movement plan with a new status.
  *
@@ -1411,14 +1527,7 @@ async function showScrollingText(document, text) {
  * @returns {Promise<unknown>}
  */
 async function markMovementStatus(combatant, status, patch = {}) {
-  const state = getCombatantState(combatant);
-  return updateCombatantState(combatant, {
-    movement: {
-      ...state.movement,
-      planStatus: status,
-      ...patch
-    }
-  });
+  return updateCombatantState(combatant, movementStatusStatePatch(combatant, status, patch));
 }
 
 /**
@@ -1486,13 +1595,11 @@ function currentMovementGridUnits(combat, combatant, state) {
 }
 
 /**
- * Determine whether a combatant can participate in a newly established
- * engagement now.
+ * Determine whether a combatant can establish a newly engaged pair now.
  *
- * RAW movement eligibility is per combatant, not per pair. A combatant that
- * has exceeded the engagement movement limit cannot be pulled into a new
- * reciprocal engagement by an otherwise eligible opponent. Existing
- * engagements and explicit disengagement/egress flows are handled elsewhere.
+ * RAW movement eligibility is directional. A combatant that has exceeded the
+ * engagement movement limit cannot establish engagement, but can still be
+ * engaged by an eligible opponent.
  *
  * @param {Combat|null} combat Active combat.
  * @param {Combatant|object|null} combatant Combatant document.
@@ -1512,14 +1619,49 @@ function combatantEngagementEligibility(combat, combatant, state) {
 function pairCanEstablishEngagement(combat, first, firstState, second, secondState) {
   const firstEligibility = combatantEngagementEligibility(combat, first, firstState);
   const secondEligibility = combatantEngagementEligibility(combat, second, secondState);
-  const blockingCombatantIds = [];
-  if (!firstEligibility.canEngage && first?.id) blockingCombatantIds.push(first.id);
-  if (!secondEligibility.canEngage && second?.id) blockingCombatantIds.push(second.id);
+  const eligibleCombatantIds = [];
+  const ineligibleCombatantIds = [];
+  if (first?.id) (firstEligibility.canEngage ? eligibleCombatantIds : ineligibleCombatantIds).push(first.id);
+  if (second?.id) (secondEligibility.canEngage ? eligibleCombatantIds : ineligibleCombatantIds).push(second.id);
   return {
-    canEngage: firstEligibility.canEngage && secondEligibility.canEngage,
+    canEngage: firstEligibility.canEngage || secondEligibility.canEngage,
     firstEligibility,
     secondEligibility,
-    blockingCombatantIds
+    eligibleCombatantIds,
+    ineligibleCombatantIds
+  };
+}
+
+/**
+ * Resolve the effective reach threshold for newly establishing engagement.
+ *
+ * Reach is directional once half-MOV eligibility is considered. A combatant
+ * that cannot establish engagement this round can still be engaged, but their
+ * weapon reach must not extend the distance at which the eligible opponent
+ * establishes the pair.
+ *
+ * @param {number} firstReach First combatant reach.
+ * @param {number} secondReach Second combatant reach.
+ * @param {object} pairEligibility Pair eligibility detail.
+ * @returns {{rawThreshold: number, effectiveThreshold: number, threshold: number}}
+ */
+export function effectiveEngagementReachThreshold(firstReach, secondReach, pairEligibility) {
+  const first = Number(firstReach);
+  const second = Number(secondReach);
+  const rawThreshold = Math.max(first, second);
+  let effectiveThreshold = Number.NaN;
+  if (pairEligibility?.firstEligibility?.canEngage === true && Number.isFinite(first)) {
+    effectiveThreshold = first;
+  }
+  if (pairEligibility?.secondEligibility?.canEngage === true && Number.isFinite(second)) {
+    effectiveThreshold = Number.isFinite(effectiveThreshold)
+      ? Math.max(effectiveThreshold, second)
+      : second;
+  }
+  return {
+    rawThreshold,
+    effectiveThreshold,
+    threshold: effectiveThreshold
   };
 }
 
@@ -1529,7 +1671,7 @@ function pairCanEstablishEngagement(combat, first, firstState, second, secondSta
  * @returns {number}
  */
 function movementTickDelayMs() {
-  const value = Number(game.settings.get(MODULE_ID, "movementTickDelayMs"));
+  const value = Number(runtimeSettings.movementTickDelayMs);
   if (!Number.isFinite(value)) return DEFAULT_MOVEMENT_TICK_DELAY_MS;
   return Math.max(0, Math.min(1000, Math.round(value)));
 }
@@ -1543,6 +1685,59 @@ async function waitMovementTickDelay() {
   const delay = movementTickDelayMs();
   if (delay <= 0) return;
   await new Promise(resolve => globalThis.setTimeout(resolve, delay));
+}
+
+function adaptiveCheckpointBatchingEnabled() {
+  return runtimeSettings.adaptiveCheckpointBatching === true;
+}
+
+function adaptiveCheckpointMaxBatchSize() {
+  const value = Number(runtimeSettings.adaptiveCheckpointMaxBatchSize);
+  if (!Number.isFinite(value)) return DEFAULT_ADAPTIVE_CHECKPOINT_BATCH_SIZE;
+  return Math.max(1, Math.min(5, Math.round(value)));
+}
+
+function checkpointRect(context, waypoint) {
+  return tokenSourceGridRect(context?.document, waypoint);
+}
+
+function tokenCurrentSourcePoint(document) {
+  return cleanMovementPoint(document?._source) ?? cleanMovementPoint(document);
+}
+
+function batchSegmentRect(context, fromPoint, toPoint) {
+  const fromRect = checkpointRect(context, fromPoint);
+  const toRect = checkpointRect(context, toPoint);
+  return rectsUnion(fromRect, toRect);
+}
+
+function checkpointCouldEnterEngagement(context, fromPoint, waypoint, snapshot) {
+  if (!context?.combatant || !snapshot || !waypoint) return true;
+  const mover = context.combatant;
+  const moverReach = snapshot.reachByCombatantId.get(mover.id);
+  if (!Number.isFinite(moverReach)) return true;
+  const destinationRect = checkpointRect(context, waypoint);
+  const sweptRect = batchSegmentRect(context, fromPoint, waypoint);
+  if (!destinationRect || !sweptRect) return true;
+  const candidates = snapshot.candidateCombatantsForRect(mover, sweptRect, snapshot.maxReachUnits);
+  for (const other of candidates) {
+    if (!other || other.id === mover.id) continue;
+    const otherRect = snapshot.rectByCombatantId.get(other.id);
+    if (!otherRect) return true;
+    const otherReach = snapshot.reachByCombatantId.get(other.id);
+    const moverState = snapshot.stateById.get(mover.id) ?? getCombatantState(mover);
+    const otherState = snapshot.stateById.get(other.id) ?? getCombatantState(other);
+    const pairEligibility = pairCanEstablishEngagement(snapshot.combat, mover, moverState, other, otherState);
+    const { threshold } = effectiveEngagementReachThreshold(moverReach, otherReach, pairEligibility);
+    if (!Number.isFinite(threshold)) return true;
+    const finalSeparation = measureOccupiedGridSeparation(destinationRect, otherRect);
+    if (Number.isFinite(finalSeparation) && finalSeparation <= threshold) return true;
+    const sweptSeparation = measureOccupiedGridSeparation(sweptRect, otherRect);
+    if (!Number.isFinite(sweptSeparation) || sweptSeparation <= threshold) return true;
+    const otherMoving = snapshot.stateById.get(other.id)?.movement?.planStatus === MOVEMENT_PLAN_STATUS.EXECUTING;
+    if (otherMoving && sweptSeparation <= threshold + 1) return true;
+  }
+  return false;
 }
 
 /**
@@ -1561,9 +1756,9 @@ function combatantOrderIndex(combatants, combatant) {
 }
 
 /**
- * Mark combatants as stopped in the in-memory run before any document writes.
+ * Mark executing combatants as stopped in the in-memory run before any document writes.
  * This prevents a following checkpoint from being submitted while engagement
- * flags and Active Effects are still being persisted.
+ * flags and Active Effects are still being persisted for the engaged pair.
  *
  * @param {Combat|null} combat Active combat.
  * @param {...(Combatant|object|null)} combatants Combatants to stop.
@@ -1574,7 +1769,9 @@ function markRunCombatantsStopped(combat, ...combatants) {
   if (!run) return;
   run.stoppedCombatantIds ??= new Set();
   for (const combatant of combatants) {
-    if (combatant?.id) run.stoppedCombatantIds.add(combatant.id);
+    if (!combatant?.id) continue;
+    if (getCombatantState(combatant).movement?.planStatus !== MOVEMENT_PLAN_STATUS.EXECUTING) continue;
+    run.stoppedCombatantIds.add(combatant.id);
   }
 }
 
@@ -1595,7 +1792,16 @@ function isRunCombatantStopped(combat, combatant) {
  * @param {Combat|null} combat Active combat.
  * @returns {{combatant: object, document: object, rect: object}[]}
  */
-function currentCombatOccupancy(combat) {
+function currentCombatOccupancy(combat, scan = null) {
+  if (scan?.combatants && scan?.tokenByCombatantId && scan?.rectByCombatantId) {
+    return scan.combatants
+      .map(combatant => ({
+        combatant,
+        document: scan.tokenByCombatantId.get(combatant.id),
+        rect: scan.rectByCombatantId.get(combatant.id)
+      }))
+      .filter(entry => entry.document && entry.rect);
+  }
   return combatantValues(combat)
     .filter(AoVAdapter.isCombatantCapable.bind(AoVAdapter))
     .map(combatant => {
@@ -1603,6 +1809,12 @@ function currentCombatOccupancy(combat) {
       return { combatant, document, rect: tokenSourceGridRect(document) };
     })
     .filter(entry => entry.document && entry.rect);
+}
+
+function movementFootprintsOppose(context, blockerCombatant, blockerDocument = null) {
+  const moverDisposition = context?.document?.disposition;
+  const blockerDisposition = blockerDocument?.disposition ?? tokenDocumentForCombatant(blockerCombatant)?.disposition;
+  return areOpposingDispositions(moverDisposition, blockerDisposition);
 }
 
 /**
@@ -1619,10 +1831,12 @@ function movementFootprintBlocker(context, waypoint, occupancy, reservations) {
   if (!rect) return null;
   for (const entry of occupancy) {
     if (entry.combatant?.id === context.combatant?.id) continue;
+    if (!movementFootprintsOppose(context, entry.combatant, entry.document)) continue;
     if (gridRectsOverlap(rect, entry.rect)) return { type: "occupied", rect, blocker: entry.combatant };
   }
   for (const reservation of reservations) {
     if (reservation.combatant?.id === context.combatant?.id) continue;
+    if (!movementFootprintsOppose(context, reservation.combatant, reservation.document)) continue;
     if (gridRectsOverlap(rect, reservation.rect)) return { type: "reserved", rect, blocker: reservation.combatant };
   }
   return null;
@@ -1641,6 +1855,14 @@ function movementCheckpointBlocker(context, checkpoint, occupancy, reservations)
   return movementFootprintBlocker(context, checkpoint, occupancy, reservations);
 }
 
+function movementBatchBlocker(context, waypoints, occupancy, reservations) {
+  for (const checkpoint of waypoints ?? []) {
+    const blocker = movementCheckpointBlocker(context, checkpoint, occupancy, reservations);
+    if (blocker) return { ...blocker, checkpoint };
+  }
+  return null;
+}
+
 /**
  * Reserve the occupied footprint for one checkpoint.
  *
@@ -1652,8 +1874,17 @@ function movementCheckpointBlocker(context, checkpoint, occupancy, reservations)
 function reserveMovementCheckpoint(context, checkpoint, reservations) {
   const rect = tokenSourceGridRect(context.document, checkpoint);
   if (!rect) return null;
-  reservations.push({ combatant: context.combatant, rect });
+  reservations.push({ combatant: context.combatant, document: context.document, rect });
   return { checkpoint, rect };
+}
+
+function reserveMovementBatch(context, waypoints, reservations) {
+  const reserved = [];
+  for (const checkpoint of waypoints ?? []) {
+    const footprint = reserveMovementCheckpoint(context, checkpoint, reservations);
+    if (footprint) reserved.push(footprint);
+  }
+  return reserved;
 }
 
 /**
@@ -1683,7 +1914,8 @@ async function stopMovementContext(context, reason) {
  */
 async function selectMovementTickOperations(combat, contexts) {
   const run = activeRuns.get(combat?.id);
-  const occupancy = currentCombatOccupancy(combat);
+  const engagementScan = buildEngagementSnapshot(combat, { includeStationary: true });
+  const occupancy = currentCombatOccupancy(combat, engagementScan);
   const reservations = [];
   const operations = [];
   const blocked = [];
@@ -1696,13 +1928,13 @@ async function selectMovementTickOperations(combat, contexts) {
   }), { runId: run?.runId, tick: run?.tick, combatId: combat?.id, level: MOVEMENT_DEBUG_LEVELS.TRACE });
 
   for (const context of contexts) {
-    const waypoints = nextMovementWaypoints(combat, context);
+    const waypoints = nextMovementWaypoints(combat, context, engagementScan);
     if (!waypoints.length) {
       if (context.status === MOVEMENT_PLAN_STATUS.EXECUTING) await completeMovementContext(context);
       continue;
     }
-    const [waypoint] = waypoints;
-    const blocker = movementCheckpointBlocker(context, waypoint, occupancy, reservations);
+    const waypoint = waypoints[0];
+    const blocker = movementBatchBlocker(context, waypoints, occupancy, reservations);
     if (blocker) {
       context.blockedTicks = Number(context.blockedTicks ?? 0) + 1;
       blocked.push({ context, waypoint, blocker });
@@ -1728,7 +1960,7 @@ async function selectMovementTickOperations(combat, contexts) {
       });
       continue;
     }
-    const reservedFootprint = reserveMovementCheckpoint(context, waypoint, reservations);
+    const reservedFootprint = reserveMovementBatch(context, waypoints, reservations);
     context.blockedTicks = 0;
     operations.push({ context, waypoints });
     movementDebug(MOVEMENT_DEBUG_CATEGORIES.SCHEDULER, "checkpoint-reserved", () => ({
@@ -1787,14 +2019,18 @@ async function selectMovementTickOperations(combat, contexts) {
 }
 
 /**
- * Mark two combatants engaged and stop any executing movement.
+ * Persist an engaged pair and stop only executing members of that pair.
+ *
+ * This is the scheduler-critical part of engagement resolution. Presentation
+ * side effects are deliberately scheduled after this commit so movement ticks
+ * are not blocked by ActiveEffect writes, tracker rendering, or scrolling text.
  *
  * @param {Combat} combat Active combat.
  * @param {Combatant} first First combatant.
  * @param {Combatant} second Second combatant.
- * @returns {Promise<void>}
+ * @returns {Promise<object|null>}
  */
-async function engagePair(combat, first, second) {
+async function commitEngagementPair(combat, first, second) {
   const run = activeRuns.get(combat?.id);
   const firstStateBefore = getCombatantState(first);
   const secondStateBefore = getCombatantState(second);
@@ -1806,7 +2042,7 @@ async function engagePair(combat, first, second) {
       first: first?.id,
       second: second?.id
     }), { runId: run?.runId, tick: run?.tick, combatId: combat?.id, level: MOVEMENT_DEBUG_LEVELS.VERBOSE });
-    return;
+    return null;
   }
 
   const pairs = [
@@ -1814,42 +2050,16 @@ async function engagePair(combat, first, second) {
     [second, first]
   ];
 
-  // Latch both participants before stopMovement or any awaited persistence.
+  // Latch executing pair members before any awaited persistence.
   markRunCombatantsStopped(combat, first, second);
   movementDebug(MOVEMENT_DEBUG_CATEGORIES.ENGAGEMENT, "engage-pair-latched", () => ({
     first: first?.id,
     second: second?.id
   }), { runId: run?.runId, tick: run?.tick, combatId: combat?.id });
 
-  /*
-   * Request interruption before any awaited work. Foundry only permits the
-   * initiating user to stop movement, and only while a movement is active.
-   * The module's authoritative execution now advances one checkpoint at a
-   * time, so this call is a defensive interruption for a checkpoint currently
-   * being animated rather than the primary stopping mechanism.
-   */
-  for (const [combatant] of pairs) {
-    const state = getCombatantState(combatant);
-    if (state.movement?.planStatus !== MOVEMENT_PLAN_STATUS.EXECUTING) continue;
-    const document = tokenDocumentForCombatant(combatant);
-    try {
-      document?.stopMovement?.();
-      movementDebug(MOVEMENT_DEBUG_CATEGORIES.STOP, "stop-movement-requested", () => ({
-        combatantId: combatant?.id,
-        tokenId: document?.id ?? document?._id ?? null,
-        reason: "engagement"
-      }), { runId: run?.runId, tick: run?.tick, combatId: combat?.id, combatantId: combatant?.id, tokenId: document?.id ?? document?._id ?? null });
-    }
-    catch (err) {
-      warn(err);
-      movementDebugWarn(MOVEMENT_DEBUG_CATEGORIES.STOP, "stop-movement-error", () => ({
-        combatantId: combatant?.id,
-        error: String(err?.message ?? err)
-      }), { runId: run?.runId, tick: run?.tick, combatId: combat?.id, combatantId: combatant?.id });
-    }
-  }
-
-  await Promise.all(pairs.map(async ([combatant, partner]) => {
+  const engagementWrites = [];
+  const postWriteEffects = [];
+  for (const [combatant, partner] of pairs) {
     const document = tokenDocumentForCombatant(combatant);
     const state = getCombatantState(combatant);
     const wasExecuting = state.movement?.planStatus === MOVEMENT_PLAN_STATUS.EXECUTING;
@@ -1864,7 +2074,7 @@ async function engagePair(combat, first, second) {
       reason: "opposing-reach"
     };
 
-    await updateCombatantState(combatant, {
+    engagementWrites.push([combatant, {
       movement: {
         ...state.movement,
         distance: Number.isFinite(distance) ? distance : state.movement?.distance,
@@ -1873,7 +2083,37 @@ async function engagePair(combat, first, second) {
         stoppedReason: wasExecuting ? "engaged" : state.movement?.stoppedReason
       },
       engagement
-    });
+    }]);
+    postWriteEffects.push({ combatant, document, partner, wasExecuting, distance, engagement });
+  }
+
+  await updateCombatantStates(combat, engagementWrites, { [MODULE_ID]: { reason: "engagement-pair" } });
+  performanceDiagnostics.count("engagement.state.batch.write", 1, {
+    combatId: combat?.id ?? null,
+    combatantIds: postWriteEffects.map(effect => effect.combatant?.id ?? null)
+  });
+
+  return {
+    combat,
+    first,
+    second,
+    runId: run?.runId ?? null,
+    tick: run?.tick ?? null,
+    effects: postWriteEffects
+  };
+}
+
+/**
+ * Run non-authoritative presentation work for a committed engagement pair.
+ *
+ * @param {object|null} commit Engagement commit detail.
+ * @returns {Promise<void>}
+ */
+async function runEngagementPairSideEffects(commit) {
+  if (!commit) return;
+  const { combat, first, second, runId, tick, effects } = commit;
+  const visualSyncs = [];
+  for (const { combatant, document, partner, wasExecuting, distance, engagement } of effects) {
     movementDebug(MOVEMENT_DEBUG_CATEGORIES.ENGAGEMENT, "engagement-state-written", () => ({
       combatantId: combatant?.id,
       partnerId: partner?.id,
@@ -1881,16 +2121,71 @@ async function engagePair(combat, first, second) {
       distance,
       movement: getCombatantState(combatant).movement,
       engagement
-    }), { runId: run?.runId, tick: run?.tick, combatId: combat?.id, combatantId: combatant?.id, level: MOVEMENT_DEBUG_LEVELS.VERBOSE });
-    await syncEngagedStatusEffect(combatant, engagement, combat);
-    await showScrollingText(document, game.i18n.localize("AOV_SKJALDBORG.MovementAutomation.Engaged"));
-  }));
+    }), { runId, tick, combatId: combat?.id, combatantId: combatant?.id, level: MOVEMENT_DEBUG_LEVELS.VERBOSE });
+    visualSyncs.push(syncEngagementVisuals(combatant, engagement, combat));
+    void showScrollingText(document, game.i18n.localize("AOV_SKJALDBORG.MovementAutomation.Engaged")).catch(error => {
+      warn(error);
+      movementDebugWarn(MOVEMENT_DEBUG_CATEGORIES.ENGAGEMENT, "engagement-scrolling-text-failed", () => ({
+        combatId: combat?.id ?? null,
+        combatantId: combatant?.id ?? null,
+        tokenId: document?.id ?? document?._id ?? null,
+        error: String(error?.message ?? error)
+      }), { runId, tick, combatId: combat?.id ?? null, combatantId: combatant?.id ?? null });
+    });
+  }
+  const visualResults = await Promise.allSettled(visualSyncs);
+  for (const result of visualResults) {
+    if (result.status !== "rejected") continue;
+    warn(result.reason);
+    movementDebugWarn(MOVEMENT_DEBUG_CATEGORIES.ENGAGEMENT, "engagement-visual-sync-failed", () => ({
+      combatId: combat?.id ?? null,
+      first: first?.id ?? null,
+      second: second?.id ?? null,
+      error: String(result.reason?.message ?? result.reason)
+    }), { runId, tick, combatId: combat?.id ?? null });
+  }
 
-  RenderCoordinator.invalidateCombatTracker("movement-engagement");
+  RenderCoordinator.invalidateCombatTracker("movement-engagement", {
+    combatantIds: [first?.id, second?.id].filter(Boolean),
+    parts: ["rows"]
+  });
   movementDebug(MOVEMENT_DEBUG_CATEGORIES.ENGAGEMENT, "engaged-movement-pair", () => ({
     first: first?.id,
     second: second?.id
-  }), { runId: run?.runId, tick: run?.tick, combatId: combat?.id });
+  }), { runId, tick, combatId: combat?.id });
+}
+
+/**
+ * Schedule non-blocking engagement presentation work.
+ *
+ * @param {object|null} commit Engagement commit detail.
+ * @returns {void}
+ */
+function scheduleEngagementPairSideEffects(commit) {
+  if (!commit) return;
+  queueMicrotask(() => {
+    void runEngagementPairSideEffects(commit).catch(error => {
+      warn(error);
+      movementDebugWarn(MOVEMENT_DEBUG_CATEGORIES.ENGAGEMENT, "engagement-side-effects-failed", () => ({
+        combatId: commit.combat?.id ?? null,
+        first: commit.first?.id ?? null,
+        second: commit.second?.id ?? null
+      }), { runId: commit.runId, tick: commit.tick, combatId: commit.combat?.id ?? null });
+    });
+  });
+}
+
+/**
+ * Mark two combatants engaged and schedule presentation work asynchronously.
+ *
+ * @param {Combat} combat Active combat.
+ * @param {Combatant} first First combatant.
+ * @param {Combatant} second Second combatant.
+ * @returns {Promise<void>}
+ */
+async function engagePair(combat, first, second) {
+  const commit = await commitEngagementPair(combat, first, second);
+  scheduleEngagementPairSideEffects(commit);
 }
 
 /**
@@ -1909,11 +2204,15 @@ async function engagePair(combat, first, second) {
  */
 export async function checkMovementEngagements(combat, { includeStationary = false, reason = "movement-contact" } = {}) {
   if (!combat) return 0;
+  const scanStartedAt = globalThis.performance?.now?.() ?? Date.now();
   const run = activeRuns.get(combat?.id);
-  const combatants = combatantValues(combat).filter(AoVAdapter.isCombatantCapable.bind(AoVAdapter));
-  const reachByCombatantId = new Map(combatants.map(combatant => [combatant.id, reachUnitsForCombatant(combatant)]));
+  const snapshot = buildEngagementSnapshot(combat, { includeStationary });
+  const { combatants } = snapshot;
   const candidates = [];
   const stats = {
+    combatants: combatants.length,
+    indexedCombatants: snapshot.indexedCombatants,
+    candidatePairs: 0,
     candidates: 0,
     resolved: 0,
     skippedExisting: 0,
@@ -1922,43 +2221,75 @@ export async function checkMovementEngagements(combat, { includeStationary = fal
     skippedHalfMove: 0,
     skippedInvalid: 0,
     skippedDuplicate: 0,
-    stationaryScans: 0
+    skippedNonOpposing: 0,
+    stationaryScans: 0,
+    indexFallback: snapshot.fallback === true
   };
+  if (snapshot.fallback) {
+    movementDebugWarn(MOVEMENT_DEBUG_CATEGORIES.ENGAGEMENT, "engagement-snapshot-index-fallback", () => ({
+      combatId: combat?.id ?? null,
+      reason,
+      combatants: combatants.length,
+      rects: snapshot.rectByCombatantId.size,
+      indexedCombatants: snapshot.indexedCombatants,
+      gridless: snapshot.gridless,
+      cellSize: snapshot.cellSize
+    }), { runId: run?.runId, tick: run?.tick, combatId: combat?.id ?? null });
+  }
+  performanceDiagnostics.count("engagement.scan.start", 1, {
+    combatId: combat?.id ?? null,
+    combatants: combatants.length,
+    indexedCombatants: snapshot.indexedCombatants,
+    fallback: snapshot.fallback === true,
+    includeStationary,
+    reason
+  });
+
   const consideredPairs = new Set();
   let resolved = 0;
 
   for (const mover of combatants) {
-    const moverStateAtScan = getCombatantState(mover);
+    const moverStateAtScan = snapshot.stateById.get(mover.id) ?? getCombatantState(mover);
     const moverExecuting = moverStateAtScan.movement?.planStatus === MOVEMENT_PLAN_STATUS.EXECUTING;
     if (!moverExecuting && !includeStationary) continue;
     if (!moverExecuting) stats.stationaryScans += 1;
-    const moverDocument = tokenDocumentForCombatant(mover);
-    const moverRect = tokenSourceGridRect(moverDocument);
+    const moverDocument = snapshot.tokenByCombatantId.get(mover.id);
+    const moverRect = snapshot.rectByCombatantId.get(mover.id);
     if (!moverRect) continue;
-    for (const other of combatants) {
+    for (const other of snapshot.candidateCombatantsFor(mover)) {
       if (mover.id === other.id) continue;
+      stats.candidatePairs += 1;
       const pairKey = engagementPairKey(mover, other);
       if (consideredPairs.has(pairKey)) {
         stats.skippedDuplicate += 1;
         continue;
       }
       consideredPairs.add(pairKey);
-      const moverState = getCombatantState(mover);
+      const moverState = snapshot.stateById.get(mover.id) ?? getCombatantState(mover);
       if (moverState.engagement?.partnerIds?.includes(other.id)) {
         stats.skippedExisting += 1;
         continue;
       }
-      const otherState = getCombatantState(other);
+      const otherState = snapshot.stateById.get(other.id) ?? getCombatantState(other);
       const pendingEngagement = activeEngagementPairs.get(pairKey);
       if (pendingEngagement) {
         stats.skippedPending += 1;
         continue;
       }
-      const otherDocument = tokenDocumentForCombatant(other);
-      if (!areOpposingDispositions(moverDocument?.disposition, otherDocument?.disposition)) continue;
-      const otherRect = tokenSourceGridRect(otherDocument);
+      const otherDocument = snapshot.tokenByCombatantId.get(other.id);
+      if (!areOpposingDispositions(
+        snapshot.dispositionByCombatantId.get(mover.id) ?? moverDocument?.disposition,
+        snapshot.dispositionByCombatantId.get(other.id) ?? otherDocument?.disposition
+      )) {
+        stats.skippedNonOpposing += 1;
+        continue;
+      }
+      const otherRect = snapshot.rectByCombatantId.get(other.id);
       if (!otherRect) continue;
-      const threshold = Math.max(reachByCombatantId.get(mover.id), reachByCombatantId.get(other.id));
+      const moverReach = snapshot.reachByCombatantId.get(mover.id);
+      const otherReach = snapshot.reachByCombatantId.get(other.id);
+      const pairEligibility = pairCanEstablishEngagement(combat, mover, moverState, other, otherState);
+      const { rawThreshold, effectiveThreshold, threshold } = effectiveEngagementReachThreshold(moverReach, otherReach, pairEligibility);
       const separation = measureOccupiedGridSeparation(moverRect, otherRect);
       movementDebug(MOVEMENT_DEBUG_CATEGORIES.ENGAGEMENT, "reach-check", () => ({
         moverId: mover.id,
@@ -1967,12 +2298,35 @@ export async function checkMovementEngagements(combat, { includeStationary = fal
         otherDisposition: otherDocument?.disposition,
         moverRect,
         otherRect,
-        moverReach: reachByCombatantId.get(mover.id),
-        otherReach: reachByCombatantId.get(other.id),
+        distanceMetric: moverRect?.metric === "gridless-pixels" || otherRect?.metric === "gridless-pixels" ? "gridless-edge-euclidean" : "grid-chebyshev",
+        moverReach,
+        otherReach,
+        rawThreshold,
+        effectiveThreshold,
         threshold,
+        moverEligibility: pairEligibility.firstEligibility,
+        otherEligibility: pairEligibility.secondEligibility,
+        eligibleCombatantIds: pairEligibility.eligibleCombatantIds,
+        ineligibleCombatantIds: pairEligibility.ineligibleCombatantIds,
         separation,
         inReach: separation <= threshold
       }), { runId: run?.runId, tick: run?.tick, combatId: combat?.id, combatantId: mover.id, level: MOVEMENT_DEBUG_LEVELS.TRACE });
+      if (!pairEligibility.canEngage) {
+        stats.skippedHalfMove += 1;
+        movementDebug(MOVEMENT_DEBUG_CATEGORIES.ENGAGEMENT, "engagement-skipped-half-move", () => ({
+          moverId: mover.id,
+          otherId: other.id,
+          moverEligibility: pairEligibility.firstEligibility,
+          otherEligibility: pairEligibility.secondEligibility,
+          eligibleCombatantIds: pairEligibility.eligibleCombatantIds,
+          ineligibleCombatantIds: pairEligibility.ineligibleCombatantIds,
+          separation,
+          rawThreshold,
+          effectiveThreshold,
+          threshold
+        }), { runId: run?.runId, tick: run?.tick, combatId: combat?.id, combatantId: mover.id, level: MOVEMENT_DEBUG_LEVELS.VERBOSE });
+        continue;
+      }
       if (!Number.isFinite(separation) || !Number.isFinite(threshold)) {
         stats.skippedInvalid += 1;
         movementDebugWarn(MOVEMENT_DEBUG_CATEGORIES.ENGAGEMENT, "invalid-reach-check", () => ({
@@ -1980,6 +2334,8 @@ export async function checkMovementEngagements(combat, { includeStationary = fal
           otherId: other.id,
           moverRect,
           otherRect,
+          rawThreshold,
+          effectiveThreshold,
           threshold,
           separation
         }), { runId: run?.runId, tick: run?.tick, combatId: combat?.id, combatantId: mover.id });
@@ -1990,19 +2346,6 @@ export async function checkMovementEngagements(combat, { includeStationary = fal
         continue;
       }
       if (separation > threshold) continue;
-      const pairEligibility = pairCanEstablishEngagement(combat, mover, moverState, other, otherState);
-      if (!pairEligibility.canEngage) {
-        stats.skippedHalfMove += 1;
-        movementDebug(MOVEMENT_DEBUG_CATEGORIES.ENGAGEMENT, "engagement-skipped-half-move", () => ({
-          moverId: mover.id,
-          otherId: other.id,
-          moverEligibility: pairEligibility.firstEligibility,
-          otherEligibility: pairEligibility.secondEligibility,
-          separation,
-          threshold
-        }), { runId: run?.runId, tick: run?.tick, combatId: combat?.id, combatantId: mover.id, level: MOVEMENT_DEBUG_LEVELS.VERBOSE });
-        continue;
-      }
       candidates.push({
         mover,
         other,
@@ -2010,6 +2353,8 @@ export async function checkMovementEngagements(combat, { includeStationary = fal
         moverOrder: combatantOrderIndex(combatants, mover),
         otherOrder: combatantOrderIndex(combatants, other),
         separation,
+        rawThreshold,
+        effectiveThreshold,
         threshold
       });
     }
@@ -2026,7 +2371,7 @@ export async function checkMovementEngagements(combat, { includeStationary = fal
   stats.candidates = candidates.length;
 
   for (const candidate of candidates) {
-    const { mover, other, pairKey, separation, threshold } = candidate;
+    const { mover, other, pairKey, separation, rawThreshold } = candidate;
     const pendingBeforeResolve = activeEngagementPairs.get(pairKey);
     if (pendingBeforeResolve) {
       stats.skippedPending += 1;
@@ -2049,13 +2394,48 @@ export async function checkMovementEngagements(combat, { includeStationary = fal
       }), { runId: run?.runId, tick: run?.tick, combatId: combat?.id, combatantId: mover.id, level: MOVEMENT_DEBUG_LEVELS.VERBOSE });
       continue;
     }
+    const currentEligibility = pairCanEstablishEngagement(combat, mover, currentMoverState, other, currentOtherState);
+    const moverReach = snapshot.reachByCombatantId.get(mover.id);
+    const otherReach = snapshot.reachByCombatantId.get(other.id);
+    const currentThreshold = effectiveEngagementReachThreshold(moverReach, otherReach, currentEligibility);
+    const threshold = currentThreshold.threshold;
+    const effectiveThreshold = currentThreshold.effectiveThreshold;
     if (await shouldSkipEngagementForEgress(combat, mover, currentMoverState, other, currentOtherState, separation, threshold, run)) {
       stats.skippedEgress += 1;
       continue;
     }
-    const currentEligibility = pairCanEstablishEngagement(combat, mover, currentMoverState, other, currentOtherState);
     if (!currentEligibility.canEngage) {
       stats.skippedHalfMove += 1;
+      movementDebug(MOVEMENT_DEBUG_CATEGORIES.ENGAGEMENT, "engagement-skipped-half-move-current", () => ({
+        moverId: mover.id,
+        otherId: other.id,
+        moverEligibility: currentEligibility.firstEligibility,
+        otherEligibility: currentEligibility.secondEligibility,
+        eligibleCombatantIds: currentEligibility.eligibleCombatantIds,
+        ineligibleCombatantIds: currentEligibility.ineligibleCombatantIds,
+        separation,
+        rawThreshold: currentThreshold.rawThreshold,
+        effectiveThreshold,
+        threshold
+      }), { runId: run?.runId, tick: run?.tick, combatId: combat?.id, combatantId: mover.id, level: MOVEMENT_DEBUG_LEVELS.VERBOSE });
+      continue;
+    }
+    if (!Number.isFinite(separation) || !Number.isFinite(threshold) || separation > threshold) {
+      stats.skippedInvalid += Number.isFinite(separation) && Number.isFinite(threshold) ? 0 : 1;
+      movementDebug(MOVEMENT_DEBUG_CATEGORIES.ENGAGEMENT, "engage-pair-skipped-effective-reach", () => ({
+        moverId: mover.id,
+        otherId: other.id,
+        moverReach,
+        otherReach,
+        rawThreshold: currentThreshold.rawThreshold,
+        effectiveThreshold,
+        threshold,
+        separation,
+        moverEligibility: currentEligibility.firstEligibility,
+        otherEligibility: currentEligibility.secondEligibility,
+        eligibleCombatantIds: currentEligibility.eligibleCombatantIds,
+        ineligibleCombatantIds: currentEligibility.ineligibleCombatantIds
+      }), { runId: run?.runId, tick: run?.tick, combatId: combat?.id, combatantId: mover.id, level: MOVEMENT_DEBUG_LEVELS.VERBOSE });
       continue;
     }
 
@@ -2070,7 +2450,11 @@ export async function checkMovementEngagements(combat, { includeStationary = fal
     movementDebug(MOVEMENT_DEBUG_CATEGORIES.ENGAGEMENT, "engaged-movement-contact", () => ({
       first: mover.id,
       second: other.id,
+      eligibleCombatantIds: currentEligibility.eligibleCombatantIds,
+      ineligibleCombatantIds: currentEligibility.ineligibleCombatantIds,
       separation,
+      rawThreshold: currentThreshold.rawThreshold,
+      effectiveThreshold,
       threshold
     }), { runId: run?.runId, tick: run?.tick, combatId: combat?.id, combatantId: mover.id });
   }
@@ -2085,6 +2469,34 @@ export async function checkMovementEngagements(combat, { includeStationary = fal
     combatId: combat?.id,
     level: resolved ? MOVEMENT_DEBUG_LEVELS.SUMMARY : MOVEMENT_DEBUG_LEVELS.VERBOSE
   });
+  const scanDetail = {
+    combatId: combat?.id ?? null,
+    combatants: stats.combatants,
+    pairsConsidered: stats.candidatePairs,
+    candidates: stats.candidates,
+    resolved,
+    skippedExisting: stats.skippedExisting,
+    skippedEgress: stats.skippedEgress,
+    skippedInvalid: stats.skippedInvalid,
+    skippedDuplicate: stats.skippedDuplicate,
+    skippedPending: stats.skippedPending,
+    fallback: stats.indexFallback,
+    includeStationary,
+    reason
+  };
+  performanceDiagnostics.count("engagement.scan.complete", 1, scanDetail);
+  performanceDiagnostics.count("engagement.scan.combatants", stats.combatants, scanDetail);
+  performanceDiagnostics.count("engagement.scan.pairsConsidered", stats.candidatePairs, scanDetail);
+  performanceDiagnostics.count("engagement.scan.candidates", stats.candidates, scanDetail);
+  performanceDiagnostics.count("engagement.scan.resolved", resolved, scanDetail);
+  performanceDiagnostics.count("engagement.scan.skippedExisting", stats.skippedExisting, scanDetail);
+  performanceDiagnostics.count("engagement.scan.skippedEgress", stats.skippedEgress, scanDetail);
+  performanceDiagnostics.count("engagement.scan.skippedInvalid", stats.skippedInvalid, scanDetail);
+  performanceDiagnostics.recordMeasure(
+    "engagement.scan.durationMs",
+    Math.max(0, (globalThis.performance?.now?.() ?? Date.now()) - scanStartedAt),
+    scanDetail
+  );
   return resolved;
 }
 
@@ -2113,7 +2525,7 @@ async function waitForTokenAnimation(document) {
  * @param {Combatant} combatant Combatant document.
  * @returns {Promise<object>}
  */
-async function prepareCombatantMovement(combat, combatant) {
+async function prepareCombatantMovement(combat, combatant, { deferStatusWrite = false } = {}) {
   const measureId = performanceDiagnostics.markStart("movement.prepareCombatant");
   const document = tokenDocumentForCombatant(combatant);
   const state = getCombatantState(combatant);
@@ -2128,11 +2540,12 @@ async function prepareCombatantMovement(combat, combatant) {
       plannedWaypoints,
       executionWaypoints
     }), { runId: run?.runId, combatId: combat?.id, combatantId: combatant?.id });
-    await markMovementStatus(combatant, MOVEMENT_PLAN_STATUS.FAILED, {
+    const failedStatusPatch = movementStatusStatePatch(combatant, MOVEMENT_PLAN_STATUS.FAILED, {
       distance: 0,
       completedAt: Date.now(),
       stoppedReason: "unavailable"
-    });
+    }, state);
+    if (!deferStatusWrite) await updateCombatantState(combatant, failedStatusPatch);
     performanceDiagnostics.markEnd(measureId, {
       combatId: combat?.id ?? null,
       combatantId: combatant?.id ?? null,
@@ -2151,15 +2564,17 @@ async function prepareCombatantMovement(combat, combatant) {
       index: 0,
       segmentIndex: 0,
       status: MOVEMENT_PLAN_STATUS.FAILED,
-      blockedTicks: 0
+      blockedTicks: 0,
+      pendingStatePatch: failedStatusPatch
     };
   }
 
-  await markMovementStatus(combatant, MOVEMENT_PLAN_STATUS.EXECUTING, {
+  const executingStatusPatch = movementStatusStatePatch(combatant, MOVEMENT_PLAN_STATUS.EXECUTING, {
     startedAt: Date.now(),
     completedAt: null,
     stoppedReason: ""
-  });
+  }, state);
+  if (!deferStatusWrite) await updateCombatantState(combatant, executingStatusPatch);
   const context = {
     combatant,
     document,
@@ -2170,7 +2585,8 @@ async function prepareCombatantMovement(combat, combatant) {
     index: 0,
     segmentIndex: 0,
     status: MOVEMENT_PLAN_STATUS.EXECUTING,
-    blockedTicks: 0
+    blockedTicks: 0,
+    pendingStatePatch: executingStatusPatch
   };
   const storedDestination = cleanMovementPoint(state.movement?.destination);
   const plannedRouteTail = cleanMovementPoint(plannedWaypoints.at(-1));
@@ -2203,16 +2619,17 @@ async function prepareCombatantMovement(combat, combatant) {
  * @param {object} context Movement context.
  * @returns {Promise<void>}
  */
-async function completeMovementContext(context) {
-  if (context.status !== MOVEMENT_PLAN_STATUS.EXECUTING) return;
+async function completeMovementContext(context, { deferStatusWrite = false } = {}) {
+  if (context.status !== MOVEMENT_PLAN_STATUS.EXECUTING) return null;
   const contextDistance = contextMovementDistance(context);
   const plannedDestination = cleanMovementPoint(context.plannedWaypoints?.at(-1));
   const actualDestination = cleanMovementPoint(context.document?._source) ?? cleanMovementPoint(context.document);
-  await markMovementStatus(context.combatant, MOVEMENT_PLAN_STATUS.COMPLETED, {
+  const statusPatch = movementStatusStatePatch(context.combatant, MOVEMENT_PLAN_STATUS.COMPLETED, {
     distance: contextDistance ?? actualMovementDistance(context.document, getCombatantState(context.combatant).movement),
     completedAt: Date.now(),
     stoppedReason: ""
   });
+  if (!deferStatusWrite) await updateCombatantState(context.combatant, statusPatch);
   context.status = MOVEMENT_PLAN_STATUS.COMPLETED;
   const payload = () => ({
     combatantId: context.combatant?.id ?? null,
@@ -2237,6 +2654,7 @@ async function completeMovementContext(context) {
     movementDebugWarn(MOVEMENT_DEBUG_CATEGORIES.SCHEDULER, "context-completed-position-mismatch", payload, meta);
   }
   else movementDebug(MOVEMENT_DEBUG_CATEGORIES.SCHEDULER, "context-completed", payload, meta);
+  return statusPatch;
 }
 
 /**
@@ -2252,19 +2670,47 @@ function canExecuteContext(combat, context) {
   return !(
     isRunCombatantStopped(combat, context.combatant)
     || state.movement?.planStatus === MOVEMENT_PLAN_STATUS.STOPPED
-    || state.engagement?.engaged === true
   );
 }
 
 /**
- * Build the single-checkpoint batch submitted by one scheduler tick.
+ * Build the checkpoint batch submitted by one scheduler tick.
+ *
+ * The default behavior remains one checkpoint when adaptive batching is
+ * disabled, missing scan data, or any hostile token could enter engagement
+ * reach before or at the candidate checkpoint. Multi-checkpoint batches are
+ * only emitted when every included segment is provably outside opposing reach.
  *
  * @param {object} context Movement context.
- * @returns {object[]} Zero or one waypoint.
+ * @param {object|null} [scan=null] Engagement scan snapshot for this tick.
+ * @param {object} [options={}] Batch options.
+ * @returns {object[]} Zero or more waypoints.
  */
-export function movementCheckpointBatch(context) {
-  const first = context?.waypoints?.[Number(context?.index) || 0];
-  return first ? [first] : [];
+export function movementCheckpointBatch(context, scan = null, options = {}) {
+  const index = Number(context?.index) || 0;
+  const first = context?.waypoints?.[index];
+  if (!first) return [];
+  const enabled = options.enabled ?? adaptiveCheckpointBatchingEnabled();
+  const maxBatchSize = Math.max(1, Math.min(5, Number(options.maxBatchSize) || adaptiveCheckpointMaxBatchSize()));
+  if (!enabled || maxBatchSize <= 1 || !scan) return [first];
+
+  const batch = [];
+  let fromPoint = cleanMovementPoint(context?.traveledWaypoints?.at?.(-1))
+    ?? tokenCurrentSourcePoint(context?.document)
+    ?? cleanMovementPoint(first);
+  if (!fromPoint) return [first];
+  const maxIndex = Math.min(context.waypoints.length, index + maxBatchSize);
+  for (let cursor = index; cursor < maxIndex; cursor += 1) {
+    const waypoint = context.waypoints[cursor];
+    if (!waypoint) break;
+    if (checkpointCouldEnterEngagement(context, fromPoint, waypoint, scan)) {
+      if (!batch.length) return [first];
+      break;
+    }
+    batch.push(waypoint);
+    fromPoint = cleanMovementPoint(waypoint) ?? fromPoint;
+  }
+  return batch.length ? batch : [first];
 }
 
 /**
@@ -2272,14 +2718,15 @@ export function movementCheckpointBatch(context) {
  *
  * @param {Combat} combat Active combat.
  * @param {object} context Movement context.
+ * @param {object|null} [scan=null] Engagement scan snapshot for this tick.
  * @returns {object[]} Waypoints to submit in one documented move call.
  */
-function nextMovementWaypoints(combat, context) {
+function nextMovementWaypoints(combat, context, scan = null) {
   if (!canExecuteContext(combat, context)) {
     context.status = MOVEMENT_PLAN_STATUS.STOPPED;
     return [];
   }
-  return movementCheckpointBatch(context);
+  return movementCheckpointBatch(context, scan);
 }
 
 /**
@@ -2344,7 +2791,6 @@ async function submitMovementBatch(combat, context, waypoints) {
     const latest = getCombatantState(combatant);
     if (
       isRunCombatantStopped(combat, combatant)
-      || latest.engagement?.engaged === true
       || latest.movement?.planStatus === MOVEMENT_PLAN_STATUS.STOPPED
     ) {
       context.status = MOVEMENT_PLAN_STATUS.STOPPED;
@@ -2413,7 +2859,7 @@ async function submitSceneMovementBatch(combat, operations) {
         movementExecution: true,
         checkpointExecution: true,
         sceneBatchExecution: true,
-        checkpointCount: operations.length
+        checkpointCount: operations.reduce((sum, operation) => sum + (operation.waypoints?.length ?? 0), 0)
       },
       showRuler: false
     });
@@ -2471,6 +2917,14 @@ async function executeMovementTick(combat, contexts) {
     }))
   }), { runId: run?.runId, tick: run?.tick, combatId: combat?.id, level: MOVEMENT_DEBUG_LEVELS.VERBOSE });
   const { operations, blocked } = await selectMovementTickOperations(combat, contexts);
+  performanceDiagnostics.count("movement.tick.operations", operations.length, {
+    combatId: combat?.id ?? null,
+    tick: run?.tick ?? null
+  });
+  performanceDiagnostics.count("movement.tick.blocked", blocked.length, {
+    combatId: combat?.id ?? null,
+    tick: run?.tick ?? null
+  });
   if (!operations.length) {
     if (blocked.length) await waitMovementTickDelay();
     movementDebug(MOVEMENT_DEBUG_CATEGORIES.SCHEDULER, "tick-no-operations", () => ({
@@ -2525,6 +2979,7 @@ async function executeMovementTick(combat, contexts) {
 
   await checkMovementEngagements(combat);
 
+  const completedContextUpdates = [];
   for (const context of contexts) {
     if (context.status !== MOVEMENT_PLAN_STATUS.EXECUTING) continue;
     const { combatant } = context;
@@ -2532,9 +2987,8 @@ async function executeMovementTick(combat, contexts) {
     if (
       isRunCombatantStopped(combat, combatant)
       || afterStep.movement?.planStatus === MOVEMENT_PLAN_STATUS.STOPPED
-      || afterStep.engagement?.engaged === true
     ) {
-      if (context.index < context.waypoints.length && afterStep.engagement?.engaged !== true && afterStep.movement?.stoppedReason !== "blocked") {
+      if (context.index < context.waypoints.length && afterStep.movement?.stoppedReason !== "blocked") {
         movementDebugWarn(MOVEMENT_DEBUG_CATEGORIES.SCHEDULER, "context-stopped-with-remaining-route", () => ({
           combatantId: combatant?.id,
           index: context.index,
@@ -2546,7 +3000,13 @@ async function executeMovementTick(combat, contexts) {
       context.status = MOVEMENT_PLAN_STATUS.STOPPED;
       continue;
     }
-    if (context.index >= context.waypoints.length) await completeMovementContext(context);
+    if (context.index >= context.waypoints.length) {
+      const statusPatch = await completeMovementContext(context, { deferStatusWrite: true });
+      if (statusPatch) completedContextUpdates.push([combatant, statusPatch]);
+    }
+  }
+  if (completedContextUpdates.length) {
+    await updateCombatantStates(combat, completedContextUpdates, { [MODULE_ID]: { reason: "movement-context-complete" } });
   }
 
   movementDebug(MOVEMENT_DEBUG_CATEGORIES.SCHEDULER, "tick-end", () => ({
@@ -2604,6 +3064,56 @@ export function isMovementRunActive(combat) {
 }
 
 /**
+ * Recover a persisted Movement run which survived without an in-memory runner.
+ *
+ * @param {Combat|null} combat Active combat.
+ * @param {{reason?: string}} [options={}] Recovery options.
+ * @returns {Promise<boolean>} Whether stale state was recovered.
+ */
+export async function recoverStaleMovementRun(combat, { reason = "stale-run-recovered" } = {}) {
+  if (!game.user?.isGM || !combat) return false;
+  const state = getCombatState(combat);
+  if (state.movementRun?.status !== MOVEMENT_PLAN_STATUS.EXECUTING) return false;
+  const key = combat.uuid ?? combat.id;
+  if (activeRuns.has(combat.id) || movementRunLocks.has(key)) return false;
+
+  const completedAt = Date.now();
+  const updates = [];
+  for (const combatant of combatantValues(combat)) {
+    const combatantState = getCombatantState(combatant);
+    if (combatantState.movement?.planStatus !== MOVEMENT_PLAN_STATUS.EXECUTING) continue;
+    updates.push([combatant, {
+      movement: {
+        ...foundry.utils.deepClone(combatantState.movement),
+        planStatus: MOVEMENT_PLAN_STATUS.FAILED,
+        completedAt,
+        stoppedReason: reason,
+        draft: false
+      }
+    }]);
+  }
+
+  if (updates.length) {
+    await updateCombatantStates(combat, updates, { [MODULE_ID]: { reason } });
+  }
+  await updateCombatState(combat, {
+    movementRun: {
+      status: MOVEMENT_PLAN_STATUS.FAILED,
+      startedAt: state.movementRun?.startedAt ?? null,
+      completedAt,
+      pendingCombatantIds: []
+    }
+  }, { [MODULE_ID]: { reason } });
+  performanceDiagnostics.count("movement.run.staleRecovered", 1, {
+    combatId: combat.id,
+    recoveredCombatants: updates.length,
+    reason
+  });
+  RenderCoordinator.invalidateCombatTracker("movement-run-stale-recovered", { parts: ["phase", "rows"] });
+  return true;
+}
+
+/**
  * Start deterministic Movement-phase checkpoint execution for planned combatants.
  *
  * @param {Combat|null} combat Active combat.
@@ -2613,10 +3123,19 @@ export function isMovementRunActive(combat) {
 export async function startMovementPhase(combat = game.combat, options = {}) {
   if (!game.user?.isGM || !combat) return null;
   const key = combat.uuid ?? combat.id;
-  const pending = movementRunLocks.get(key);
-  if (pending) {
-    await pending;
-    return startMovementPhase(combat, options);
+  while (movementRunLocks.has(key)) {
+    const pending = movementRunLocks.get(key);
+    if (!pending || typeof pending.then !== "function") {
+      movementRunLocks.delete(key);
+      break;
+    }
+    try {
+      await pending;
+    }
+    catch (err) {
+      if (movementRunLocks.get(key) === pending) movementRunLocks.delete(key);
+      throw err;
+    }
   }
 
   let operation;
@@ -2710,10 +3229,15 @@ async function startMovementPhaseUnlocked(combat) {
   try {
     // All participants become EXECUTING before the first reach check so tokens
     // already within weapon length engage without taking an extra grid step.
+    const preparedContextUpdates = [];
     for (const combatant of planned) {
-      const context = await prepareCombatantMovement(combat, combatant);
+      const context = await prepareCombatantMovement(combat, combatant, { deferStatusWrite: true });
       contexts.push(context);
+      if (context.pendingStatePatch) preparedContextUpdates.push([combatant, context.pendingStatePatch]);
       activeRuns.get(combat.id)?.contextsByCombatantId?.set(combatant.id, context);
+    }
+    if (preparedContextUpdates.length) {
+      await updateCombatantStates(combat, preparedContextUpdates, { [MODULE_ID]: { reason: "movement-run-prepare" } });
     }
     await checkMovementEngagements(combat, { includeStationary: true, reason: "movement-phase-start" });
 
@@ -2742,7 +3266,10 @@ async function startMovementPhaseUnlocked(combat) {
   // completed, stopped, or failed. At this point each stored distance is the
   // authoritative travelled distance rather than the route planned earlier.
   await applyMovementDexResults(combat);
-  RenderCoordinator.invalidateCombatTracker("movement-run-complete");
+  RenderCoordinator.invalidateCombatTracker("movement-run-complete", {
+    combatantIds: contexts.map(context => context.combatant?.id).filter(Boolean),
+    parts: ["phase", "rows"]
+  });
   debug("movement run complete", {
     combatId: combat.id,
     results: contexts.map(context => ({ combatantId: context.combatant.id, status: context.status }))
@@ -2883,7 +3410,12 @@ export function registerMovementHooks(requestGm) {
       combatantId: decision.combatant.id,
       movement: plan
     }).then(result => {
-      if (result === null) return;
+      if (!result) return;
+      if (result.accepted === false) {
+        if (result.draft !== true) ui.notifications.warn(game.i18n.localize("AOV_SKJALDBORG.Warnings.MovementPlanIgnored"));
+        return;
+      }
+      if (result.draft === true) return;
       if (key) movementRulerDrafts.delete(key);
       performanceDiagnostics.count("movement.capture.write", 1, {
         combatId: decision.combat.id,
@@ -2895,7 +3427,10 @@ export function registerMovementHooks(requestGm) {
         combatantId: decision.combatant.id,
         tokenId: document?.id ?? document?._id ?? null
       });
-      RenderCoordinator.invalidateCombatTracker("movement-captured");
+      RenderCoordinator.invalidateCombatTracker("movement-captured", {
+        combatantIds: [decision.combatant.id],
+        parts: ["rows"]
+      });
     }).catch(exception => {
       warn(exception);
       ui.notifications.error(exception?.message ?? game.i18n.localize("AOV_SKJALDBORG.MovementAutomation.MoveFailed"));
@@ -2926,6 +3461,14 @@ export function registerMovementHooks(requestGm) {
 
   Hooks.on("moveToken", (document, _movement, _operation, user) => {
     if (!game.user?.isGM || user?.id !== game.user.id) return;
+    if (isInternalMovementOperation(_operation)) {
+      performanceDiagnostics.count("movement.hook.engagementScan.suppressed", 1, {
+        tokenId: document?.id ?? document?._id ?? null,
+        reason: _operation?.[MODULE_ID]?.reason ?? "module-movement-execution",
+        sceneBatchExecution: _operation?.[MODULE_ID]?.sceneBatchExecution === true
+      });
+      return;
+    }
     const combat = game.combat;
     const run = activeRuns.get(combat?.id);
     movementDebug(MOVEMENT_DEBUG_CATEGORIES.STOP, "move-token-hook", () => ({
@@ -2991,3 +3534,11 @@ export function registerMovementHooks(requestGm) {
     });
   });
 }
+
+export const __test = Object.freeze({
+  movementFootprintBlocker,
+  movementBatchBlocker,
+  movementFootprintsOppose,
+  reserveMovementBatch,
+  recoverStaleMovementRun
+});

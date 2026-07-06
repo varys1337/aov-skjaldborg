@@ -6,13 +6,22 @@
     <p class="hint">{{localize "AOV_SKJALDBORG.Settings.PhaseStructureMenu.Phases.Hint"}}</p>
     <div class="skj-phase-structure-grid">
       {{#each phases}}
-        <label class="skj-phase-structure-option">
-          <input type="checkbox" name="{{name}}" value="true" data-dtype="Boolean" {{checked checked}}>
-          <span>
-            <strong>{{label}}</strong>
-            <small>{{hint}}</small>
-          </span>
-        </label>
+        <div class="skj-phase-structure-option">
+          <label class="skj-phase-structure-option__main" for="{{enableId}}">
+            <input id="{{enableId}}" type="checkbox" name="{{name}}" value="true" data-dtype="Boolean" {{checked checked}}>
+            <span>
+              <strong>{{label}}</strong>
+              <small>{{hint}}</small>
+            </span>
+          </label>
+          <label class="skj-phase-structure-option__subtoggle" for="{{trackCurrentTurnId}}">
+            <input id="{{trackCurrentTurnId}}" type="checkbox" name="{{trackCurrentTurnName}}" value="true" data-dtype="Boolean" {{checked trackCurrentTurn}}>
+            <span>
+              <strong>{{localize "AOV_SKJALDBORG.Settings.PhaseStructureMenu.TrackCurrentTurn.Name"}}</strong>
+              <small>{{localize "AOV_SKJALDBORG.Settings.PhaseStructureMenu.TrackCurrentTurn.Hint"}}</small>
+            </span>
+          </label>
+        </div>
       {{/each}}
     </div>
   </fieldset>

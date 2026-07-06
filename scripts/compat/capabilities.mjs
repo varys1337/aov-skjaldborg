@@ -91,6 +91,8 @@ export function detectV14Capabilities() {
   const releaseGeneration = Number(game.release?.generation ?? 0);
   const fvttVersion = foundryVersion();
   const aovVersion = String(game.system?.version ?? "");
+  const applicationApi = foundry.applications?.api ?? {};
+  const applicationSheets = foundry.applications?.sheets ?? {};
   const tokenDocumentPrototype = globalThis.TokenDocument?.prototype
     ?? foundry.documents?.TokenDocument?.prototype
     ?? CONFIG.Token?.documentClass?.prototype
@@ -123,11 +125,19 @@ export function detectV14Capabilities() {
       versionOk: versionAtLeast(aovVersion, MINIMUM_AOV_VERSION)
     },
     applications: {
-      applicationV2: typeof foundry.applications?.api?.ApplicationV2 === "function",
-      documentSheetV2: typeof foundry.applications?.api?.DocumentSheetV2 === "function",
-      handlebarsMixin: typeof foundry.applications?.api?.HandlebarsApplicationMixin === "function",
-      dialogV2: typeof foundry.applications?.api?.DialogV2 === "function",
+      applicationV2: typeof applicationApi.ApplicationV2 === "function",
+      documentSheetV2: typeof applicationApi.DocumentSheetV2 === "function",
+      handlebarsMixin: typeof applicationApi.HandlebarsApplicationMixin === "function",
+      dialogV2: typeof applicationApi.DialogV2 === "function",
       handlebarsRender: typeof foundry.applications?.handlebars?.renderTemplate === "function"
+    },
+    sheets: {
+      documentSheetV2: typeof applicationApi.DocumentSheetV2 === "function",
+      actorSheetV2: typeof applicationApi.ActorSheetV2 === "function"
+        || typeof applicationSheets.ActorSheetV2 === "function",
+      itemSheetV2: typeof applicationApi.ItemSheetV2 === "function"
+        || typeof applicationSheets.ItemSheetV2 === "function",
+      integrationsUsed: false
     },
     combat: {
       className: combatClass?.name ?? "",
@@ -186,15 +196,21 @@ export function detectV14Capabilities() {
   const hardBlockers = capabilities.hardBlockers;
   addIfMissing(hardBlockers, "Foundry generation 14", capabilities.foundry.generationOk);
   addIfMissing(hardBlockers, "Age of Vikings system id", capabilities.system.idOk);
+  // ApplicationV2 is required by ActionRing, ActorHotbar, CombatHUD, and settings applications.
   addIfMissing(hardBlockers, "ApplicationV2", capabilities.applications.applicationV2);
-  addIfMissing(hardBlockers, "DocumentSheetV2", capabilities.applications.documentSheetV2);
+  // HandlebarsApplicationMixin is required by the module's AppV2 Handlebars surfaces.
   addIfMissing(hardBlockers, "HandlebarsApplicationMixin", capabilities.applications.handlebarsMixin);
+  // DialogV2 is required by combat workflow dialogs, utility dialogs, and Runic/Seidur dialogs.
   addIfMissing(hardBlockers, "DialogV2", capabilities.applications.dialogV2);
+  // renderTemplate is required by AppV2 contexts, dialog content, and chat report rendering.
   addIfMissing(hardBlockers, "Handlebars renderTemplate", capabilities.applications.handlebarsRender);
+  // Combat documents and tracker hooks are required for phase, intent, and movement workflows.
   addIfMissing(hardBlockers, "Combat document class", capabilities.combat.combatClass);
   addIfMissing(hardBlockers, "CombatTracker class", capabilities.combat.trackerClass);
+  // Token movement and preMoveToken support are required by engagement and movement capture.
   addIfMissing(hardBlockers, "TokenDocument#move", capabilities.movement.tokenMove);
   addIfMissing(hardBlockers, "preMoveToken hook support", capabilities.movement.hooksAvailable);
+  // The module delegates authoritative combat writes through its registered socket.
   addIfMissing(hardBlockers, "module socket", capabilities.sockets.available);
 
   const warnings = capabilities.warnings;
@@ -205,6 +221,7 @@ export function detectV14Capabilities() {
   addIfMissing(warnings, "AoV tracker adjustInit unavailable", capabilities.combat.trackerAdjustInit);
   addIfMissing(warnings, "AoV tracker adjDex unavailable", capabilities.combat.trackerAdjDex);
   addIfMissing(warnings, "Foundry route-resolved import support unavailable", capabilities.aovApi.routeResolvedImports);
+  addIfMissing(warnings, "DocumentSheetV2 unavailable; custom document sheet integrations disabled", capabilities.sheets.documentSheetV2);
   if (capabilities.dataModels.skillCritMult === false || capabilities.dataModels.skillFumbleMult === false) {
     warnings.push("AoV skill data model does not expose critMult/fumbleMult");
   }
@@ -221,6 +238,7 @@ export function detectV14Capabilities() {
   if (!capabilities.movement.sceneMoveTokens) degraded.push("scene-move-tokens");
   if (!capabilities.movement.completeMovementPath) degraded.push("complete-movement-path");
   if (!capabilities.combat.trackerAdjustInit || !capabilities.combat.trackerAdjDex) degraded.push("adjust-initiative-integration");
+  if (!capabilities.sheets.documentSheetV2) degraded.push("document-sheet-integrations");
   if (!capabilities.effects.activeEffectFromStatusEffect) degraded.push("active-effect-from-status-fallback");
   capabilities.statusEffectMode = statusEffectMode(statusEffects, capabilities);
   if (!capabilities.effects.statusEffectsObject && !capabilities.effects.statusEffectsMap && capabilities.effects.activeEffectClass) {

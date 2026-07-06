@@ -1,4 +1,8 @@
+@use "components/design-tokens";
 @use "legacy/skjaldborg";
+@use "components/dialog-layout";
+@use "components/dialog-controls";
+@use "components/dialog-sections";
 @use "apps/attack-roll-dialog";
 @use "apps/disengage-dialog";
 @use "apps/grapple-roll-dialog";
