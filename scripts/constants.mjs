@@ -7,7 +7,7 @@
 export const MODULE_ID = "aov-skjaldborg";
 export const SOCKET_NAME = `module.${MODULE_ID}`;
 
-export const MODULE_VERSION = "0.3.2";
+export const MODULE_VERSION = "0.5.5";
 export const MINIMUM_FOUNDRY_VERSION = "14.363";
 export const VERIFIED_FOUNDRY_VERSION = "14.364";
 export const MINIMUM_AOV_VERSION = "14.4";
