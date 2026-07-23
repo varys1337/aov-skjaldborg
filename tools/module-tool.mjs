@@ -123,6 +123,10 @@ function validateMetadata() {
   const packageLock = readJson(join(ROOT, "package-lock.json"));
   const constants = readFileSync(join(ROOT, "scripts", "constants.mjs"), "utf8");
   const constantVersion = constants.match(/export const MODULE_VERSION = "([^"]+)"/)?.[1];
+  const minimumFoundry = manifest.compatibility?.minimum;
+  const verifiedFoundry = manifest.compatibility?.verified;
+  const constantMinimumFoundry = constants.match(/export const MINIMUM_FOUNDRY_VERSION = "([^"]+)"/)?.[1];
+  const constantVerifiedFoundry = constants.match(/export const VERIFIED_FOUNDRY_VERSION = "([^"]+)"/)?.[1];
   const minimumAoV = manifest.relationships?.systems?.find(system => system.id === "aov")?.compatibility?.minimum;
   const verifiedAoV = manifest.relationships?.systems?.find(system => system.id === "aov")?.compatibility?.verified;
   const constantMinimumAoV = constants.match(/export const MINIMUM_AOV_VERSION = "([^"]+)"/)?.[1];
@@ -141,9 +145,25 @@ function validateMetadata() {
   if (minimumAoV !== constantMinimumAoV || verifiedAoV !== constantVerifiedAoV) {
     fail(`AoV compatibility metadata is inconsistent: manifest=${minimumAoV}/${verifiedAoV}, constants=${constantMinimumAoV}/${constantVerifiedAoV}`);
   }
+  if (minimumFoundry !== constantMinimumFoundry || verifiedFoundry !== constantVerifiedFoundry) {
+    fail(`Foundry compatibility metadata is inconsistent: manifest=${minimumFoundry}/${verifiedFoundry}, constants=${constantMinimumFoundry}/${constantVerifiedFoundry}`);
+  }
+  if (!versionAtLeast(verifiedFoundry, minimumFoundry)) {
+    fail(`Foundry verified version ${verifiedFoundry} is below minimum ${minimumFoundry}`);
+  }
+  if (!versionAtLeast(verifiedAoV, minimumAoV)) {
+    fail(`AoV verified version ${verifiedAoV} is below minimum ${minimumAoV}`);
+  }
   const expectedDownload = `/releases/download/v${manifest.version}/aov-skjaldborg.zip`;
   if (!String(manifest.download ?? "").endsWith(expectedDownload)) {
     fail(`module.json download must end with ${expectedDownload}`);
+  }
+  const releaseNotesPath = join(ROOT, "previous-releases.md");
+  if (existsSync(releaseNotesPath)) {
+    const releaseHeading = readFileSync(releaseNotesPath, "utf8").match(/^##\s+([^\s]+)\s*$/m)?.[1];
+    if (releaseHeading !== manifest.version) {
+      fail(`previous-releases.md must begin with release ${manifest.version}; found ${releaseHeading ?? "none"}`);
+    }
   }
   for (const path of manifestPaths(manifest)) {
     if (!existsSync(join(ROOT, path))) fail(`Manifest path does not exist: ${path}`);
@@ -155,7 +175,7 @@ function validateMetadata() {
       if (!existsSync(join(ROOT, target))) fail(`package.json script "${name}" references missing ${match[1]}`);
     }
   }
-  console.log(`metadata: version ${manifest.version}; AoV ${minimumAoV}-${verifiedAoV}`);
+  console.log(`metadata: version ${manifest.version}; Foundry ${minimumFoundry}-${verifiedFoundry}; AoV ${minimumAoV}-${verifiedAoV}`);
   return { manifest, packageJson, constants };
 }
 
@@ -183,6 +203,8 @@ function validateImportsAndReachability() {
   const scriptRoot = join(ROOT, "scripts");
   const files = walk(scriptRoot, path => extname(path) === ".mjs");
   const aovContractFile = resolve(scriptRoot, "adapter", "aov-contract.mjs");
+  const chatMessageHelper = resolve(scriptRoot, "compat", "chat-message.mjs");
+  const dialogV2Base = resolve(scriptRoot, "apps", "base", "dialog-v2.mjs");
   const directHookOwners = new Set([
     resolve(scriptRoot, "main.mjs"),
     resolve(scriptRoot, "core", "feature-registry.mjs"),
@@ -196,6 +218,18 @@ function validateImportsAndReachability() {
     }
     if (!directHookOwners.has(resolve(file)) && /\bHooks\.(?:on|once)\s*\(/.test(source)) {
       fail(`${relativePath(file)} registers an unscoped hook outside the feature registrar`);
+    }
+    if (resolve(file) !== chatMessageHelper && /\bChatMessage\.create\s*\(/.test(source)) {
+      fail(`${relativePath(file)} creates ChatMessage documents outside scripts/compat/chat-message.mjs`);
+    }
+    if (/\.render(?:\?\.)?\s*\(\s*(?:true|false)\s*\)/.test(source)) {
+      fail(`${relativePath(file)} uses the legacy boolean render signature instead of ApplicationV2 render options`);
+    }
+    if (resolve(file) !== dialogV2Base && /\bclass\s+\w+\s+extends\s+DialogV2\b/.test(source)) {
+      fail(`${relativePath(file)} subclasses DialogV2 outside the shared 14.365-compatible base`);
+    }
+    if (/ArrayLike<HTMLElement>|\bhtml\s*\??\.\s*\[0\]|\bhtml\s*\[0\]/.test(source)) {
+      fail(`${relativePath(file)} retains a pre-v14 array-like HTMLElement compatibility branch`);
     }
     const dependencies = [];
     for (const specifier of moduleReferences(source)) {
@@ -498,7 +532,34 @@ async function contractTests() {
   }), true);
   assert.equal(changedPaths.combatTrackerAffectedByCombatantChange({ sort: 10 }), false);
   assert.equal(changedPaths.combatTrackerAffectedByCombatantChange({ initiative: 12 }), true);
-  console.log("contracts: rule ordering, primitive reports, socket schemas, serialization, and prompt fallbacks passed");
+  const versions = await import("../scripts/utils/version.mjs");
+  assert.equal(versions.compareVersions("14.365.0", "14.365"), 0);
+  assert.equal(versions.compareVersions("14.365", "14.364"), 1);
+  assert.equal(versions.compareVersions("14.363", "14.365"), -1);
+  assert.equal(versions.versionAtLeast("14.365.0", "14.365"), true);
+  assert.equal(versions.versionAtLeast("", "14.365"), false);
+  const chatMessages = await import("../scripts/compat/chat-message.mjs");
+  assert.deepEqual(
+    chatMessages.chatMessageOperation(chatMessages.CHAT_MESSAGE_DELIVERY.BACKGROUND, {}, "14.365"),
+    { notify: false, scroll: false }
+  );
+  assert.deepEqual(
+    chatMessages.chatMessageOperation(chatMessages.CHAT_MESSAGE_DELIVERY.BACKGROUND, {}, "14.364"),
+    {}
+  );
+  assert.deepEqual(
+    chatMessages.chatMessageOperation(
+      chatMessages.CHAT_MESSAGE_DELIVERY.BACKGROUND,
+      { notify: true },
+      "14.365"
+    ),
+    { notify: true, scroll: false }
+  );
+  const dialogBaseSource = readFileSync(join(ROOT, "scripts", "apps", "base", "dialog-v2.mjs"), "utf8");
+  assert.match(dialogBaseSource, /typeof this\._refit !== "function"/);
+  assert.match(dialogBaseSource, /queueMicrotask/);
+  assert.match(dialogBaseSource, /if \(this\.rendered\) this\._refit\(nextPosition\)/);
+  console.log("contracts: rules, sockets, serialization, versions, AppV2 refits, and chat delivery passed");
 }
 
 function cleanBuildPath(path) {

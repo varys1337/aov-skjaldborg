@@ -87,11 +87,11 @@ export class CombatTrackingSettings extends HandlebarsApplicationMixin(Applicati
    * Open the client-side reach visualizer settings from the combat submenu.
    *
    * @param {PointerEvent} event Click event.
-   * @returns {void}
+   * @returns {Promise<void>}
    */
-  static onReachVisualizer(event) {
+  static async onReachVisualizer(event) {
     event.preventDefault();
-    void new ReachVisualizerSettings().render(true);
+    await new ReachVisualizerSettings().render({ force: true });
   }
 
   /** @override */

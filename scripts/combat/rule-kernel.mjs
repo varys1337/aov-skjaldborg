@@ -144,7 +144,7 @@ export function prepareHitLocationContext(context) {
  * Allow registered rules to decorate a rendered chat card.
  *
  * @param {object} context Combat rule context.
- * @param {HTMLElement|ArrayLike<HTMLElement>} html Pending chat HTML.
+ * @param {HTMLElement} html Pending chat HTML.
  * @returns {object}
  */
 export function decorateChatCard(context, html) {

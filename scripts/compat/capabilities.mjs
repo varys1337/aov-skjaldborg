@@ -6,29 +6,9 @@ import {
   VERIFIED_FOUNDRY_VERSION
 } from "../constants.mjs";
 import { AOV_IMPORTS, importAoVModule } from "../adapter/aov-contract.mjs";
+import { versionAtLeast } from "../utils/version.mjs";
 
 let lastCapabilityReport = null;
-
-/**
- * Compare two dotted numeric versions without trusting undocumented helpers.
- *
- * @param {string|number|null|undefined} current Current version.
- * @param {string|number|null|undefined} minimum Required minimum.
- * @returns {boolean}
- */
-function versionAtLeast(current, minimum) {
-  const left = String(current ?? "").split(/[^0-9]+/).filter(Boolean).map(Number);
-  const right = String(minimum ?? "").split(/[^0-9]+/).filter(Boolean).map(Number);
-  if (!left.length || !right.length) return false;
-  const length = Math.max(left.length, right.length);
-  for (let i = 0; i < length; i += 1) {
-    const a = Number(left[i] ?? 0);
-    const b = Number(right[i] ?? 0);
-    if (a > b) return true;
-    if (a < b) return false;
-  }
-  return true;
-}
 
 /**
  * Push one capability label when its condition is false.
@@ -127,10 +107,14 @@ export function detectV14Capabilities() {
     },
     applications: {
       applicationV2: typeof applicationApi.ApplicationV2 === "function",
+      refit: typeof applicationApi.ApplicationV2?.prototype?._refit === "function",
       documentSheetV2: typeof applicationApi.DocumentSheetV2 === "function",
       handlebarsMixin: typeof applicationApi.HandlebarsApplicationMixin === "function",
       dialogV2: typeof applicationApi.DialogV2 === "function",
       handlebarsRender: typeof foundry.applications?.handlebars?.renderTemplate === "function"
+    },
+    chat: {
+      messagePresentationOptions: versionAtLeast(fvttVersion, "14.365")
     },
     sheets: {
       documentSheetV2: typeof applicationApi.DocumentSheetV2 === "function",
@@ -161,6 +145,7 @@ export function detectV14Capabilities() {
       statusEffectsArray: Array.isArray(statusEffects),
       statusEffectsMap: typeof statusEffects?.set === "function",
       activeEffectClass: typeof CONFIG?.ActiveEffect?.documentClass === "function",
+      shouldApplyChange: typeof CONFIG?.ActiveEffect?.documentClass?.prototype?.shouldApplyChange === "function",
       activeEffectFromStatusEffect: typeof CONFIG?.ActiveEffect?.documentClass?.fromStatusEffect === "function"
         || typeof foundry.documents?.ActiveEffect?.fromStatusEffect === "function"
         || typeof globalThis.ActiveEffect?.fromStatusEffect === "function",

@@ -1,6 +1,6 @@
 {
   "name": "aov-skjaldborg",
-  "version": "0.5.8",
+  "version": "0.6.0",
   "private": true,
   "description": "Development, validation, SCSS compilation, packaging, and release automation for the Age of Vikings - Skjaldborg Foundry VTT module.",
   "type": "module",
@@ -21,6 +21,6 @@
     "set-version": "node tools/module-tool.mjs set-version"
   },
   "devDependencies": {
-    "sass": "^1.94.2"
+    "sass": "^1.101.6"
   }
 }

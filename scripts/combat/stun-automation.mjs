@@ -34,6 +34,7 @@ import {
   numberOr,
   renderActorStackCard,
   renderAoVChat,
+  resolveChatMessageElement,
   rerenderAoVMessage,
   resultIconHtml,
   safeFromUuid
@@ -224,7 +225,7 @@ async function createResistanceCard(sourceMessage, stun, { activeScore, passiveS
     ]
   };
   const html = await renderAoVChat(chatMsgData.chatTemplate, chatMsgData);
-  const message = await ChatMessage.create({
+  const message = await createModuleChatMessage({
     user: game.user.id,
     content: html,
     speaker: { actor: attackerActor.id, alias: game.i18n.localize("AOV.card.RE") },
@@ -251,7 +252,7 @@ async function createResistanceCard(sourceMessage, stun, { activeScore, passiveS
         }
       }
     }
-  });
+  }, { applyDefaultMode: false });
   if (message) {
     await message.update({ [`flags.${MODULE_ID}.${STUN_FLAG}.resistanceMessageId`]: message.id });
     await updateStunSource(sourceMessage, { stage: "resistance", resistanceMessageId: message.id });
@@ -392,13 +393,6 @@ async function handleMessageUpdate(message) {
   } finally {
     processingMessages.delete(key);
   }
-}
-
-function resolveChatMessageElement(html) {
-  if (!html) return null;
-  if (typeof html.querySelector === "function") return html;
-  const candidate = html[0];
-  return candidate && typeof candidate.querySelector === "function" ? candidate : null;
 }
 
 function actorForCombatant(combatant) {

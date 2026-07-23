@@ -242,7 +242,7 @@ Hooks.once("ready", async () => {
     buildResolutionQueue,
     ui: {
       closeActionRing: () => ActionRing.closeAll(),
-      refreshActionRing: () => ActionRing.current?.render(false),
+      refreshActionRing: () => ActionRing.current?.render(),
       refreshActorHotbar: () => ActorHotbar.scheduleRender(),
       resetActorHotbarPosition: () => ActorHotbar.resetPosition(),
       closeActorHotbar: () => ActorHotbar.closeCurrent(),

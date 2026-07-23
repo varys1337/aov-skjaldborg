@@ -6,7 +6,11 @@ import {
   REPORT_SCOPE
 } from "../constants.mjs";
 import { AoVAdapter } from "../adapter/aov-adapter.mjs";
-import { createModuleChatMessage } from "../compat/chat-message.mjs";
+import {
+  CHAT_MESSAGE_DELIVERY,
+  createModuleChatMessage
+} from "../compat/chat-message.mjs";
+import { resolveChatMessageElement } from "./automation-helpers.mjs";
 import { computeDexLedger } from "./dex-ledger.mjs";
 import { getCombatantState, phaseLabelKey } from "./state.mjs";
 
@@ -225,7 +229,10 @@ async function createReportMessage(combat, state, scope, whisper, audience) {
         scope
       }
     }
-  }, { applyDefaultMode: false });
+  }, {
+    applyDefaultMode: false,
+    delivery: CHAT_MESSAGE_DELIVERY.BACKGROUND
+  });
 }
 
 
@@ -235,23 +242,6 @@ async function createReportMessage(combat, state, scope, whisper, audience) {
  * @type {boolean}
  */
 let chatReportHooksRegistered = false;
-
-/**
- * Resolve the pending chat-message HTMLElement defensively.
- *
- * Foundry v14 documents renderChatMessageHTML as providing an HTMLElement, but
- * accepting an array-like wrapper here keeps the compatibility guard harmless
- * if another integration proxies the hook argument.
- *
- * @param {HTMLElement|ArrayLike<HTMLElement>|null|undefined} html Pending message HTML.
- * @returns {HTMLElement|null}
- */
-function resolveChatMessageElement(html) {
-  if (!html) return null;
-  if (typeof html.setAttribute === "function") return html;
-  const candidate = html[0];
-  return candidate && typeof candidate.setAttribute === "function" ? candidate : null;
-}
 
 /**
  * Suppress a player-audience report on GM clients.
@@ -264,7 +254,7 @@ function resolveChatMessageElement(html) {
  * browser's default [hidden] rule.
  *
  * @param {ChatMessage} message ChatMessage being rendered.
- * @param {HTMLElement|ArrayLike<HTMLElement>} html Pending message HTML.
+ * @param {HTMLElement} html Pending message HTML.
  * @returns {void}
  */
 function suppressPlayerReportForGm(message, html) {

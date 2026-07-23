@@ -12,6 +12,7 @@ import {
   upsertActorStatusEffect
 } from "../compat/active-effects.mjs";
 import { RenderCoordinator } from "../ui/render-coordinator.mjs";
+import { warn } from "../logger.mjs";
 
 export const EVADE_MODES = Object.freeze({
   RANGED: "ranged",
@@ -329,7 +330,9 @@ export function registerEvadingStatusHooks(hooks = globalThis.Hooks) {
     if (!game.user?.isGM) return;
     if (Number(updateOptions?.direction ?? 1) <= 0) return;
     const nextLogicalRound = AoVAdapter.getSystemLogicalRound({ round: Number(updateData?.round ?? combat?.round ?? 0) });
-    void removeExpiredEvadingEffects(combat, { logicalRound: nextLogicalRound, reason: "combat-round" });
+    void removeExpiredEvadingEffects(combat, { logicalRound: nextLogicalRound, reason: "combat-round" }).catch(exception => {
+      warn("Failed to remove expired Evading effects after combatRound.", exception);
+    });
   });
 
   hooks.on("updateCombat", (combat, changed = {}, options = {}) => {
@@ -337,7 +340,9 @@ export function registerEvadingStatusHooks(hooks = globalThis.Hooks) {
     if (!Object.prototype.hasOwnProperty.call(changed ?? {}, "round")) return;
     if (Number(options?.direction ?? 1) <= 0) return;
     const nextLogicalRound = AoVAdapter.getSystemLogicalRound(combat);
-    void removeExpiredEvadingEffects(combat, { logicalRound: nextLogicalRound, reason: "combat-update-round" });
+    void removeExpiredEvadingEffects(combat, { logicalRound: nextLogicalRound, reason: "combat-update-round" }).catch(exception => {
+      warn("Failed to remove expired Evading effects after updateCombat.", exception);
+    });
   });
 }
 

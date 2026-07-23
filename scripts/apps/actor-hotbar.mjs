@@ -537,12 +537,11 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
   /**
    * Convert rendered region HTML into exactly one element.
    *
-   * @param {string|HTMLElement|HTMLElement[]} html Rendered region output.
+   * @param {string|HTMLElement} html Rendered region output.
    * @returns {HTMLElement|null}
    */
   _regionElementFromHtml(html) {
     if (html instanceof HTMLElement) return html;
-    if (Array.isArray(html) && html[0] instanceof HTMLElement) return html[0];
     const template = document.createElement("template");
     template.innerHTML = String(html ?? "").trim();
     const element = template.content.firstElementChild;
@@ -2963,7 +2962,7 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
 
   /** @returns {Promise<unknown|null>} */
   static onOpenActor() {
-    return this.actor?.sheet?.render?.(true) ?? null;
+    return this.actor?.sheet?.render?.({ force: true }) ?? null;
   }
 
   /**
@@ -3080,7 +3079,7 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
     if (!uuid || typeof globalThis.fromUuid !== "function") return null;
     try {
       const document = await globalThis.fromUuid(uuid);
-      return document?.sheet?.render?.(true) ?? null;
+      return document?.sheet?.render?.({ force: true }) ?? null;
     } catch (exception) {
       error(`Failed to open hotbar document ${uuid}.`, exception);
       ui.notifications.error(game.i18n.localize("AOV_SKJALDBORG.Warnings.ActionFailed"));

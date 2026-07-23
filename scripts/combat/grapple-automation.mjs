@@ -339,7 +339,7 @@ async function createResistanceCard(context, { activeScore, passiveScore, active
     ]
   };
   const html = await renderAoVChat(chatMsgData.chatTemplate, chatMsgData);
-  return ChatMessage.create({
+  return createModuleChatMessage({
     user: game.user.id,
     content: html,
     speaker: { actor: attackerActor.id, alias: game.i18n.localize("AOV.card.RE") },
@@ -363,7 +363,7 @@ async function createResistanceCard(context, { activeScore, passiveScore, active
         }
       }
     }
-  });
+  }, { applyDefaultMode: false });
 }
 
 async function createImmobilizeResistanceCard(context) {
@@ -960,7 +960,7 @@ export async function startGrappleAttack({ actor, targetToken, weapon, targetNum
     })]
   };
   const html = await renderAoVChat(chatMsgData.chatTemplate, chatMsgData);
-  return ChatMessage.create({
+  return createModuleChatMessage({
     user: game.user.id,
     style: CONST.CHAT_MESSAGE_STYLES.OTHER,
     content: html,
@@ -992,7 +992,7 @@ export async function startGrappleAttack({ actor, targetToken, weapon, targetNum
         }
       }
     }
-  });
+  }, { applyDefaultMode: false });
 }
 
 /**

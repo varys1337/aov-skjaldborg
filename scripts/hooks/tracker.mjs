@@ -22,6 +22,7 @@ import {
 } from "../compat/tracker-adapter.mjs";
 import { htmlEscape } from "../ui/dom-utils.mjs";
 import { performanceDiagnostics } from "../performance/performance-monitor.mjs";
+import { error } from "../logger.mjs";
 
 const INTENT_STATUS_ICONS = Object.freeze({
   [INTENT_STATUS.UNCOMMITTED]: "fa-circle-question",
@@ -382,7 +383,12 @@ function attachTrackerEvents(element, combat) {
     event.stopPropagation();
     const action = control.dataset.skjAction;
     const phase = control.dataset.phase;
-    if (action === "advance-phase") void requestGm("advancePhase", { combatId: combat.id, phase });
+    if (action === "advance-phase") {
+      void requestGm("advancePhase", { combatId: combat.id, phase }).catch(exception => {
+        error("Failed to advance the Skjaldborg phase from the combat tracker.", exception);
+        ui.notifications.error(game.i18n.localize("AOV_SKJALDBORG.Warnings.ActionFailed"));
+      });
+    }
   }, { signal: controller.signal });
   performanceDiagnostics.count("tracker.controls.bound", 1, { combatId: combat?.id ?? null, delegated: true });
 }

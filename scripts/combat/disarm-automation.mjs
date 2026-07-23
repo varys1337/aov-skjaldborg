@@ -155,7 +155,7 @@ async function createResistanceCard(sourceMessage, disarm, { stage, activeActor,
     ]
   };
   const html = await renderAoVChat(chatMsgData.chatTemplate, chatMsgData);
-  const message = await ChatMessage.create({
+  const message = await createModuleChatMessage({
     user: game.user.id,
     content: html,
     speaker: { actor: activeActor?.id ?? null, alias: game.i18n.localize("AOV.card.RE") },
@@ -181,7 +181,7 @@ async function createResistanceCard(sourceMessage, disarm, { stage, activeActor,
         }
       }
     }
-  });
+  }, { applyDefaultMode: false });
   if (message) {
     await message.update({ [`flags.${MODULE_ID}.${DISARM_FLAG}.resistanceMessageId`]: message.id });
     await updateDisarmSource(sourceMessage, { stage, resistanceMessageId: message.id });

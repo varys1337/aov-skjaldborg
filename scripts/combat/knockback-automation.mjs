@@ -29,6 +29,7 @@ import {
   numberOr,
   renderActorStackCard,
   renderAoVChat,
+  resolveChatMessageElement,
   resultIconHtml,
   resultLevelLabel,
   safeFromUuid
@@ -144,7 +145,7 @@ async function createKnockbackResistanceCard(context) {
     ]
   };
   const html = await renderAoVChat(chatMsgData.chatTemplate, chatMsgData);
-  return ChatMessage.create({
+  return createModuleChatMessage({
     user: game.user.id,
     content: html,
     speaker: {
@@ -171,7 +172,7 @@ async function createKnockbackResistanceCard(context) {
         }
       }
     }
-  });
+  }, { applyDefaultMode: false });
 }
 
 function attackSucceeded(message) {
@@ -492,14 +493,8 @@ async function handleKnockbackChatUpdate(message) {
   }
 }
 
-function htmlElementFromRender(html) {
-  if (html instanceof HTMLElement) return html;
-  if (html?.[0] instanceof HTMLElement) return html[0];
-  return null;
-}
-
 function bindFumblePrompt(message, html) {
-  const element = htmlElementFromRender(html);
+  const element = resolveChatMessageElement(html);
   const button = element?.querySelector?.("[data-aov-skj-knockback-fumble-table]");
   if (!button || button.dataset.skjKnockbackBound === "true") return;
   button.dataset.skjKnockbackBound = "true";
@@ -556,7 +551,7 @@ export async function startKnockbackAttack({ actor, targetToken, weapon, targetN
     })]
   };
   const html = await renderAoVChat(chatMsgData.chatTemplate, chatMsgData);
-  return ChatMessage.create({
+  return createModuleChatMessage({
     user: game.user.id,
     style: CONST.CHAT_MESSAGE_STYLES.OTHER,
     content: html,
@@ -603,7 +598,7 @@ export async function startKnockbackAttack({ actor, targetToken, weapon, targetN
         }
       }
     }
-  });
+  }, { applyDefaultMode: false });
 }
 
 /**

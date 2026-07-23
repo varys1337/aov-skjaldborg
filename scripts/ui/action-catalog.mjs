@@ -1018,7 +1018,7 @@ export async function executeActorItem(actor, itemId, event = null) {
   }
   try {
     if (typeof item.roll === "function") return await item.roll(event ?? undefined);
-    return item.sheet?.render?.(true) ?? null;
+    return item.sheet?.render?.({ force: true }) ?? null;
   } catch (exception) {
     error(`Failed to execute actor item ${item.uuid}.`, exception);
     ui.notifications.error(game.i18n.localize("AOV_SKJALDBORG.Warnings.ActionFailed"));
@@ -1091,7 +1091,13 @@ export async function executeActorStat(actor, statId, event = null) {
 export async function openActorItem(actor, itemId) {
   const item = actor?.items?.get(itemId) ?? null;
   if (!item) return null;
-  return item.sheet?.render?.(true) ?? null;
+  try {
+    return await item.sheet?.render?.({ force: true }) ?? null;
+  } catch (exception) {
+    error(`Failed to open actor Item ${item.uuid}.`, exception);
+    ui.notifications.error(game.i18n.localize("AOV_SKJALDBORG.Warnings.ActionFailed"));
+    return null;
+  }
 }
 
 /**

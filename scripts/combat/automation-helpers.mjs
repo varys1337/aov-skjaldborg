@@ -51,16 +51,13 @@ export function actorName(actor) {
 
 
 /**
- * Resolve the pending chat-message HTMLElement defensively.
+ * Resolve the documented Foundry v14 chat-message render element.
  *
- * @param {HTMLElement|ArrayLike<HTMLElement>|null|undefined} html Pending message HTML.
+ * @param {HTMLElement|null|undefined} html Pending message HTML.
  * @returns {HTMLElement|null}
  */
 export function resolveChatMessageElement(html) {
-  if (!html) return null;
-  if (typeof html.querySelector === "function") return html;
-  const candidate = html[0];
-  return candidate && typeof candidate.querySelector === "function" ? candidate : null;
+  return html instanceof HTMLElement ? html : null;
 }
 
 /**
@@ -305,7 +302,7 @@ export function clampCritFumbleChance(value) {
 }
 
 /**
- * Resolve AoV 14.4 critical and fumble chance percentages from a skill/passion.
+ * Resolve AoV 14.4-14.5 critical and fumble chance percentages from a skill/passion.
  *
  * @param {Item|object|null|undefined} item AoV skill or passion item.
  * @returns {{critChance: number, fumbleChance: number}}
@@ -322,7 +319,7 @@ function itemCid(item) {
 }
 
 /**
- * Resolve AoV 14.4 weapon critical and fumble chances from the linked skill.
+ * Resolve AoV 14.4-14.5 weapon critical and fumble chances from the linked skill.
  *
  * @param {Actor|object|null|undefined} actor Actor owning the weapon.
  * @param {Item|object|null|undefined} weapon Weapon item.
@@ -337,9 +334,9 @@ export function getWeaponCritFumbleChances(actor, weapon) {
 }
 
 /**
- * Evaluate an AoV 14.4 D100 roll result against a target score.
+ * Evaluate an AoV 14.4-14.5 D100 roll result against a target score.
  *
- * This mirrors AoV 14.4 AOVCheck.successLevel for critical, special, fumble,
+ * This mirrors AoV 14.4-14.5 AOVCheck.successLevel for critical, special, fumble,
  * clamped success, and final result ordering.
  *
  * @param {object} options Evaluation options.
@@ -373,7 +370,7 @@ export function evaluateAovD100({
 }
 
 /**
- * Evaluate an AoV 14.4 D100 roll result with default critical and fumble chances.
+ * Evaluate an AoV 14.4-14.5 D100 roll result with default critical and fumble chances.
  *
  * @param {unknown} targetScore Target percentage.
  * @param {unknown} rollResult D100 result.

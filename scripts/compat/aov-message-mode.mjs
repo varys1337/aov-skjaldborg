@@ -50,7 +50,7 @@ export function getAoVMessageModeCompatibilityStatus() {
 
 /**
  * Install a narrowly scoped compatibility override for the current AoV Combat
- * document class. The replacement mirrors AoV 14.1's rollInitiative semantics:
+ * document class. The replacement mirrors AoV 14.5's rollInitiative semantics:
  * owner-filtered combatants, evaluated initiative rolls, one embedded update,
  * no initiative chat cards, and preservation of the current turn when
  * updateTurn is false.
@@ -89,7 +89,7 @@ export function installAoVMessageModeCompatibility() {
       messageOptions = {}
     } = {}
   ) {
-    // AoV 14.1 intentionally suppresses initiative ChatMessages. Retain the
+    // AoV 14.5 intentionally suppresses initiative ChatMessages. Retain the
     // public v14 options for API compatibility without changing that behavior.
     void messageMode;
     void messageOptions;

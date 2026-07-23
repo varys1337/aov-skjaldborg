@@ -2,6 +2,7 @@ import { DAMAGE_EFFECT_SOURCE_FLAG, GRAPPLED_STATUS_ID, IMMOBILIZED_STATUS_ID, M
 import { runtimeSettings } from "../runtime-settings.mjs";
 import { warn } from "../logger.mjs";
 import { effectHasStatus, effectIsActive, injuryThresholdSeverityFromEffects, moduleFlag } from "../compat/active-effects.mjs";
+import { createModuleChatMessage } from "../compat/chat-message.mjs";
 import { guardedModuleFlag, guardedUpdate } from "../utils/guarded-document-writes.mjs";
 import { collectionArray, numberOr } from "../utils/document-data.mjs";
 import {
@@ -1372,7 +1373,7 @@ export class AoVAdapter {
       chatCard: [chatCard]
     };
     const content = await this.#renderCombatMessage(aovFlags);
-    const message = await ChatMessage.create({
+    const message = await createModuleChatMessage({
       user: game.user.id,
       style: CONST.CHAT_MESSAGE_STYLES.OTHER,
       content,
@@ -1391,7 +1392,7 @@ export class AoVAdapter {
           }
         }
       }
-    });
+    }, { applyDefaultMode: false });
     return message ?? null;
   }
 
@@ -2636,7 +2637,7 @@ export class AoVAdapter {
     if (!wound) throw new Error("Age of Vikings did not create the wound Item.");
 
     await this.#assignActorItemCid(wound);
-    wound.sheet?.render?.(true);
+    await wound.sheet?.render?.({ force: true });
     return wound;
   }
 

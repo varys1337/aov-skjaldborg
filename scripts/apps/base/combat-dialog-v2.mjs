@@ -1,7 +1,7 @@
 import { actionThemeClass } from "../../ui/dom-utils.mjs";
+import { SkjDialogV2 } from "./dialog-v2.mjs";
 
-const { DialogV2 } = foundry.applications.api;
-const BASE_DEFAULT_OPTIONS = DialogV2.DEFAULT_OPTIONS ?? {};
+const BASE_DEFAULT_OPTIONS = SkjDialogV2.DEFAULT_OPTIONS ?? {};
 const BASE_WINDOW_OPTIONS = BASE_DEFAULT_OPTIONS.window ?? {};
 const BASE_ACTIONS = BASE_DEFAULT_OPTIONS.actions ?? {};
 
@@ -12,7 +12,7 @@ const BASE_ACTIONS = BASE_DEFAULT_OPTIONS.actions ?? {};
  * base centralizes the form wrapper, template/content rendering, and primary
  * submit action routing.
  */
-export class SkjCombatDialogV2 extends DialogV2 {
+export class SkjCombatDialogV2 extends SkjDialogV2 {
   static DEFAULT_OPTIONS = {
     ...BASE_DEFAULT_OPTIONS,
     classes: ["aov-skjaldborg", "dialog", "skj-combat-dialog"],
@@ -154,6 +154,7 @@ export class SkjCombatDialogV2 extends DialogV2 {
     const collapsed = !section.classList.contains("collapsed");
     section.classList.toggle("collapsed", collapsed);
     section.setAttribute("aria-expanded", collapsed ? "false" : "true");
+    this.requestContentRefit();
   }
 
   /**

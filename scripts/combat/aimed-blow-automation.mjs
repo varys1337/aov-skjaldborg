@@ -331,7 +331,7 @@ async function runCoreHitLocationFallback(message, button, event) {
  * explicit user action. Automatic resolution belongs to create/update hooks.
  *
  * @param {ChatMessage} message Rendered ChatMessage.
- * @param {HTMLElement|ArrayLike<HTMLElement>} html Rendered HTML.
+ * @param {HTMLElement} html Rendered HTML.
  * @returns {void}
  */
 function bindAimedHitLocationOverride(message, html) {

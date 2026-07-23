@@ -34,8 +34,7 @@ import {
   unregisterTargetRefresh,
   validChoiceValue
 } from "./target-refresh-helpers.mjs";
-
-const { DialogV2 } = foundry.applications.api;
+import { SkjDialogV2 } from "./base/dialog-v2.mjs";
 
 const DISARM_PENALTIES = Object.freeze([0, -20, -40]);
 const DISARM_MODES = Object.freeze(["strikeWeapon", "hitFlat", "entangle"]);
@@ -107,7 +106,7 @@ function disarmMode(value) {
  * defence, damage, and chat-card automation; it does not alter Actor, Token,
  * Combat, or Item documents.
  */
-export class AttackRollDialog extends DialogV2 {
+export class AttackRollDialog extends SkjDialogV2 {
   static current = null;
 
   static DEFAULT_OPTIONS = {
@@ -306,7 +305,9 @@ export class AttackRollDialog extends DialogV2 {
         this._captureForm(form);
         this.activeTargetKey = String(targetControl.dataset.targetKey ?? "");
         this._setActiveTarget(this._activeTarget());
-        void this.render({ force: true });
+        void this.render({ force: true }).catch(exception => {
+          error("Failed to change the active target in the attack dialog.", exception);
+        });
       }
     });
     this._syncDamageTypeInput(form);
@@ -680,6 +681,9 @@ export class AttackRollDialog extends DialogV2 {
     this._updateAugmentDetails(form);
     this._syncAimedPenaltyControls(form);
     this._updatePreview(form);
+    if (["augmentOptions", "splitAttackEnabled"].includes(String(target?.name ?? ""))) {
+      this.requestContentRefit();
+    }
   }
 
   /**

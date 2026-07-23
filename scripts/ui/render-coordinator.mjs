@@ -1,4 +1,5 @@
 import { incrementCounter, measureAsync } from "../performance/performance-monitor.mjs";
+import { warn } from "../logger.mjs";
 
 const handlers = new Map();
 const pending = new Map();
@@ -61,7 +62,9 @@ export function invalidateRenderSurface(surface, detail = {}) {
   if (frame !== null) return;
   frame = requestFrame(() => {
     frame = null;
-    void flushRenderSurfaces();
+    void flushRenderSurfaces().catch(exception => {
+      warn("A coordinated render surface failed.", exception);
+    });
   });
 }
 

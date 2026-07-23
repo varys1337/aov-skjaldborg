@@ -1,6 +1,7 @@
 import { MODULE_ID } from "../constants.mjs";
 import { AoVAdapter } from "../adapter/aov-adapter.mjs";
 import { AOV_TEMPLATES } from "../adapter/aov-contract.mjs";
+import { createModuleChatMessage } from "../compat/chat-message.mjs";
 import { cleanString, numberOr } from "../utils/document-data.mjs";
 import { cleanTargetRefs, runeMagicNarrativeKey } from "./runic-magic-data.mjs";
 import {
@@ -188,7 +189,7 @@ export async function createRunicResistanceCard({
   const chatMsgData = buildRunicResistanceChatData({ actor, casterToken, targetActor, targetToken });
   const html = await renderAoVChat(chatMsgData.chatTemplate, chatMsgData);
   const speaker = ChatMessage.getSpeaker({ actor, token: casterToken?.object ?? casterToken });
-  return ChatMessage.create({
+  return createModuleChatMessage({
     user: game.user.id,
     content: html,
     speaker: {
@@ -224,7 +225,7 @@ export async function createRunicResistanceCard({
         }
       }
     }
-  });
+  }, { applyDefaultMode: false });
 }
 
 export async function createRunicResistanceCards({

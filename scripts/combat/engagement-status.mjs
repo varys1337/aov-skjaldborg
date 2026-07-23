@@ -606,21 +606,29 @@ export function registerEngagedStatusHooks(hooks = globalThis.Hooks) {
   if (statusEffectMode !== "disabled" && typeof CONFIG?.ActiveEffect?.documentClass === "function") {
     hooks.on("deleteActiveEffect", effect => {
       if (!isEngagedEffect(effect)) return;
-      void clearEngagementFromEffect(effect);
+      void clearEngagementFromEffect(effect).catch(exception => {
+        warn("Failed to reconcile engagement after deleting its ActiveEffect.", exception);
+      });
     });
 
     hooks.on("updateActiveEffect", effect => {
       if (!isEngagedEffect(effect) || hasActiveEngagedStatus(effect)) return;
-      void clearEngagementFromEffect(effect);
+      void clearEngagementFromEffect(effect).catch(exception => {
+        warn("Failed to reconcile engagement after disabling its ActiveEffect.", exception);
+      });
     });
   }
 
   hooks.on("deleteCombat", combat => {
-    void clearEngagedStatusEffectsForCombat(combat, { reason: "combat-deleted" });
+    void clearEngagedStatusEffectsForCombat(combat, { reason: "combat-deleted" }).catch(exception => {
+      warn("Failed to clear engagement effects for a deleted Combat.", exception);
+    });
   });
 
   hooks.on("deleteCombatant", combatant => {
-    void clearDeletedCombatantEngagement(combatant);
+    void clearDeletedCombatantEngagement(combatant).catch(exception => {
+      warn("Failed to clear engagement for a deleted Combatant.", exception);
+    });
   });
 }
 

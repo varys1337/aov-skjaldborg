@@ -1,4 +1,5 @@
 import { actorPortraitSource, isVideoSource } from "../ui/dom-utils.mjs";
+import { error } from "../logger.mjs";
 
 /**
  * Build one live target snapshot from a canvas Token.
@@ -70,7 +71,9 @@ export function registerTargetRefresh(app, refreshCallback) {
   unregisterTargetRefresh(app);
   const handler = user => {
     if (user?.id !== game.user?.id) return;
-    void refreshCallback();
+    void Promise.resolve(refreshCallback()).catch(exception => {
+      error("Failed to refresh a Skjaldborg dialog after target changes.", exception);
+    });
   };
   app._skjTargetRefreshHandler = handler;
   Hooks.on("targetToken", handler);

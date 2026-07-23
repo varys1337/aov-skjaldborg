@@ -17,14 +17,13 @@ import {
   serializeTargetSnapshot,
   unregisterTargetRefresh
 } from "./target-refresh-helpers.mjs";
-
-const { DialogV2 } = foundry.applications.api;
+import { SkjDialogV2 } from "./base/dialog-v2.mjs";
 
 function resistanceSummary(_actor, _targetActor) {
   return game.i18n.localize("AOV_SKJALDBORG.KnockbackDialog.ResistancePublicSummary");
 }
 
-export class KnockbackRollDialog extends DialogV2 {
+export class KnockbackRollDialog extends SkjDialogV2 {
   static current = null;
 
   static DEFAULT_OPTIONS = {
@@ -161,7 +160,9 @@ export class KnockbackRollDialog extends DialogV2 {
       this._captureForm(form);
       this.activeTargetKey = String(targetControl.dataset.targetKey ?? "");
       this._setActiveTarget(this._activeTarget());
-      void this.render({ force: true });
+      void this.render({ force: true }).catch(exception => {
+        error("Failed to change the active target in the knockback dialog.", exception);
+      });
     });
     this._updatePreview(form);
   }

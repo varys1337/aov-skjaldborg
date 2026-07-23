@@ -6,6 +6,7 @@ import { startGrappleAttack } from "./grapple-automation.mjs";
 import { htmlEscape } from "../ui/dom-utils.mjs";
 import { warn } from "../logger.mjs";
 import { collectionArray, safeFromUuid } from "../utils/document-data.mjs";
+import { resolveChatMessageElement } from "./automation-helpers.mjs";
 
 const TARGET_QUEUE_FLAG = "targetQueue";
 const SPLIT_ATTACK_FLAG = "splitAttack";
@@ -41,22 +42,6 @@ async function deductQueuedAmmunition(ammunition) {
 
 function localize(key) {
   return game.i18n.localize(key);
-}
-
-/**
- * Resolve Foundry v14 chat render HTML.
- *
- * Foundry v14 passes an HTMLElement to renderChatMessageHTML; the array-like
- * branch is retained only as a defensive compatibility fallback.
- *
- * @param {HTMLElement|ArrayLike<HTMLElement>|null|undefined} html Rendered chat message HTML.
- * @returns {HTMLElement|null}
- */
-function resolveChatMessageElement(html) {
-  if (!html) return null;
-  if (typeof html.querySelectorAll === "function") return html;
-  const candidate = html[0];
-  return candidate && typeof candidate.querySelectorAll === "function" ? candidate : null;
 }
 
 function renderTargetQueueContent(queue) {

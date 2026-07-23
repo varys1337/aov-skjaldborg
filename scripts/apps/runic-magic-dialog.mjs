@@ -20,8 +20,7 @@ import { RenderCoordinator } from "../ui/render-coordinator.mjs";
 import { actionThemeClass, actorPortraitSource, isVideoSource } from "../ui/dom-utils.mjs";
 import { error } from "../logger.mjs";
 import { ensureDialogPartialsLoaded } from "./base/dialog-partials.mjs";
-
-const { DialogV2 } = foundry.applications.api;
+import { SkjDialogV2 } from "./base/dialog-v2.mjs";
 
 function safeState(combatant) {
   return combatant ? getCombatantState(combatant) : { runeMagic: {}, updatedAt: 0 };
@@ -153,7 +152,7 @@ function resultSucceeded(result) {
   return Number(result.resultLevel) >= 2;
 }
 
-export class RunicMagicDialog extends DialogV2 {
+export class RunicMagicDialog extends SkjDialogV2 {
   static current = null;
 
   constructor({ actor, combatant = null, combat = game.combat } = {}) {
@@ -198,7 +197,7 @@ export class RunicMagicDialog extends DialogV2 {
 
     if (this.current) await this.current.close({ force: true });
     this.current = new RunicMagicDialog({ actor, combatant: liveCombatant, combat: activeCombat });
-    await this.current.render({ force: true, modal: false });
+    await this.current.render({ force: true });
     return this.current;
   }
 
@@ -381,6 +380,7 @@ export class RunicMagicDialog extends DialogV2 {
           ? game.i18n.localize("AOV_SKJALDBORG.RunicMagic.TrackRitual")
           : game.i18n.localize("AOV_SKJALDBORG.RunicMagic.Submit");
       }
+      this.requestContentRefit();
     };
 
     form.addEventListener("change", event => {

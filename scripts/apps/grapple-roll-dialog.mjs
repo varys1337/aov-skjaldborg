@@ -20,8 +20,7 @@ import {
   unregisterTargetRefresh,
   validChoiceValue
 } from "./target-refresh-helpers.mjs";
-
-const { DialogV2 } = foundry.applications.api;
+import { SkjDialogV2 } from "./base/dialog-v2.mjs";
 
 const GRAPPLE_SKILL_CID = "i.skill.grapple";
 const TARGET_OPTION_FIELDS = Object.freeze(["mode", "locationMode", "manualLocationId"]);
@@ -50,7 +49,7 @@ function getGrappleSkills(actor) {
  * selection, then delegates the actual opposed-card and follow-up automation to
  * `grapple-automation.mjs`.
  */
-export class GrappleRollDialog extends DialogV2 {
+export class GrappleRollDialog extends SkjDialogV2 {
   static current = null;
 
   static DEFAULT_OPTIONS = {
@@ -199,7 +198,9 @@ export class GrappleRollDialog extends DialogV2 {
       this._captureForm(form);
       this.activeTargetKey = String(targetControl.dataset.targetKey ?? "");
       this._setActiveTarget(this._activeTarget());
-      void this.render({ force: true });
+      void this.render({ force: true }).catch(exception => {
+        error("Failed to change the active target in the grapple dialog.", exception);
+      });
     });
     this._updateLocationMode(form);
     this._updatePreview(form);
@@ -264,6 +265,9 @@ export class GrappleRollDialog extends DialogV2 {
     }
     this._updateLocationMode(form);
     this._updatePreview(form);
+    if (["mode", "locationMode"].includes(String(target?.name ?? ""))) {
+      this.requestContentRefit();
+    }
   }
 
   _updateLocationMode(form) {

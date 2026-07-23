@@ -590,7 +590,7 @@ export function hotbarVisibleEffects(actor) {
  */
 export function openEffectSheet(effect) {
   try {
-    return effect?.sheet?.render?.(true) ?? null;
+    return effect?.sheet?.render?.({ force: true }) ?? null;
   } catch (exception) {
     warn("Unable to open Skjaldborg ActiveEffect sheet.", exception);
     return null;

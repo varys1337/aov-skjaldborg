@@ -2,6 +2,7 @@ import { DEFENSE_REACTION_STEP, MODULE_ID } from "../constants.mjs";
 import { AoVAdapter } from "../adapter/aov-adapter.mjs";
 import { alwaysShowIconMode, effectIsActive, moduleFlag, safeDeleteActiveEffect } from "../compat/active-effects.mjs";
 import { RenderCoordinator } from "../ui/render-coordinator.mjs";
+import { warn } from "../logger.mjs";
 
 const REACTION_EFFECT_FLAG = "managedReactionPenalty";
 const REACTION_EFFECT_DATA_FLAG = "reactionPenalty";
@@ -326,25 +327,33 @@ export function registerReactionPenaltyEffectHooks(hooks = globalThis.Hooks) {
   hooks.on("combatRound", (combat, _updateData, updateOptions = {}) => {
     if (!game.user?.isGM) return;
     if (Number(updateOptions?.direction ?? 1) <= 0) return;
-    void removeExpiredReactionPenaltyEffects(combat, { reason: "combat-round" });
+    void removeExpiredReactionPenaltyEffects(combat, { reason: "combat-round" }).catch(exception => {
+      warn("Failed to remove expired reaction penalties after combatRound.", exception);
+    });
   });
 
   hooks.on("updateCombat", (combat, changed = {}, options = {}) => {
     if (!game.user?.isGM) return;
     if (!Object.prototype.hasOwnProperty.call(changed ?? {}, "round")) return;
     if (Number(options?.direction ?? 1) <= 0) return;
-    void removeExpiredReactionPenaltyEffects(combat, { reason: "combat-update-round" });
+    void removeExpiredReactionPenaltyEffects(combat, { reason: "combat-update-round" }).catch(exception => {
+      warn("Failed to remove expired reaction penalties after updateCombat.", exception);
+    });
   });
 
   hooks.on("deleteCombatant", combatant => {
     if (!game.user?.isGM) return;
     const actor = reactionActorForCombatant(combatant);
-    void deleteReactionPenaltyEffectsForActor(actor);
+    void deleteReactionPenaltyEffectsForActor(actor).catch(exception => {
+      warn("Failed to remove reaction penalties for a deleted Combatant.", exception);
+    });
   });
 
   hooks.on("deleteCombat", combat => {
     if (!game.user?.isGM) return;
-    void clearReactionPenaltyEffectsForCombat(combat, { reason: "combat-delete" });
+    void clearReactionPenaltyEffectsForCombat(combat, { reason: "combat-delete" }).catch(exception => {
+      warn("Failed to clear reaction penalties for a deleted Combat.", exception);
+    });
   });
 }
 

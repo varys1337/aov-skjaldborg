@@ -189,7 +189,7 @@ export class ActionRing extends HandlebarsApplicationMixin(ApplicationV2) {
     const combat = game.combat ?? null;
     const combatant = AoVAdapter.getCombatantForToken(combat, placeable);
     this.current = new ActionRing({ token: placeable, combat, combatant, fallbackPosition });
-    await this.current.render(true);
+    await this.current.render({ force: true });
     return this.current;
   }
 
@@ -352,7 +352,9 @@ export class ActionRing extends HandlebarsApplicationMixin(ApplicationV2) {
         return;
       }
       if (event.target.closest("[data-action]")) return;
-      void ActionRing.closeAll();
+      void ActionRing.closeAll().catch(exception => {
+        error("Failed to close the action ring after a background pointer interaction.", exception);
+      });
     });
 
     window.setTimeout(() => {
@@ -438,7 +440,10 @@ export class ActionRing extends HandlebarsApplicationMixin(ApplicationV2) {
         return toggleIntentCategory(this.actor, this.combatant, this.combat, target.dataset.actionId, { promptOther: true });
       }
       return this._openDetails(target.dataset.actionKind, target.dataset.actionId);
-    })();
+    })().catch(exception => {
+      error("Failed to run the action-ring context action.", exception);
+      ui.notifications.error(game.i18n.localize("AOV_SKJALDBORG.Warnings.ActionFailed"));
+    });
   }
 
   /**
@@ -489,17 +494,23 @@ export class ActionRing extends HandlebarsApplicationMixin(ApplicationV2) {
 
     if (kind === "item") {
       const execution = executeActorItem(this.actor, actionId, event);
-      void ActionRing.closeAll();
+      void ActionRing.closeAll().catch(exception => {
+        error("Failed to close the action ring after an Item action.", exception);
+      });
       return execution;
     }
     if (kind === "stat") {
       const execution = executeActorStat(this.actor, actionId, event);
-      void ActionRing.closeAll();
+      void ActionRing.closeAll().catch(exception => {
+        error("Failed to close the action ring after a statistic action.", exception);
+      });
       return execution;
     }
     if (kind === "macro") {
       const execution = executeMacro(actionId);
-      void ActionRing.closeAll();
+      void ActionRing.closeAll().catch(exception => {
+        error("Failed to close the action ring after a Macro action.", exception);
+      });
       return execution;
     }
     return null;
@@ -566,7 +577,7 @@ export function registerActionRingHooks(hooks = globalThis.Hooks) {
       event.stopPropagation();
       void (async () => {
         try {
-          await actor.sheet?.render?.(true);
+          await actor.sheet?.render?.({ force: true });
           await app.close({ animate: false });
         } catch (exception) {
           error("Failed to open action-ring details from the Token HUD.", exception);
@@ -577,8 +588,13 @@ export function registerActionRingHooks(hooks = globalThis.Hooks) {
     configControl.insertAdjacentElement("afterend", control);
   });
 
-  hooks.on("canvasPan", () => void ActionRing.closeAll());
-  hooks.on("controlToken", () => void ActionRing.closeAll());
-  hooks.on("canvasTearDown", () => void ActionRing.closeAll());
+  const closeForCanvasChange = () => {
+    void ActionRing.closeAll().catch(exception => {
+      error("Failed to close the action ring after a canvas change.", exception);
+    });
+  };
+  hooks.on("canvasPan", closeForCanvasChange);
+  hooks.on("controlToken", closeForCanvasChange);
+  hooks.on("canvasTearDown", closeForCanvasChange);
   window.addEventListener("resize", () => ActionRing.current?.setPosition(), { passive: true });
 }

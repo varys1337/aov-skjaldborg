@@ -86,7 +86,15 @@ export async function runDiagnostics() {
   results.push(check("action-ring-setting", typeof game.settings.get(MODULE_ID, "enableActionRing") === "boolean"));
   results.push(check("actor-hotbar-setting", typeof game.settings.get(MODULE_ID, "enableActorHotbar") === "boolean"));
   results.push(check("appv2", capabilities.applications.applicationV2));
+  results.push(optionalCheck(
+    "appv2-refit",
+    capabilities.applications.refit ? "native Foundry 14.365 content refitting" : "unavailable; guarded compatibility path"
+  ));
   results.push(check("dialogv2", capabilities.applications.dialogV2));
+  results.push(optionalCheck(
+    "chat-presentation-options",
+    capabilities.chat.messagePresentationOptions ? "notify and scroll options available" : "default chat presentation behavior"
+  ));
   results.push(check("scene-move-tokens", true, capabilities.movement.sceneMoveTokens ? "native" : "per-token fallback"));
   results.push(check("token-move", capabilities.movement.tokenMove));
   results.push(check("token-complete-movement-path", true, capabilities.movement.completeMovementPath ? "native" : "fallback expansion"));
@@ -99,6 +107,10 @@ export async function runDiagnostics() {
         : "catalog unavailable; module fallback active when ActiveEffect is available"));
   results.push(check("status-effect-mode", true, `${engagementStatusMode}; ${statusEffectCapabilityDetail({ ...capabilities, statusEffectMode: engagementStatusMode })}`));
   results.push(check("active-effect-class", true, String(capabilities.effects.activeEffectClass)));
+  results.push(optionalCheck(
+    "active-effect-should-apply-change",
+    String(capabilities.effects.shouldApplyChange)
+  ));
   results.push(check("active-effect-from-status", true, String(capabilities.effects.activeEffectFromStatusEffect)));
   results.push(check("aov-combat-class", capabilities.combat.combatClass, `${capabilities.combat.className}; name recognized=${capabilities.combat.aovCombatClass}`));
   results.push(check("message-mode-compatibility", isAoVMessageModeCompatible(), "Combat#rollInitiative does not access core.rollMode"));

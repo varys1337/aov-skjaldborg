@@ -14,8 +14,7 @@ import { requestGm } from "../socket.mjs";
 import { RenderCoordinator } from "../ui/render-coordinator.mjs";
 import { error } from "../logger.mjs";
 import { actionThemeClass, actorPortraitSource, isVideoSource } from "../ui/dom-utils.mjs";
-
-const { DialogV2 } = foundry.applications.api;
+import { SkjDialogV2 } from "./base/dialog-v2.mjs";
 
 function numberWithin(value, min, max) {
   const number = Number(value);
@@ -141,7 +140,7 @@ function formValues(form, { actor, twoWeapon }) {
   };
 }
 
-export class UtilityDialog extends DialogV2 {
+export class UtilityDialog extends SkjDialogV2 {
   static current = null;
 
   static DEFAULT_OPTIONS = {
@@ -209,7 +208,7 @@ export class UtilityDialog extends DialogV2 {
 
     if (this.current) await this.current.close({ force: true });
     this.current = new UtilityDialog({ actor, combatant: liveCombatant, combat });
-    await this.current.render({ force: true, modal: false });
+    await this.current.render({ force: true });
     return this.current;
   }
 
@@ -353,6 +352,7 @@ export class UtilityDialog extends DialogV2 {
     }
     const count = form.querySelector("[data-location-count]");
     if (count) count.textContent = game.i18n.format("AOV_SKJALDBORG.Utility.CoveredCount", { count: selected.size });
+    this.requestContentRefit();
   }
 
   _syncTwoWeaponPanel(form) {
@@ -362,6 +362,7 @@ export class UtilityDialog extends DialogV2 {
     for (const input of form.querySelectorAll("[data-two-weapon-chance]")) {
       if (input instanceof HTMLInputElement) input.disabled = !enabled;
     }
+    this.requestContentRefit();
   }
 
   async _submit(form) {
