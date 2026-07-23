@@ -39,7 +39,7 @@ jobs:
         run: npm run build -- --tag "${GITHUB_REF_NAME}"
 
       - name: Verify release archive
-        run: unzip -t dist/aov-skjaldborg.zip
+        run: unzip -t release/aov-skjaldborg.zip
 
       - name: Publish GitHub release
         env:
@@ -52,9 +52,9 @@ jobs:
           fi
 
           gh release create "${GITHUB_REF_NAME}" \
-            dist/aov-skjaldborg.zip \
-            dist/module.json \
-            dist/SHA256SUMS.txt \
+            release/aov-skjaldborg.zip \
+            release/module.json \
+            release/SHA256SUMS.txt \
             --repo "${GITHUB_REPOSITORY}" \
             --title "Age of Vikings - Skjaldborg ${GITHUB_REF_NAME}" \
             --generate-notes \

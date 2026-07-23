@@ -39,15 +39,15 @@ jobs:
         run: npm run build
 
       - name: Verify release archive
-        run: unzip -t dist/aov-skjaldborg.zip
+        run: unzip -t release/aov-skjaldborg.zip
 
       - name: Upload CI build
         uses: actions/upload-artifact@v4
         with:
           name: aov-skjaldborg-${{ github.sha }}
           path: |
-            dist/aov-skjaldborg.zip
-            dist/module.json
-            dist/SHA256SUMS.txt
+            release/aov-skjaldborg.zip
+            release/module.json
+            release/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 14
