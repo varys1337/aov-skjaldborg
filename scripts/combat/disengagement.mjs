@@ -525,12 +525,31 @@ export async function resolveKnockbackDisengagement(combat, attackerCombatantId,
 }
 
 /**
+ * Clear one displaced attacker/target engagement only when reach is lost.
+ *
+ * @param {object} context Automation context containing combatant ids.
+ * @returns {Promise<number>}
+ */
+export async function resolveOutOfReachEngagementPair(context = {}) {
+  const combat = context.combatId
+    ? game.combats?.get?.(context.combatId) ?? game.combat
+    : game.combat;
+  if (!combat || !context.attackerCombatantId || !context.targetCombatantId) return 0;
+  return resolveKnockbackDisengagement(
+    combat,
+    context.attackerCombatantId,
+    context.targetCombatantId,
+    { clearAll: false, onlyIfOutOfReach: true }
+  );
+}
+
+/**
  * Register disengagement integration hooks once.
  *
  * @returns {void}
  */
-export function registerDisengagementHooks() {
-  Hooks.on("aovSkjaldborgKnockbackResolved", payload => {
+export function registerDisengagementHooks(hooks = globalThis.Hooks) {
+  hooks.on("aovSkjaldborgKnockbackResolved", payload => {
     if (!game.user?.isGM) return;
     const combat = payload?.combat ?? game.combat;
     void resolveKnockbackDisengagement(

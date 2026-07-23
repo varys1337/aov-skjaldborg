@@ -270,22 +270,22 @@ export function refreshEngagementOverlayVisuals(reason = "api") {
   scheduleRedraw(reason);
 }
 
-export function registerEngagementIndicatorHooks() {
+export function registerEngagementIndicatorHooks(hooks = globalThis.Hooks) {
   if (hooksRegistered) return;
   hooksRegistered = true;
-  overlayManager.registerHooks(Hooks);
-  Hooks.on("canvasPan", () => scheduleRedraw("canvas-pan"));
-  Hooks.on("updateToken", document => {
+  overlayManager.registerHooks(hooks);
+  hooks.on("canvasPan", () => scheduleRedraw("canvas-pan"));
+  hooks.on("updateToken", document => {
     const id = tokenId(document);
     if (id) scheduleRedraw("update-token");
   });
-  Hooks.on("deleteToken", document => {
+  hooks.on("deleteToken", document => {
     scheduleRedraw("delete-token");
   });
-  Hooks.on("updateCombat", () => scheduleRedraw("update-combat"));
-  Hooks.on("updateCombatant", () => scheduleRedraw("update-combatant"));
-  Hooks.on("deleteCombat", combat => clearEngagementOverlayVisualsForCombat(combat, { reason: "combat-deleted" }));
-  Hooks.on("deleteCombatant", combatant => {
+  hooks.on("updateCombat", () => scheduleRedraw("update-combat"));
+  hooks.on("updateCombatant", () => scheduleRedraw("update-combatant"));
+  hooks.on("deleteCombat", combat => clearEngagementOverlayVisualsForCombat(combat, { reason: "combat-deleted" }));
+  hooks.on("deleteCombatant", combatant => {
     for (const key of Array.from(pairEntries.keys())) {
       if (key.split(":").includes(String(combatant?.id ?? ""))) destroyPairEntry(key);
     }

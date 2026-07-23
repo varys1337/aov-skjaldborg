@@ -1,6 +1,8 @@
 import { MODULE_ID } from "../constants.mjs";
 import { warn } from "../logger.mjs";
 import { collectionArray, numberOr, safeFromUuid } from "../utils/document-data.mjs";
+import { guardedUpdate } from "../utils/guarded-document-writes.mjs";
+import { AOV_TEMPLATES } from "../adapter/aov-contract.mjs";
 import { combatantForTokenDocument, combatantValues } from "./combatant-token-resolution.mjs";
 
 export { collectionArray, numberOr, safeFromUuid } from "../utils/document-data.mjs";
@@ -124,6 +126,38 @@ export function grossDamage(card) {
 export function aovCards(message) {
   const cards = message?.getFlag?.("aov", "chatCard") ?? message?.flags?.aov?.chatCard ?? [];
   return Array.isArray(cards) ? cards : [];
+}
+
+/**
+ * Return the initiating card from an AoV combat ChatMessage.
+ *
+ * @param {ChatMessage|object|null|undefined} message Candidate message.
+ * @returns {object|null}
+ */
+export function attackCard(message) {
+  return aovCards(message)[0] ?? null;
+}
+
+/**
+ * Whether an AoV combat card has reached its closed state.
+ *
+ * @param {ChatMessage|object|null|undefined} message Candidate message.
+ * @returns {boolean}
+ */
+export function attackCardResolved(message) {
+  return message?.getFlag?.("aov", "cardType") === "CO"
+    && message?.getFlag?.("aov", "state") === "closed";
+}
+
+/**
+ * Whether the initiating AoV combat card succeeded.
+ *
+ * @param {ChatMessage|object|null|undefined} message Candidate message.
+ * @returns {boolean}
+ */
+export function attackCardSucceeded(message) {
+  const card = attackCard(message);
+  return card?.rollDamage === true || Number(card?.resultLevel ?? 1) >= 2;
 }
 
 /**
@@ -437,10 +471,56 @@ export async function renderAoVChat(template, data) {
  * @param {ChatMessage} message Message to re-render.
  * @returns {Promise<void>}
  */
-export async function rerenderAoVMessage(message) {
+export async function rerenderAoVMessage(message, {
+  fallbackTemplate = AOV_TEMPLATES.ROLL_COMBAT,
+  guarded = false
+} = {}) {
   const refreshed = game.messages?.get?.(message.id) ?? message;
-  const content = await renderAoVChat(refreshed.flags.aov?.chatTemplate ?? "systems/aov/templates/chat/roll-combat.hbs", refreshed.flags.aov);
+  const template = refreshed.flags?.aov?.chatTemplate ?? fallbackTemplate;
+  if (!template) return;
+  const content = await renderAoVChat(template, refreshed.flags.aov);
+  if (guarded) {
+    await guardedUpdate(refreshed, { content }, { category: "chat.aovRerender" });
+    return;
+  }
   await refreshed.update({ content });
+}
+
+/**
+ * Locate the first unresolved positive AoV damage card awaiting hit location.
+ *
+ * @param {ChatMessage|object|null|undefined} message Candidate message.
+ * @returns {{card: object, index: number}|null}
+ */
+export function findDamageLocationCard(message) {
+  const cards = aovCards(message);
+  const index = cards.findIndex(card => (
+    card?.rollType === "DM"
+    && card.damageCF === true
+    && grossDamage(card) > 0
+    && !String(card.targetLocID ?? "").trim()
+  ));
+  return index >= 0 ? { card: cards[index], index } : null;
+}
+
+/**
+ * Register the common create/update ChatMessage observer pair.
+ *
+ * @param {(message: ChatMessage) => Promise<unknown>|unknown} handler Handler.
+ * @param {{hooks?: typeof Hooks, onError?: (error: unknown) => void}} [options={}] Registration options.
+ * @returns {number} Number of registered hooks.
+ */
+export function registerChatMessageAutomationHooks(handler, {
+  hooks = globalThis.Hooks,
+  onError = exception => warn(exception)
+} = {}) {
+  if (typeof handler !== "function" || typeof hooks?.on !== "function") return 0;
+  const callback = message => {
+    void Promise.resolve(handler(message)).catch(onError);
+  };
+  hooks.on("createChatMessage", callback);
+  hooks.on("updateChatMessage", callback);
+  return 2;
 }
 
 function participantForActor(actor, tokenDocument = null) {

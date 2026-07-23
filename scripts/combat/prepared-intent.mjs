@@ -5,6 +5,7 @@ import { refreshPlanningInitiative } from "./planning-initiative.mjs";
 import { refreshImmediateResolutionActions } from "./resolution-queue.mjs";
 import { shouldQueueResolutionImmediately } from "./phase-structure.mjs";
 import { error } from "../logger.mjs";
+import { isAuthoritativeGmClient } from "../utils/authority.mjs";
 
 export const PREPARED_INTENT_FLAG = "preparedIntent";
 const PREPARED_INTENT_VERSION = 1;
@@ -160,17 +161,6 @@ export async function synchronizePreparedIntents(combat) {
 }
 
 /**
- * Select one active GM for authoritative prepared-intent synchronization.
- *
- * @returns {boolean}
- */
-function isAuthoritativeGmClient() {
-  if (!game.user?.isGM) return false;
-  const activeGm = game.users?.find?.(user => user.active && user.isGM) ?? null;
-  return !activeGm || activeGm.id === game.user.id;
-}
-
-/**
  * Register synchronization hooks for Combat activation and late combatants.
  *
  * The documented combatStart hook runs before the core start update completes,
@@ -178,11 +168,11 @@ function isAuthoritativeGmClient() {
  *
  * @returns {void}
  */
-export function registerPreparedIntentHooks() {
+export function registerPreparedIntentHooks(hooks = globalThis.Hooks) {
   if (hooksRegistered) return;
   hooksRegistered = true;
 
-  Hooks.on("combatStart", combat => {
+  hooks.on("combatStart", combat => {
     if (!isAuthoritativeGmClient()) return;
     globalThis.setTimeout(() => {
       void synchronizePreparedIntents(combat).catch(cause => {
@@ -191,7 +181,7 @@ export function registerPreparedIntentHooks() {
     }, 0);
   });
 
-  Hooks.on("createCombatant", combatant => {
+  hooks.on("createCombatant", combatant => {
     if (!isAuthoritativeGmClient() || !combatant?.parent?.started) return;
     void applyPreparedIntentToCombatant(combatant).catch(cause => {
       error("Failed to synchronize a prepared intent for a new combatant.", cause);

@@ -1,5 +1,6 @@
 import { ENGAGED_STATUS_ID, ENGAGEMENT_STATUS, ENGAGEMENT_VISUAL_MODE_DEFAULT, ENGAGEMENT_VISUAL_MODES, MODULE_ID, MOVEMENT_DEBUG_CATEGORIES, MOVEMENT_DEBUG_LEVELS } from "../constants.mjs";
 import {
+  canMirrorActorStatusEffect,
   effectHasStatus,
   effectIsActive,
   moduleFlag,
@@ -116,14 +117,7 @@ function usesActiveEffectMirror(mode = getEngagementVisualMode()) {
  * @returns {boolean}
  */
 function canMirrorEngagementEffect(actor) {
-  if (statusEffectMode === "disabled") return false;
-  if (!actor) return false;
-  return typeof CONFIG?.ActiveEffect?.documentClass === "function"
-    && (
-      typeof actor.toggleStatusEffect === "function"
-      || typeof actor.createEmbeddedDocuments === "function"
-      || Array.from(actor.effects ?? []).some(effect => typeof effect?.update === "function")
-    );
+  return canMirrorActorStatusEffect(actor, { enabled: statusEffectMode !== "disabled" });
 }
 
 /**
@@ -608,24 +602,24 @@ async function clearDeletedCombatantEngagement(combatant) {
  *
  * @returns {void}
  */
-export function registerEngagedStatusHooks() {
+export function registerEngagedStatusHooks(hooks = globalThis.Hooks) {
   if (statusEffectMode !== "disabled" && typeof CONFIG?.ActiveEffect?.documentClass === "function") {
-    Hooks.on("deleteActiveEffect", effect => {
+    hooks.on("deleteActiveEffect", effect => {
       if (!isEngagedEffect(effect)) return;
       void clearEngagementFromEffect(effect);
     });
 
-    Hooks.on("updateActiveEffect", effect => {
+    hooks.on("updateActiveEffect", effect => {
       if (!isEngagedEffect(effect) || hasActiveEngagedStatus(effect)) return;
       void clearEngagementFromEffect(effect);
     });
   }
 
-  Hooks.on("deleteCombat", combat => {
+  hooks.on("deleteCombat", combat => {
     void clearEngagedStatusEffectsForCombat(combat, { reason: "combat-deleted" });
   });
 
-  Hooks.on("deleteCombatant", combatant => {
+  hooks.on("deleteCombatant", combatant => {
     void clearDeletedCombatantEngagement(combatant);
   });
 }

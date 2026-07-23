@@ -144,3 +144,37 @@ export function actorHotbarPartsForCombatChange(changed) {
   }
   return parts;
 }
+
+/**
+ * Return whether a Combat differential can change Skjaldborg tracker output.
+ *
+ * @param {object|null|undefined} changed Combat differential.
+ * @returns {boolean}
+ */
+export function combatTrackerAffectedByCombatChange(changed) {
+  return hasAnyChangedPath(changed, [
+    "turn",
+    "round",
+    "combatants",
+    "flags.aov-skjaldborg.combatState"
+  ]);
+}
+
+/**
+ * Return whether a Combatant differential can change its tracker row.
+ *
+ * @param {object|null|undefined} changed Combatant differential.
+ * @returns {boolean}
+ */
+export function combatTrackerAffectedByCombatantChange(changed) {
+  return hasAnyChangedPath(changed, [
+    "initiative",
+    "name",
+    "img",
+    "tokenId",
+    "actorId",
+    "hidden",
+    "defeated",
+    "flags.aov-skjaldborg.combatantState"
+  ]);
+}

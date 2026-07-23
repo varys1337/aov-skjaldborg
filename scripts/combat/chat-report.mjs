@@ -290,10 +290,10 @@ function suppressPlayerReportForGm(message, html) {
  *
  * @returns {void}
  */
-export function registerChatReportHooks() {
+export function registerChatReportHooks(hooks = globalThis.Hooks) {
   if (chatReportHooksRegistered) return;
   chatReportHooksRegistered = true;
-  Hooks.on("renderChatMessageHTML", suppressPlayerReportForGm);
+  hooks.on("renderChatMessageHTML", suppressPlayerReportForGm);
 
   // Re-render an already-open GM chat log so player-audience messages created
   // before module ready are also suppressed by the newly registered hook.

@@ -8,6 +8,7 @@
  */
 import { GRAPPLED_STATUS_ID, IMMOBILIZED_STATUS_ID, MODULE_ID } from "../constants.mjs";
 import { AoVAdapter } from "../adapter/aov-adapter.mjs";
+import { AOV_TEMPLATES } from "../adapter/aov-contract.mjs";
 import { createModuleChatMessage } from "../compat/chat-message.mjs";
 import {
   effectHasStatus,
@@ -18,7 +19,8 @@ import {
   upsertActorStatusEffect
 } from "../compat/active-effects.mjs";
 import { warn, error } from "../logger.mjs";
-import { resolveKnockbackDisengagement } from "./disengagement.mjs";
+import { normalizeDescriptor } from "../utils/document-data.mjs";
+import { resolveOutOfReachEngagementPair } from "./disengagement.mjs";
 import {
   abilityTotal,
   actorName,
@@ -218,7 +220,7 @@ async function suppressGrappleDamagePrompt(message) {
 
   const aovFlags = foundry.utils.deepClone(message.flags?.aov ?? {});
   aovFlags.chatCard = chatCards;
-  const html = await renderAoVChat(aovFlags.chatTemplate ?? "systems/aov/templates/chat/roll-combat.hbs", aovFlags);
+  const html = await renderAoVChat(aovFlags.chatTemplate ?? AOV_TEMPLATES.ROLL_COMBAT, aovFlags);
   await message.update({
     "flags.aov.chatCard": chatCards,
     content: html
@@ -261,14 +263,6 @@ function cardResultLevel(card) {
 
 function cardLabel(card) {
   return String(card?.label ?? card?.skillName ?? card?.name ?? card?.itemName ?? "");
-}
-
-function normalizeDescriptor(value) {
-  return String(value ?? "")
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "");
 }
 
 function cardDescriptor(card) {
@@ -334,7 +328,7 @@ async function createResistanceCard(context, { activeScore, passiveScore, active
   const chatMsgData = {
     rollType: "CH",
     cardType: "RE",
-    chatTemplate: "systems/aov/templates/chat/roll-resistance.hbs",
+    chatTemplate: AOV_TEMPLATES.ROLL_RESISTANCE,
     state: "open",
     wait: true,
     resultLevel: 0,
@@ -770,15 +764,6 @@ async function promptThrowDestinationCanvas(targetToken, distance) {
   });
 }
 
-async function cleanupThrowEngagementPair(context) {
-  const combat = context.combatId ? game.combats?.get?.(context.combatId) ?? game.combat : game.combat;
-  if (!combat || !context.attackerCombatantId || !context.targetCombatantId) return 0;
-  return resolveKnockbackDisengagement(combat, context.attackerCombatantId, context.targetCombatantId, {
-    clearAll: false,
-    onlyIfOutOfReach: true
-  });
-}
-
 async function applyLandingDamage(context, targetActor) {
   const dexTarget = abilityTotal(targetActor, "dex") * 5;
   const dexRoll = await evaluateVisibleRoll("1d100");
@@ -862,7 +847,7 @@ async function handleThrowResistanceClosed(_message, context, resultLevel) {
     await targetToken.update({ x: destination.x, y: destination.y }, { animate: true, [MODULE_ID]: { reason: "grapple-throw", movementExecution: true } });
   }
   await removeGrappleEffects(context);
-  await cleanupThrowEngagementPair(context);
+  await resolveOutOfReachEngagementPair(context);
   await createGrappleResultMessage(context, {
     actor: targetActor,
     resultLevel,
@@ -957,7 +942,7 @@ export async function startGrappleAttack({ actor, targetToken, weapon, targetNum
   const chatMsgData = {
     rollType: "WP",
     cardType: "CO",
-    chatTemplate: "systems/aov/templates/chat/roll-combat.hbs",
+    chatTemplate: AOV_TEMPLATES.ROLL_COMBAT,
     state: "open",
     wait: true,
     resultLevel: 0,
@@ -1015,10 +1000,10 @@ export async function startGrappleAttack({ actor, targetToken, weapon, targetNum
  *
  * @returns {void}
  */
-export function registerGrappleAutomationHooks() {
+export function registerGrappleAutomationHooks(hooks = globalThis.Hooks) {
   if (hooksRegistered) return;
   hooksRegistered = true;
-  Hooks.on("updateChatMessage", message => {
+  hooks.on("updateChatMessage", message => {
     void handleGrappleChatUpdate(message).catch(warn);
   });
 }

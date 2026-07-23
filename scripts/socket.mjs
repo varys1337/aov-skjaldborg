@@ -46,7 +46,13 @@ import {
   assertSocketAuthority,
   resolveRequestingUser
 } from "./socket/authority.mjs";
-import { getSocketActionSchema, SOCKET_ACTIONS } from "./socket/schema.mjs";
+import {
+  bindSocketActionRuntime,
+  DEFAULT_SOCKET_ACTION_TIMEOUT_MS,
+  getSocketActionSchema,
+  normalizeSocketActionResult,
+  SOCKET_ACTIONS
+} from "./socket/schema.mjs";
 import { unknownSocketActionError } from "./socket/errors.mjs";
 import {
   cleanActionCategory,
@@ -67,8 +73,8 @@ import {
   targetNames
 } from "./combat/runic-magic-data.mjs";
 import { appendMagicDetailsToMessage, createRunicResistanceCards } from "./combat/runic-magic-cards.mjs";
+import { firstActiveGm } from "./utils/authority.mjs";
 
-const SOCKET_REQUEST_TIMEOUT_MS = 10000;
 const SOCKET_MESSAGE_REQUEST = "request";
 const SOCKET_MESSAGE_RESPONSE = "response";
 const SOCKET_SCHEMA_VERSION = 1;
@@ -79,85 +85,10 @@ const userPromptQueues = new Map();
 const CLIENT_SOCKET_ACTIONS = new Set(Object.entries(SOCKET_ACTIONS)
   .filter(([, schema]) => schema.clientAction === true)
   .map(([action]) => action));
-const DEFENSE_RESULT_FIELDS = Object.freeze([
-  "accepted",
-  "alreadyResolved",
-  "cancelled",
-  "combatAction",
-  "coreDialogSource",
-  "defenseMessageId",
-  "defenseMode",
-  "reason"
-]);
-
-function plainSocketActionResult(action, result = {}) {
-  const source = result && typeof result === "object" && !Array.isArray(result) ? result : {};
-  return {
-    accepted: source.accepted !== false,
-    action: String(action ?? ""),
-    ...(source.duplicate === true ? { duplicate: true } : {}),
-    ...(source.reason ? { reason: cleanString(source.reason, 120) } : {})
-  };
-}
-
-function movementSocketResult(action, result = {}) {
-  const source = result && typeof result === "object" && !Array.isArray(result) ? result : {};
-  const movement = source.movement && typeof source.movement === "object" ? source.movement : source;
-  return {
-    ...plainSocketActionResult(action, source),
-    ignoredReason: cleanString(source.ignoredReason, 80),
-    routeId: cleanString(source.routeId ?? movement.routeId, 160),
-    routeRevision: Math.max(0, Number(source.routeRevision ?? movement.routeRevision) || 0),
-    planStatus: cleanString(source.planStatus ?? movement.planStatus, 40),
-    draft: (source.draft ?? movement.draft) === true
-  };
-}
-
-function defenseSocketResult(action, result = {}) {
-  const source = result && typeof result === "object" && !Array.isArray(result) ? result : {};
-  const summary = plainSocketActionResult(action, source);
-  for (const field of DEFENSE_RESULT_FIELDS) {
-    if (source[field] === undefined) continue;
-    if (typeof source[field] === "string") summary[field] = cleanString(source[field], 200);
-    else if (typeof source[field] === "boolean") summary[field] = source[field];
-    else if (source[field] === null) summary[field] = null;
-  }
-  return summary;
-}
-
-function isDocumentLike(value) {
-  return !!value
-    && typeof value === "object"
-    && (
-      typeof value.documentName === "string"
-      || typeof value.uuid === "string"
-      || typeof value.update === "function"
-      || typeof value.setFlag === "function"
-    );
-}
 
 function normalizeSocketResult(action, result) {
-  if (action === "recordMovement" || action === "clearMovement") return movementSocketResult(action, result);
-  if (action === "promptDefenseRoll" || action === "commitDefenseCard") return defenseSocketResult(action, result);
-  if (result === null || result === undefined) return plainSocketActionResult(action);
-  if (typeof result === "boolean") return { accepted: result, action: String(action ?? "") };
-  if (isDocumentLike(result)) return plainSocketActionResult(action, {
-    accepted: true,
-    reason: result.documentName ?? result.constructor?.name ?? ""
-  });
-  if (Array.isArray(result)) return plainSocketActionResult(action, { accepted: true });
-  if (typeof result !== "object") return plainSocketActionResult(action, { accepted: true });
-  if (result.accepted !== undefined || result.reason !== undefined) return plainSocketActionResult(action, result);
-  return plainSocketActionResult(action);
-}
-
-/**
- * Select the first active GM to receive a player request.
- *
- * @returns {User|null}
- */
-function firstActiveGm() {
-  return game.users.find(u => u.active && u.isGM) ?? null;
+  return getSocketActionSchema(action)?.normalize(result)
+    ?? normalizeSocketActionResult(action, result);
 }
 
 /**
@@ -209,16 +140,6 @@ function socketUserTimeoutMessage(userId) {
  */
 function requestingUser(userId) {
   return resolveRequestingUser(userId);
-}
-
-/**
- * Require a GM-originated request for workflow-global mutations.
- *
- * @param {User} user Requesting User.
- * @returns {void}
- */
-function assertGmRequest(user) {
-  if (!user?.isGM) throw new Error(game.i18n.localize("AOV_SKJALDBORG.Warnings.GmOnly"));
 }
 
 /**
@@ -1197,6 +1118,10 @@ export async function requestGm(action, payload = {}) {
     performanceDiagnostics.markEnd(measureId, { action, noGm: true });
     return null;
   }
+  const schemaTimeout = Number(getSocketActionSchema(action)?.timeoutMs);
+  const timeoutMs = Number.isFinite(schemaTimeout) && schemaTimeout > 0
+    ? schemaTimeout
+    : DEFAULT_SOCKET_ACTION_TIMEOUT_MS;
   return new Promise((resolve, reject) => {
     const timeout = globalThis.setTimeout(() => {
       pendingSocketRequests.delete(message.requestId);
@@ -1205,7 +1130,7 @@ export async function requestGm(action, payload = {}) {
       performanceDiagnostics.count("socket.request.timeout", 1, { action, gmId: message.to });
       performanceDiagnostics.markEnd(measureId, { action, timedOut: true });
       reject(new Error(errorMessage));
-    }, SOCKET_REQUEST_TIMEOUT_MS);
+    }, timeoutMs);
     pendingSocketRequests.set(message.requestId, {
       resolve: result => {
         performanceDiagnostics.markEnd(measureId, { action, ok: true });
@@ -1278,7 +1203,7 @@ export async function requestUser(action, payload = {}, userId) {
   const schemaTimeout = Number(getSocketActionSchema(action)?.timeoutMs);
   const timeoutMs = Number.isFinite(schemaTimeout) && schemaTimeout > 0
     ? schemaTimeout
-    : SOCKET_REQUEST_TIMEOUT_MS;
+    : DEFAULT_SOCKET_ACTION_TIMEOUT_MS;
 
   return new Promise((resolve, reject) => {
     const timeout = globalThis.setTimeout(() => {
@@ -1375,352 +1300,363 @@ export async function startDialogCombatWorkflowBatch(payloads = [], options = {}
   return results;
 }
 
-/**
- * Handle a direct client-side socket request on the addressed user's client.
- * These actions are intentionally limited to user-interface prompts, not
- * authoritative combat state mutations.
- *
- * @param {{action: string, payload?: object, from?: string, to?: string, requestId?: string}} message Socket message.
- * @returns {Promise<unknown>}
- */
-export async function handleClientSocketRequest(message) {
-  debug("client socket request", message);
-  if (message?.type && message.type !== SOCKET_MESSAGE_REQUEST) {
-    throw new Error(`Invalid ${MODULE_ID} socket message type.`);
-  }
-  if (message?.schemaVersion && Number(message.schemaVersion) !== SOCKET_SCHEMA_VERSION) {
-    throw new Error(`Unsupported ${MODULE_ID} socket schema version.`);
-  }
-  if (!message?.requestId) throw new Error(`Rejected ${MODULE_ID} socket request without a request id.`);
-  if (isDuplicateRequest(message)) {
-    performanceDiagnostics.count("socket.request.duplicate", 1, {
-      action: message.action,
-      requestId: message.requestId,
-      client: true
-    });
-    return { accepted: true, action: message.action, duplicate: true };
-  }
-  const schema = getSocketActionSchema(message.action);
-  if (!schema?.clientAction) throw unknownSocketActionError(MODULE_ID, message.action, { client: true });
-  const user = requestingUser(message?.from);
-  const payload = schema.sanitize(message?.payload ?? {});
-  assertSocketAuthority({ action: message.action, schema, user, payload, message });
-  return schema.execute({ payload, user, message, requestGm });
+function resolveCombatDocuments(context) {
+  const combat = AoVAdapter.getCombatById(context.payload.combatId);
+  const combatant = context.payload.combatantId
+    ? AoVAdapter.getCombatantById(combat, context.payload.combatantId)
+    : null;
+  return { ...context, combat, combatant };
 }
 
-/**
- * Handle a socket request on the authoritative GM client.
- *
- * @param {{action: string, payload?: object, from?: string, to?: string, requestId?: string}} message Socket message.
- * @returns {Promise<unknown>}
- */
-export async function handleSocketRequest(message) {
-  debug("socket request", message);
-  if (message?.type && message.type !== SOCKET_MESSAGE_REQUEST) {
-    throw new Error(`Invalid ${MODULE_ID} socket message type.`);
-  }
-  if (message?.schemaVersion && Number(message.schemaVersion) !== SOCKET_SCHEMA_VERSION) {
-    throw new Error(`Unsupported ${MODULE_ID} socket schema version.`);
-  }
-  if (!message?.requestId) throw new Error(`Rejected ${MODULE_ID} socket request without a request id.`);
-  if (isDuplicateRequest(message)) {
-    performanceDiagnostics.count("socket.request.duplicate", 1, {
-      action: message.action,
-      requestId: message.requestId,
-      client: false
-    });
-    return { accepted: true, action: message.action, duplicate: true };
-  }
-  const user = requestingUser(message?.from);
-  const payload = message?.payload ?? {};
-  const combat = AoVAdapter.getCombatById(payload.combatId);
-  const combatant = payload.combatantId ? AoVAdapter.getCombatantById(combat, payload.combatantId) : null;
+function authorizeCombatantWrite({ user, combatant }) {
+  assertCombatantAccess(user, combatant);
+}
 
-  switch (message.action) {
-    case "initializeCombat":
-      assertGmRequest(user);
-      assertCombat(combat);
-      return PhaseController.initialize(combat);
-    case "disableCombat":
-      assertGmRequest(user);
-      assertCombat(combat);
-      return PhaseController.disable(combat);
-    case "advancePhase":
-      assertGmRequest(user);
-      assertCombat(combat);
-      assertFreshCombat(payload, combat);
-      return PhaseController.advance(combat, cleanPhase(payload.phase));
-    case "advanceTurn":
-      assertCombat(combat);
-      if (!user.isGM) assertCombatantAccess(user, combat.combatant);
-      return PhaseController.advanceTurn(combat);
-    case "setActionStatus":
-      assertGmRequest(user);
-      assertCombat(combat);
-      assertFreshCombat(payload, combat);
-      return PhaseController.setActionStatus(combat, payload.actionId, cleanResolutionStatus(payload.status));
-    case "submitIntent":
-      assertCombatantAccess(user, combatant);
-      return enqueueCombatantWrite(combat?.id, combatant?.id, async () => {
-        const intent = sanitizeIntentPayload(payload.intent);
-        if (!isFreshCombatant(payload, combatant)) {
-          if (staleIntentIsIdempotent(payload, combatant, intent)) {
-            performanceDiagnostics.count("intent.commit.staleIdenticalNoop", 1, {
-              combatId: combat?.id ?? null,
-              combatantId: combatant?.id ?? null,
-              actionCategory: intent.actionCategory
-            });
-            performanceDiagnostics.count("socket.request.staleNoop", 1, {
-              action: message.action,
-              combatId: combat?.id ?? null,
-              combatantId: combatant?.id ?? null
-            });
-            return getCombatantState(combatant);
-          }
-          assertFreshCombatant(payload, combatant);
-        }
-        validateIntentAgainstDisengagement(combatant, intent);
-        const updated = await updateCombatantState(combatant, { intent });
-        await refreshPlanningInitiative(combat, combatant);
-        if (shouldQueueResolutionImmediately()) {
-          await refreshImmediateResolutionActions(combat, combatant);
-        }
-        return updated;
-      });
-    case "holdIntent":
-      assertCombatantAccess(user, combatant);
-      return enqueueCombatantWrite(combat?.id, combatant?.id, async () => {
-        assertFreshCombatant(payload, combatant);
-        const updated = await updateCombatantState(combatant, {
-          intent: { ...getCombatantState(combatant).intent, status: "held" }
+function authorizeAdvanceTurn({ user, combat }) {
+  assertCombat(combat);
+  if (!user.isGM) assertCombatantAccess(user, combat.combatant);
+}
+
+async function executeRecordMovement({ combat, combatant, payload }) {
+  const incoming = sanitizeMovementPayload(payload.movement);
+  const result = await enqueueCombatantWrite(combat?.id, combatant?.id, async () => {
+    const current = getCombatantState(combatant).movement;
+    const incomingRevision = Number(incoming.routeRevision) || 0;
+    const currentRevision = Number(current?.routeRevision) || 0;
+
+    if (incomingRevision > 0) {
+      if (incomingRevision < currentRevision) {
+        performanceDiagnostics.count("movement.commit.ignored", 1, {
+          combatId: combat?.id ?? null,
+          combatantId: combatant?.id ?? null,
+          ignoredReason: "stale-revision",
+          incomingRevision,
+          currentRevision
         });
-        await refreshPlanningInitiative(combat, combatant);
-        if (shouldQueueResolutionImmediately()) {
-          await refreshImmediateResolutionActions(combat, combatant);
-        }
-        return updated;
-      });
-    case "clearIntent":
-      assertCombatantAccess(user, combatant);
-      return enqueueCombatantWrite(combat?.id, combatant?.id, async () => {
-        assertFreshCombatant(payload, combatant);
-        const updated = await updateCombatantState(combatant, {
-          intent: foundry.utils.deepClone(defaultCombatantState().intent)
-        });
-        await refreshPlanningInitiative(combat, combatant);
-        if (shouldQueueResolutionImmediately()) {
-          await refreshImmediateResolutionActions(combat, combatant);
-        }
-        return updated;
-      });
-    case "recordMovement": {
-      assertCombatantAccess(user, combatant);
-      const incoming = sanitizeMovementPayload(payload.movement);
-      const result = await enqueueCombatantWrite(combat?.id, combatant?.id, async () => {
-        const current = getCombatantState(combatant).movement;
-        const incomingRevision = Number(incoming.routeRevision) || 0;
-        const currentRevision = Number(current?.routeRevision) || 0;
-
-        // Re-read after prior writes complete. Without serialization, a draft
-        // and final player route can both validate against the same old state
-        // and the slower draft update may overwrite the final plan.
-        if (incomingRevision > 0) {
-          if (incomingRevision < currentRevision) {
-            performanceDiagnostics.count("movement.commit.ignored", 1, {
-              combatId: combat?.id ?? null,
-              combatantId: combatant?.id ?? null,
-              ignoredReason: "stale-revision",
-              incomingRevision,
-              currentRevision
-            });
-            movementDebug(MOVEMENT_DEBUG_CATEGORIES.SOCKET, "record-movement-stale-revision-ignored", () => ({
-              combatantId: combatant?.id ?? null,
-              incomingRevision,
-              currentRevision,
-              incoming,
-              current
-            }), {
-              combatId: combat?.id ?? null,
-              combatantId: combatant?.id ?? null,
-              level: MOVEMENT_DEBUG_LEVELS.VERBOSE
-            });
-            return movementCommitSummary(incoming, { accepted: false, ignoredReason: "stale-revision" });
-          }
-          if (
-            incomingRevision === currentRevision
-            && Number(incoming.capturedAt) < Number(current?.capturedAt ?? 0)
-          ) {
-            performanceDiagnostics.count("movement.commit.ignored", 1, {
-              combatId: combat?.id ?? null,
-              combatantId: combatant?.id ?? null,
-              ignoredReason: "older-equal-revision",
-              incomingRevision,
-              currentRevision
-            });
-            movementDebug(MOVEMENT_DEBUG_CATEGORIES.SOCKET, "record-movement-older-equal-revision-ignored", () => ({
-              combatantId: combatant?.id ?? null,
-              incomingRevision,
-              incomingCapturedAt: incoming.capturedAt,
-              currentCapturedAt: current?.capturedAt ?? null,
-              incoming,
-              current
-            }), {
-              combatId: combat?.id ?? null,
-              combatantId: combatant?.id ?? null,
-              level: MOVEMENT_DEBUG_LEVELS.VERBOSE
-            });
-            return movementCommitSummary(incoming, { accepted: false, ignoredReason: "older-equal-revision" });
-          }
-        }
-        else assertFreshCombatant(payload, combatant);
-
-        movementDebug(MOVEMENT_DEBUG_CATEGORIES.SOCKET, "record-movement-write", () => ({
+        movementDebug(MOVEMENT_DEBUG_CATEGORIES.SOCKET, "record-movement-stale-revision-ignored", () => ({
           combatantId: combatant?.id ?? null,
           incomingRevision,
           currentRevision,
-          routeId: incoming.routeId,
-          captureSource: incoming.captureSource,
-          draft: incoming.draft,
-          previousMovement: current,
-          incomingMovement: incoming
+          incoming,
+          current
         }), {
           combatId: combat?.id ?? null,
           combatantId: combatant?.id ?? null,
-          level: MOVEMENT_DEBUG_LEVELS.TRACE
+          level: MOVEMENT_DEBUG_LEVELS.VERBOSE
         });
-        await updateCombatantState(combatant, { movement: incoming });
-        movementDebug(MOVEMENT_DEBUG_CATEGORIES.SOCKET, "record-movement-write-complete", () => ({
-          combatantId: combatant?.id ?? null,
-          routeId: incoming.routeId,
-          routeRevision: incoming.routeRevision,
-          persistedMovement: getCombatantState(combatant).movement
-        }), {
-          combatId: combat?.id ?? null,
-          combatantId: combatant?.id ?? null,
-          level: MOVEMENT_DEBUG_LEVELS.TRACE
-        });
-        return movementCommitSummary(getCombatantState(combatant).movement);
-      }, { movement: true });
-
-      const persisted = getCombatantState(combatant).movement;
-      const combatPhase = getCombatState(combat).phase;
-      const sameRevision = Number(persisted?.routeRevision ?? 0) === Number(incoming.routeRevision ?? 0);
-      if (result.accepted !== false && incoming.draft !== true && sameRevision) {
-        await refreshPlanningInitiative(combat, combatant);
+        return movementCommitSummary(incoming, { accepted: false, ignoredReason: "stale-revision" });
       }
       if (
-        result.accepted !== false
-        && incoming.draft !== true
-        && sameRevision
-        && persisted?.planStatus === MOVEMENT_PLAN_STATUS.PLANNED
-        && shouldExecuteMovementImmediately(combatPhase)
+        incomingRevision === currentRevision
+        && Number(incoming.capturedAt) < Number(current?.capturedAt ?? 0)
       ) {
-        await startMovementPhase(combat, { positionAtLast: false });
-        if (shouldQueueResolutionImmediately()) {
-          await refreshImmediateResolutionActions(combat, combatant, { preserveStatus: true });
-        }
-      }
-      return {
-        ...result,
-        planStatus: cleanString(persisted?.planStatus ?? result.planStatus, 40),
-        draft: persisted?.draft === true
-      };
-    }
-    case "clearMovement":
-      assertCombatantAccess(user, combatant);
-      return enqueueCombatantWrite(combat?.id, combatant?.id, async () => {
-        assertFreshCombatant(payload, combatant);
-        const clearedMovement = {
-          mode: "none",
-          origin: null,
-          destination: null,
-          route: [],
-          waypoints: [],
-          distance: 0,
-          units: "",
-          manual: true,
-          planStatus: MOVEMENT_PLAN_STATUS.NONE,
-          startedAt: null,
-          completedAt: null,
-          stoppedReason: "",
-          routeRevision: Date.now(),
-          routeId: "",
-          captureSource: "manual-clear",
-          capturedAt: Date.now(),
-          draft: false
-        };
-        await updateCombatantState(combatant, {
-          movement: clearedMovement
+        performanceDiagnostics.count("movement.commit.ignored", 1, {
+          combatId: combat?.id ?? null,
+          combatantId: combatant?.id ?? null,
+          ignoredReason: "older-equal-revision",
+          incomingRevision,
+          currentRevision
         });
-        await refreshPlanningInitiative(combat, combatant);
-        if (shouldQueueResolutionImmediately()) {
-          await refreshImmediateResolutionActions(combat, combatant, { preserveStatus: true });
+        movementDebug(MOVEMENT_DEBUG_CATEGORIES.SOCKET, "record-movement-older-equal-revision-ignored", () => ({
+          combatantId: combatant?.id ?? null,
+          incomingRevision,
+          incomingCapturedAt: incoming.capturedAt,
+          currentCapturedAt: current?.capturedAt ?? null,
+          incoming,
+          current
+        }), {
+          combatId: combat?.id ?? null,
+          combatantId: combatant?.id ?? null,
+          level: MOVEMENT_DEBUG_LEVELS.VERBOSE
+        });
+        return movementCommitSummary(incoming, { accepted: false, ignoredReason: "older-equal-revision" });
+      }
+    } else {
+      assertFreshCombatant(payload, combatant);
+    }
+
+    movementDebug(MOVEMENT_DEBUG_CATEGORIES.SOCKET, "record-movement-write", () => ({
+      combatantId: combatant?.id ?? null,
+      incomingRevision,
+      currentRevision,
+      routeId: incoming.routeId,
+      captureSource: incoming.captureSource,
+      draft: incoming.draft,
+      previousMovement: current,
+      incomingMovement: incoming
+    }), {
+      combatId: combat?.id ?? null,
+      combatantId: combatant?.id ?? null,
+      level: MOVEMENT_DEBUG_LEVELS.TRACE
+    });
+    await updateCombatantState(combatant, { movement: incoming });
+    movementDebug(MOVEMENT_DEBUG_CATEGORIES.SOCKET, "record-movement-write-complete", () => ({
+      combatantId: combatant?.id ?? null,
+      routeId: incoming.routeId,
+      routeRevision: incoming.routeRevision,
+      persistedMovement: getCombatantState(combatant).movement
+    }), {
+      combatId: combat?.id ?? null,
+      combatantId: combatant?.id ?? null,
+      level: MOVEMENT_DEBUG_LEVELS.TRACE
+    });
+    return movementCommitSummary(getCombatantState(combatant).movement);
+  }, { movement: true });
+
+  const persisted = getCombatantState(combatant).movement;
+  const combatPhase = getCombatState(combat).phase;
+  const sameRevision = Number(persisted?.routeRevision ?? 0) === Number(incoming.routeRevision ?? 0);
+  if (result.accepted !== false && incoming.draft !== true && sameRevision) {
+    await refreshPlanningInitiative(combat, combatant);
+  }
+  if (
+    result.accepted !== false
+    && incoming.draft !== true
+    && sameRevision
+    && persisted?.planStatus === MOVEMENT_PLAN_STATUS.PLANNED
+    && shouldExecuteMovementImmediately(combatPhase)
+  ) {
+    await startMovementPhase(combat, { positionAtLast: false });
+    if (shouldQueueResolutionImmediately()) {
+      await refreshImmediateResolutionActions(combat, combatant, { preserveStatus: true });
+    }
+  }
+  return {
+    ...result,
+    planStatus: cleanString(persisted?.planStatus ?? result.planStatus, 40),
+    draft: persisted?.draft === true
+  };
+}
+
+const SOCKET_ACTION_RUNTIMES = Object.freeze({
+  initializeCombat: {
+    resolve: resolveCombatDocuments,
+    execute: ({ combat }) => {
+      assertCombat(combat);
+      return PhaseController.initialize(combat);
+    }
+  },
+  disableCombat: {
+    resolve: resolveCombatDocuments,
+    execute: ({ combat }) => {
+      assertCombat(combat);
+      return PhaseController.disable(combat);
+    }
+  },
+  advancePhase: {
+    resolve: resolveCombatDocuments,
+    execute: ({ combat, payload }) => {
+      assertCombat(combat);
+      assertFreshCombat(payload, combat);
+      return PhaseController.advance(combat, cleanPhase(payload.phase));
+    }
+  },
+  advanceTurn: {
+    resolve: resolveCombatDocuments,
+    authorize: authorizeAdvanceTurn,
+    execute: ({ combat }) => PhaseController.advanceTurn(combat)
+  },
+  setActionStatus: {
+    resolve: resolveCombatDocuments,
+    execute: ({ combat, payload }) => {
+      assertCombat(combat);
+      assertFreshCombat(payload, combat);
+      return PhaseController.setActionStatus(combat, payload.actionId, cleanResolutionStatus(payload.status));
+    }
+  },
+  submitIntent: {
+    resolve: resolveCombatDocuments,
+    authorize: authorizeCombatantWrite,
+    execute: ({ combat, combatant, payload, message }) => enqueueCombatantWrite(combat?.id, combatant?.id, async () => {
+      const intent = sanitizeIntentPayload(payload.intent);
+      if (!isFreshCombatant(payload, combatant)) {
+        if (staleIntentIsIdempotent(payload, combatant, intent)) {
+          performanceDiagnostics.count("intent.commit.staleIdenticalNoop", 1, {
+            combatId: combat?.id ?? null,
+            combatantId: combatant?.id ?? null,
+            actionCategory: intent.actionCategory
+          });
+          performanceDiagnostics.count("socket.request.staleNoop", 1, {
+            action: message.action,
+            combatId: combat?.id ?? null,
+            combatantId: combatant?.id ?? null
+          });
+          return getCombatantState(combatant);
         }
-        return movementCommitSummary(getCombatantState(combatant).movement, { action: "clearMovement" });
-      }, { movement: true });
-    case "adjustInitiative":
-      assertCombatantAccess(user, combatant);
-      return applyInitiativeAndWeaponAction(combatant, payload);
-    case "delayCombatant":
-      assertCombatantAccess(user, combatant);
+        assertFreshCombatant(payload, combatant);
+      }
+      validateIntentAgainstDisengagement(combatant, intent);
+      const updated = await updateCombatantState(combatant, { intent });
+      await refreshPlanningInitiative(combat, combatant);
+      if (shouldQueueResolutionImmediately()) await refreshImmediateResolutionActions(combat, combatant);
+      return updated;
+    })
+  },
+  holdIntent: {
+    resolve: resolveCombatDocuments,
+    authorize: authorizeCombatantWrite,
+    execute: ({ combat, combatant, payload }) => enqueueCombatantWrite(combat?.id, combatant?.id, async () => {
+      assertFreshCombatant(payload, combatant);
+      const updated = await updateCombatantState(combatant, {
+        intent: { ...getCombatantState(combatant).intent, status: "held" }
+      });
+      await refreshPlanningInitiative(combat, combatant);
+      if (shouldQueueResolutionImmediately()) await refreshImmediateResolutionActions(combat, combatant);
+      return updated;
+    })
+  },
+  clearIntent: {
+    resolve: resolveCombatDocuments,
+    authorize: authorizeCombatantWrite,
+    execute: ({ combat, combatant, payload }) => enqueueCombatantWrite(combat?.id, combatant?.id, async () => {
+      assertFreshCombatant(payload, combatant);
+      const updated = await updateCombatantState(combatant, {
+        intent: foundry.utils.deepClone(defaultCombatantState().intent)
+      });
+      await refreshPlanningInitiative(combat, combatant);
+      if (shouldQueueResolutionImmediately()) await refreshImmediateResolutionActions(combat, combatant);
+      return updated;
+    })
+  },
+  recordMovement: {
+    resolve: resolveCombatDocuments,
+    authorize: authorizeCombatantWrite,
+    execute: executeRecordMovement
+  },
+  clearMovement: {
+    resolve: resolveCombatDocuments,
+    authorize: authorizeCombatantWrite,
+    execute: ({ combat, combatant, payload }) => enqueueCombatantWrite(combat?.id, combatant?.id, async () => {
+      assertFreshCombatant(payload, combatant);
+      const clearedMovement = {
+        mode: "none",
+        origin: null,
+        destination: null,
+        route: [],
+        waypoints: [],
+        distance: 0,
+        units: "",
+        manual: true,
+        planStatus: MOVEMENT_PLAN_STATUS.NONE,
+        startedAt: null,
+        completedAt: null,
+        stoppedReason: "",
+        routeRevision: Date.now(),
+        routeId: "",
+        captureSource: "manual-clear",
+        capturedAt: Date.now(),
+        draft: false
+      };
+      await updateCombatantState(combatant, { movement: clearedMovement });
+      await refreshPlanningInitiative(combat, combatant);
+      if (shouldQueueResolutionImmediately()) {
+        await refreshImmediateResolutionActions(combat, combatant, { preserveStatus: true });
+      }
+      return movementCommitSummary(getCombatantState(combatant).movement, { action: "clearMovement" });
+    }, { movement: true })
+  },
+  adjustInitiative: {
+    resolve: resolveCombatDocuments,
+    authorize: authorizeCombatantWrite,
+    execute: ({ combatant, payload }) => applyInitiativeAndWeaponAction(combatant, payload)
+  },
+  delayCombatant: {
+    resolve: resolveCombatDocuments,
+    authorize: authorizeCombatantWrite,
+    execute: ({ combat, combatant, payload }) => {
       assertCombat(combat);
       return enqueueCombatantWrite(combat?.id, combatant?.id, async () => {
         assertFreshCombatant(payload, combatant);
         return applyCombatantDelay(combat, combatant, payload);
       });
-    case "setUtilityOptions":
-      assertCombatantAccess(user, combatant);
-      return enqueueCombatantWrite(combat?.id, combatant?.id, async () => {
-        assertFreshCombatant(payload, combatant);
-        return applyUtilityOptions(combatant, payload);
-      });
-    case "startRuneCarving":
-      assertCombatantAccess(user, combatant);
+    }
+  },
+  setUtilityOptions: {
+    resolve: resolveCombatDocuments,
+    authorize: authorizeCombatantWrite,
+    execute: ({ combat, combatant, payload }) => enqueueCombatantWrite(combat?.id, combatant?.id, async () => {
+      assertFreshCombatant(payload, combatant);
+      return applyUtilityOptions(combatant, payload);
+    })
+  },
+  startRuneCarving: {
+    resolve: resolveCombatDocuments,
+    authorize: authorizeCombatantWrite,
+    execute: ({ combat, combatant, payload }) => {
       assertCombat(combat);
       return enqueueCombatantWrite(combat?.id, combatant?.id, async () => {
         assertFreshCombatant(payload, combatant);
         return startRuneCarving(combat, combatant, payload);
       });
-    case "markRunePrepared":
-      assertCombatantAccess(user, combatant);
+    }
+  },
+  markRunePrepared: {
+    resolve: resolveCombatDocuments,
+    authorize: authorizeCombatantWrite,
+    execute: ({ combat, combatant, payload }) => {
       assertCombat(combat);
       return enqueueCombatantWrite(combat?.id, combatant?.id, async () => {
         assertFreshCombatant(payload, combatant);
         return markRunePrepared(combat, combatant, payload);
       });
-    case "castRuneScript":
-      assertCombatantAccess(user, combatant);
+    }
+  },
+  castRuneScript: {
+    resolve: resolveCombatDocuments,
+    authorize: authorizeCombatantWrite,
+    execute: ({ combat, combatant, payload }) => {
       assertCombat(combat);
       return enqueueCombatantWrite(combat?.id, combatant?.id, async () => {
         assertFreshCombatant(payload, combatant);
         return castRuneScript(combat, combatant, payload);
       });
-    case "trackSeidurRitual":
-      assertCombatantAccess(user, combatant);
+    }
+  },
+  trackSeidurRitual: {
+    resolve: resolveCombatDocuments,
+    authorize: authorizeCombatantWrite,
+    execute: ({ combat, combatant, payload }) => {
       assertCombat(combat);
       return enqueueCombatantWrite(combat?.id, combatant?.id, async () => {
         assertFreshCombatant(payload, combatant);
         return trackSeidurRitual(combat, combatant, payload);
       });
-    case "clearRuneMagic":
-      assertCombatantAccess(user, combatant);
-      return enqueueCombatantWrite(combat?.id, combatant?.id, async () => {
-        assertFreshCombatant(payload, combatant);
-        return clearRuneMagic(combatant);
-      });
-    case "disruptRuneMagic":
-      assertGmRequest(user);
+    }
+  },
+  clearRuneMagic: {
+    resolve: resolveCombatDocuments,
+    authorize: authorizeCombatantWrite,
+    execute: ({ combat, combatant, payload }) => enqueueCombatantWrite(combat?.id, combatant?.id, async () => {
+      assertFreshCombatant(payload, combatant);
+      return clearRuneMagic(combatant);
+    })
+  },
+  disruptRuneMagic: {
+    resolve: resolveCombatDocuments,
+    execute: ({ combat, combatant, payload }) => {
       assertCombat(combat);
-      return enqueueCombatantWrite(combat?.id, combatant?.id, async () => disruptRuneMagic(combatant, cleanString(payload.reason, 300)));
-    case "activateEvade":
-      assertCombatantAccess(user, combatant);
+      return enqueueCombatantWrite(
+        combat?.id,
+        combatant?.id,
+        async () => disruptRuneMagic(combatant, cleanString(payload.reason, 300))
+      );
+    }
+  },
+  activateEvade: {
+    resolve: resolveCombatDocuments,
+    authorize: authorizeCombatantWrite,
+    execute: ({ combat, combatant, payload }) => {
       assertCombat(combat);
       return enqueueCombatantWrite(combat?.id, combatant?.id, async () => {
         assertFreshCombatant(payload, combatant);
         return activateEvadingForCombatant(combat, combatant);
       });
-    case "declareDisengagement":
-      assertCombatantAccess(user, combatant);
+    }
+  },
+  declareDisengagement: {
+    resolve: resolveCombatDocuments,
+    authorize: authorizeCombatantWrite,
+    execute: ({ combat, combatant, payload }) => {
       assertCombat(combat);
       return enqueueCombatantWrite(combat?.id, combatant?.id, async () => {
         assertFreshCombatant(payload, combatant);
@@ -1732,8 +1668,11 @@ export async function handleSocketRequest(message) {
           opportunityMode: cleanString(payload.opportunityMode, 20)
         });
       });
-    case "resolveKnockbackDisengagement":
-      assertGmRequest(user);
+    }
+  },
+  resolveKnockbackDisengagement: {
+    resolve: resolveCombatDocuments,
+    execute: ({ combat, payload }) => {
       assertCombat(combat);
       return resolveKnockbackDisengagement(
         combat,
@@ -1741,34 +1680,94 @@ export async function handleSocketRequest(message) {
         cleanString(payload.targetCombatantId, 100),
         { clearAll: payload.clearAll === true, onlyIfOutOfReach: payload.onlyIfOutOfReach === true }
       );
-    case "incrementReaction": {
-      assertCombatantAccess(user, combatant);
-      return enqueueCombatantWrite(combat?.id, combatant?.id, async () => {
-        assertFreshCombatant(payload, combatant);
-        const state = getCombatantState(combatant);
-        const reactionCount = Math.max(0, Number(state.reactionCount ?? 0) + 1);
-        const next = await updateCombatantState(combatant, { reactionCount });
-        await reconcileReactionPenaltyEffect(combat, combatant, reactionCount);
-        return next;
-      });
     }
-    case "decrementReaction": {
-      assertCombatantAccess(user, combatant);
-      return enqueueCombatantWrite(combat?.id, combatant?.id, async () => {
-        assertFreshCombatant(payload, combatant);
-        const state = getCombatantState(combatant);
-        const reactionCount = Math.max(0, Number(state.reactionCount ?? 0) - 1);
-        const next = await updateCombatantState(combatant, { reactionCount });
-        await reconcileReactionPenaltyEffect(combat, combatant, reactionCount);
-        return next;
-      });
-    }
-    case "commitDefenseCard": {
-      const schema = getSocketActionSchema("commitDefenseCard");
-      const sanitized = schema?.sanitize(payload) ?? payload;
-      return AoVAdapter.commitDefenseCard(sanitized, { user, requestId: message.requestId });
-    }
-    default:
-      throw new Error(`Unknown ${MODULE_ID} socket action "${message.action}"`);
+  },
+  incrementReaction: {
+    resolve: resolveCombatDocuments,
+    authorize: authorizeCombatantWrite,
+    execute: ({ combat, combatant, payload }) => enqueueCombatantWrite(combat?.id, combatant?.id, async () => {
+      assertFreshCombatant(payload, combatant);
+      const state = getCombatantState(combatant);
+      const reactionCount = Math.max(0, Number(state.reactionCount ?? 0) + 1);
+      const next = await updateCombatantState(combatant, { reactionCount });
+      await reconcileReactionPenaltyEffect(combat, combatant, reactionCount);
+      return next;
+    })
+  },
+  decrementReaction: {
+    resolve: resolveCombatDocuments,
+    authorize: authorizeCombatantWrite,
+    execute: ({ combat, combatant, payload }) => enqueueCombatantWrite(combat?.id, combatant?.id, async () => {
+      assertFreshCombatant(payload, combatant);
+      const state = getCombatantState(combatant);
+      const reactionCount = Math.max(0, Number(state.reactionCount ?? 0) - 1);
+      const next = await updateCombatantState(combatant, { reactionCount });
+      await reconcileReactionPenaltyEffect(combat, combatant, reactionCount);
+      return next;
+    })
+  },
+  commitDefenseCard: {
+    execute: ({ payload, user, message }) => AoVAdapter.commitDefenseCard(payload, {
+      user,
+      requestId: message.requestId
+    })
+  },
+  promptDefenseRoll: {}
+});
+
+for (const [action, runtime] of Object.entries(SOCKET_ACTION_RUNTIMES)) {
+  bindSocketActionRuntime(action, runtime);
+}
+
+async function executeSocketEnvelope(message, { clientAction }) {
+  debug(clientAction ? "client socket request" : "socket request", message);
+  if (message?.type && message.type !== SOCKET_MESSAGE_REQUEST) {
+    throw new Error(`Invalid ${MODULE_ID} socket message type.`);
   }
+  if (message?.schemaVersion && Number(message.schemaVersion) !== SOCKET_SCHEMA_VERSION) {
+    throw new Error(`Unsupported ${MODULE_ID} socket schema version.`);
+  }
+  if (!message?.requestId) throw new Error(`Rejected ${MODULE_ID} socket request without a request id.`);
+  if (isDuplicateRequest(message)) {
+    performanceDiagnostics.count("socket.request.duplicate", 1, {
+      action: message.action,
+      requestId: message.requestId,
+      client: clientAction
+    });
+    return { accepted: true, action: message.action, duplicate: true };
+  }
+
+  const schema = getSocketActionSchema(message.action);
+  if (!schema || schema.clientAction !== clientAction) {
+    throw unknownSocketActionError(MODULE_ID, message.action, { client: clientAction });
+  }
+  const user = requestingUser(message?.from);
+  const payload = schema.sanitize(message?.payload ?? {});
+  const baseContext = { action: schema.id, payload, user, message, requestGm };
+  assertSocketAuthority({ action: schema.id, schema, user, payload, message });
+  const context = await schema.resolve(baseContext);
+  await schema.authorize(context);
+  return schema.execute(context);
+}
+
+/**
+ * Handle a direct client-side socket request on the addressed user's client.
+ * These actions are intentionally limited to user-interface prompts, not
+ * authoritative combat state mutations.
+ *
+ * @param {{action: string, payload?: object, from?: string, to?: string, requestId?: string}} message Socket message.
+ * @returns {Promise<unknown>}
+ */
+export async function handleClientSocketRequest(message) {
+  return executeSocketEnvelope(message, { clientAction: true });
+}
+
+/**
+ * Handle a socket request on the authoritative GM client.
+ *
+ * @param {{action: string, payload?: object, from?: string, to?: string, requestId?: string}} message Socket message.
+ * @returns {Promise<unknown>}
+ */
+export async function handleSocketRequest(message) {
+  return executeSocketEnvelope(message, { clientAction: false });
 }

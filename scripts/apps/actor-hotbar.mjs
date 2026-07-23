@@ -3120,8 +3120,8 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
  *
  * @returns {void}
  */
-export function registerActorHotbarHooks() {
-  return registerActorHotbarHookRegistry(ActorHotbar);
+export function registerActorHotbarHooks(hooks = globalThis.Hooks) {
+  return registerActorHotbarHookRegistry(ActorHotbar, hooks);
 }
 
 export const __test = {

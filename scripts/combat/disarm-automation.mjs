@@ -8,6 +8,7 @@
  * damage or unequip an item twice.
  */
 import { MODULE_ID } from "../constants.mjs";
+import { AOV_TEMPLATES } from "../adapter/aov-contract.mjs";
 import { createModuleChatMessage } from "../compat/chat-message.mjs";
 import { warn } from "../logger.mjs";
 import { incrementCounter } from "../performance/performance-monitor.mjs";
@@ -15,14 +16,19 @@ import { clearReadiedWeaponInHand, getReadiedWeaponIds } from "./weapon-state.mj
 import {
   abilityTotal,
   aovCards,
+  attackCard,
+  attackCardResolved,
+  attackCardSucceeded,
   buildResistanceChatCard,
   idTypeMatch,
   inlineResultHtml,
   localize,
   numberOr,
   recentFlaggedMessages,
+  registerChatMessageAutomationHooks,
   renderActorStackCard,
   renderAoVChat,
+  rerenderAoVMessage,
   resultIconHtml,
   safeFromUuid
 } from "./automation-helpers.mjs";
@@ -67,29 +73,8 @@ function findMatchingDisarmSource(damageMessage, damageCard) {
   return match ? { message: match.message, disarm: match.flag } : null;
 }
 
-function attackCard(message) {
-  return aovCards(message)[0] ?? null;
-}
-
-function attackResolved(message) {
-  return message?.getFlag?.("aov", "cardType") === "CO" && message?.getFlag?.("aov", "state") === "closed";
-}
-
-function attackSucceeded(message) {
-  const card = attackCard(message);
-  return card?.rollDamage === true || Number(card?.resultLevel ?? 1) >= 2;
-}
-
 function attackSpecialOrBetter(message) {
   return Number(attackCard(message)?.resultLevel ?? 1) >= 3;
-}
-
-async function rerenderAoVMessage(message) {
-  const refreshed = game.messages?.get?.(message.id) ?? message;
-  const template = refreshed.flags?.aov?.chatTemplate;
-  if (!template) return;
-  const content = await renderAoVChat(template, refreshed.flags.aov);
-  await refreshed.update({ content });
 }
 
 async function resolveContext(disarm) {
@@ -159,7 +144,7 @@ async function createResistanceCard(sourceMessage, disarm, { stage, activeActor,
   const chatMsgData = {
     rollType: "CH",
     cardType: "RE",
-    chatTemplate: "systems/aov/templates/chat/roll-resistance.hbs",
+    chatTemplate: AOV_TEMPLATES.ROLL_RESISTANCE,
     state: "open",
     wait: true,
     resultLevel: 0,
@@ -291,7 +276,7 @@ async function resolveStrikeWeapon(sourceMessage, disarm, damageMessage, damageC
       resolvedAt: Date.now()
     }
   });
-  await rerenderAoVMessage(damageMessage);
+  await rerenderAoVMessage(damageMessage, { fallbackTemplate: null });
   await markDisarmResolved(sourceMessage, {
     damageMessageId: damageMessage.id,
     affectedWeaponId: targetWeapon.id,
@@ -333,7 +318,7 @@ async function resolveFlatDamage(sourceMessage, disarm, damageMessage, damageCar
       resolvedAt: Date.now()
     }
   });
-  await rerenderAoVMessage(damageMessage);
+  await rerenderAoVMessage(damageMessage, { fallbackTemplate: null });
   await createFlatResistance(sourceMessage, disarm, damage);
   return true;
 }
@@ -349,11 +334,11 @@ async function handleDamageMessage(message) {
 }
 
 async function handleCombatMessage(message) {
-  if (!game.user?.isGM || !attackResolved(message)) return;
+  if (!game.user?.isGM || !attackCardResolved(message)) return;
   const disarm = message.getFlag?.(MODULE_ID, DISARM_FLAG) ?? null;
   if (!disarm || disarm.resolved === true || disarm.stage !== "attack") return;
 
-  if (!attackSucceeded(message)) {
+  if (!attackCardSucceeded(message)) {
     await markDisarmResolved(message, { stage: "failedAttack" });
     return;
   }
@@ -481,15 +466,10 @@ async function handleMessageUpdate(message) {
  *
  * @returns {void}
  */
-export function registerDisarmAutomationHooks() {
+export function registerDisarmAutomationHooks(hooks = globalThis.Hooks) {
   if (hooksRegistered) return;
   hooksRegistered = true;
-  Hooks.on("createChatMessage", message => {
-    void handleMessageUpdate(message).catch(exception => warn(exception));
-  });
-  Hooks.on("updateChatMessage", message => {
-    void handleMessageUpdate(message).catch(exception => warn(exception));
-  });
+  registerChatMessageAutomationHooks(handleMessageUpdate, { hooks });
 }
 
 export const __test = {

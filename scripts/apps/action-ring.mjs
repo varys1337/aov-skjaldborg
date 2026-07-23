@@ -516,11 +516,11 @@ export class ActionRing extends HandlebarsApplicationMixin(ApplicationV2) {
  *
  * @returns {void}
  */
-export function registerActionRingHooks() {
+export function registerActionRingHooks(hooks = globalThis.Hooks) {
   if (hooksRegistered) return;
   hooksRegistered = true;
 
-  Hooks.on("renderTokenHUD", (app, html) => {
+  hooks.on("renderTokenHUD", (app, html) => {
     const element = html instanceof HTMLElement ? html : app?.element;
     if (element) markPriorityStatusPalette(element);
     if (!game.settings.get(MODULE_ID, "enableActionRing")) return;
@@ -577,8 +577,8 @@ export function registerActionRingHooks() {
     configControl.insertAdjacentElement("afterend", control);
   });
 
-  Hooks.on("canvasPan", () => void ActionRing.closeAll());
-  Hooks.on("controlToken", () => void ActionRing.closeAll());
-  Hooks.on("canvasTearDown", () => void ActionRing.closeAll());
+  hooks.on("canvasPan", () => void ActionRing.closeAll());
+  hooks.on("controlToken", () => void ActionRing.closeAll());
+  hooks.on("canvasTearDown", () => void ActionRing.closeAll());
   window.addEventListener("resize", () => ActionRing.current?.setPosition(), { passive: true });
 }

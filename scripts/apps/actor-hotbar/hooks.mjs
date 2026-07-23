@@ -264,24 +264,24 @@ function invalidateActorHotbar(parts, reason, actor = ActorHotbarClass?.current?
  * @param {typeof import("../actor-hotbar.mjs").ActorHotbar} ActorHotbar Hotbar facade class.
  * @returns {void}
  */
-export function registerActorHotbarHooks(ActorHotbar) {
+export function registerActorHotbarHooks(ActorHotbar, hooks = globalThis.Hooks) {
   if (hooksRegistered) return;
   ActorHotbarClass = ActorHotbar;
   hooksRegistered = true;
 
   RenderCoordinator.register("actorHotbar", detail => ActorHotbar.renderInvalidated(detail));
 
-  Hooks.on("controlToken", () => invalidateActorHotbar(["shell"], "control-token"));
-  Hooks.on("canvasReady", () => invalidateActorHotbar(["shell"], "canvas-ready"));
-  Hooks.on("canvasTearDown", () => invalidateActorHotbar(["shell"], "canvas-teardown"));
-  Hooks.on("renderHotbar", () => invalidateActorHotbar(["shell"], "core-hotbar-render"));
-  Hooks.on("createToken", token => {
+  hooks.on("controlToken", () => invalidateActorHotbar(["shell"], "control-token"));
+  hooks.on("canvasReady", () => invalidateActorHotbar(["shell"], "canvas-ready"));
+  hooks.on("canvasTearDown", () => invalidateActorHotbar(["shell"], "canvas-teardown"));
+  hooks.on("renderHotbar", () => invalidateActorHotbar(["shell"], "core-hotbar-render"));
+  hooks.on("createToken", token => {
     if (tokenBelongsToCurrentHotbarActor(token)) invalidateActorHotbar(["shell"], "token-create");
   });
-  Hooks.on("deleteToken", token => {
+  hooks.on("deleteToken", token => {
     if (tokenBelongsToCurrentHotbarActor(token)) invalidateActorHotbar(["shell"], "token-delete");
   });
-  Hooks.on("updateToken", (token, changes) => {
+  hooks.on("updateToken", (token, changes) => {
     const changedKeys = Object.keys(changes ?? {});
     const dispositionChanged = Object.prototype.hasOwnProperty.call(changes ?? {}, "disposition");
     const actorChanged = ["actorId", "actorLink"].some(key => Object.prototype.hasOwnProperty.call(changes ?? {}, key));
@@ -290,43 +290,43 @@ export function registerActorHotbarHooks(ActorHotbar) {
       invalidateActorHotbar(["shell", "resources"], "token-update");
     }
   });
-  Hooks.on("updateActor", (actor, changed) => {
+  hooks.on("updateActor", (actor, changed) => {
     const current = ActorHotbar.current;
     if (current?._xpUpdatePending && current.actor?.id === actor.id) return;
     if (!documentBelongsToCurrentHotbarActor(actor)) return;
     invalidateActorHotbar(actorHotbarPartsForActorChange(changed), "actor-update", actor);
   });
-  Hooks.on("updateItem", (item, changed) => {
+  hooks.on("updateItem", (item, changed) => {
     const current = ActorHotbar.current;
     const sameActor = documentBelongsToCurrentHotbarActor(item);
     if (sameActor && (current?._xpUpdatePending || current?._magicPreparationUpdatesPending?.size > 0)) return;
     if (sameActor) invalidateActorHotbar(actorHotbarPartsForItemChange(changed), "item-update", item.actor);
   });
-  Hooks.on("createItem", item => {
+  hooks.on("createItem", item => {
     if (documentBelongsToCurrentHotbarActor(item)) invalidateActorHotbar(["shell"], "item-create", item.actor);
   });
-  Hooks.on("deleteItem", item => {
+  hooks.on("deleteItem", item => {
     if (documentBelongsToCurrentHotbarActor(item)) invalidateActorHotbar(["shell"], "item-delete", item.actor);
   });
-  Hooks.on("createActiveEffect", effect => {
+  hooks.on("createActiveEffect", effect => {
     if (documentBelongsToCurrentHotbarActor(effect)) {
       invalidateActorHotbar(actorHotbarPartsForActiveEffect(effect), "effect-create", effectParentActor(effect));
     }
   });
-  Hooks.on("updateActiveEffect", (effect, changed) => {
+  hooks.on("updateActiveEffect", (effect, changed) => {
     if (!documentBelongsToCurrentHotbarActor(effect)) return;
     if (!Object.keys(changed ?? {}).length) return;
     invalidateActorHotbar(actorHotbarPartsForActiveEffect(effect), "effect-update", effectParentActor(effect));
   });
-  Hooks.on("deleteActiveEffect", effect => {
+  hooks.on("deleteActiveEffect", effect => {
     if (documentBelongsToCurrentHotbarActor(effect)) {
       invalidateActorHotbar(actorHotbarPartsForActiveEffect(effect), "effect-delete", effectParentActor(effect));
     }
   });
-  Hooks.on("updateCombat", (combat, changed) => {
+  hooks.on("updateCombat", (combat, changed) => {
     if (combatAffectsCurrentHotbar(combat)) invalidateActorHotbar(actorHotbarPartsForCombatChange(changed), "combat-update");
   });
-  Hooks.on("updateCombatant", (combatant, changed) => {
+  hooks.on("updateCombatant", (combatant, changed) => {
     if (combatantAffectsCurrentHotbar(combatant)) invalidateActorHotbar(actorHotbarPartsForCombatantChange(changed), "combatant-update", combatant.actor);
   });
 

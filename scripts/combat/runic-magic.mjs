@@ -2,20 +2,13 @@ import { MODULE_ID } from "../constants.mjs";
 import { RUNE_MAGIC_STATUSES } from "./runic-magic-data.mjs";
 import { getCombatantState, updateCombatantState } from "./state.mjs";
 import { createModuleChatMessage } from "../compat/chat-message.mjs";
-import { cleanString, numberOr } from "../utils/document-data.mjs";
+import { cleanString, itemActor, numberOr } from "../utils/document-data.mjs";
 import { RUNIC_MAGIC_RESISTANCE_FLAG } from "./runic-magic-cards.mjs";
 import { warn } from "../logger.mjs";
+import { isAuthoritativeGmClient } from "../utils/authority.mjs";
 
 let hooksRegistered = false;
 const processingMessages = new Set();
-
-function firstActiveGm() {
-  return game.users?.find?.(user => user.active && user.isGM) ?? null;
-}
-
-function itemActor(item) {
-  return item?.parent?.documentName === "Actor" ? item.parent : (item?.actor ?? item?.parent ?? null);
-}
 
 function changedPath(changed, path) {
   return foundry.utils.hasProperty(changed ?? {}, path);
@@ -68,7 +61,7 @@ function resistanceClosed(message) {
 }
 
 async function handleRunicResistanceMessage(message) {
-  if (!game.user?.isGM || firstActiveGm()?.id !== game.user.id) return;
+  if (!isAuthoritativeGmClient()) return;
   if (!resistanceClosed(message)) return;
   const data = message.getFlag?.(MODULE_ID, RUNIC_MAGIC_RESISTANCE_FLAG) ?? null;
   if (!data || data.resolved === true) return;
@@ -91,7 +84,7 @@ async function handleMessageUpdate(message) {
 }
 
 export async function disruptRuneMagicForActorDamage(item, changed = {}, options = {}) {
-  if (!game.user?.isGM || firstActiveGm()?.id !== game.user.id) return [];
+  if (!isAuthoritativeGmClient()) return [];
   if (!damagingWoundChange(item, changed, { created: options.created === true })) return [];
   const actor = itemActor(item);
   if (!actor) return [];
@@ -118,16 +111,16 @@ export async function disruptRuneMagicForActorDamage(item, changed = {}, options
   return Promise.all(updates);
 }
 
-export function registerRunicMagicHooks() {
+export function registerRunicMagicHooks(hooks = globalThis.Hooks) {
   if (hooksRegistered) return;
   hooksRegistered = true;
-  Hooks.on("createItem", (item) => {
+  hooks.on("createItem", (item) => {
     void disruptRuneMagicForActorDamage(item, {}, { created: true }).catch(exception => warn(exception));
   });
-  Hooks.on("updateItem", (item, changed) => {
+  hooks.on("updateItem", (item, changed) => {
     void disruptRuneMagicForActorDamage(item, changed, { created: false }).catch(exception => warn(exception));
   });
-  Hooks.on("updateChatMessage", message => {
+  hooks.on("updateChatMessage", message => {
     void handleMessageUpdate(message).catch(exception => warn(exception));
   });
 }

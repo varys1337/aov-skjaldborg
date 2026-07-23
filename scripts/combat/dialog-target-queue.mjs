@@ -5,27 +5,12 @@ import { startKnockbackAttack } from "./knockback-automation.mjs";
 import { startGrappleAttack } from "./grapple-automation.mjs";
 import { htmlEscape } from "../ui/dom-utils.mjs";
 import { warn } from "../logger.mjs";
+import { collectionArray, safeFromUuid } from "../utils/document-data.mjs";
 
 const TARGET_QUEUE_FLAG = "targetQueue";
 const SPLIT_ATTACK_FLAG = "splitAttack";
 
 let hooksRegistered = false;
-
-function collectionArray(source) {
-  if (!source) return [];
-  if (typeof source.values === "function") return Array.from(source.values());
-  return Array.from(source ?? []);
-}
-
-async function safeFromUuid(uuid) {
-  const value = String(uuid ?? "").trim();
-  if (!value || typeof fromUuid !== "function") return null;
-  try {
-    return await fromUuid(value);
-  } catch (_exception) {
-    return null;
-  }
-}
 
 async function tokenLikeFromUuid(uuid) {
   const resolved = await safeFromUuid(uuid);
@@ -312,8 +297,8 @@ function bindTargetQueueControls(message, html) {
   }
 }
 
-export function registerDialogTargetQueueHooks() {
+export function registerDialogTargetQueueHooks(hooks = globalThis.Hooks) {
   if (hooksRegistered) return;
   hooksRegistered = true;
-  Hooks.on("renderChatMessageHTML", bindTargetQueueControls);
+  hooks.on("renderChatMessageHTML", bindTargetQueueControls);
 }

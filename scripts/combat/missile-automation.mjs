@@ -19,6 +19,7 @@ import {
   idTypeMatch,
   localize,
   recentFlaggedMessages,
+  registerChatMessageAutomationHooks,
   renderActorStackCard,
   rerenderAoVMessage,
   safeFromUuid
@@ -379,15 +380,10 @@ async function handleMessageUpdate(message) {
  *
  * @returns {void}
  */
-export function registerMissileAutomationHooks() {
+export function registerMissileAutomationHooks(hooks = globalThis.Hooks) {
   if (hooksRegistered) return;
   hooksRegistered = true;
-  Hooks.on("createChatMessage", message => {
-    void handleMessageUpdate(message).catch(exception => warn(exception));
-  });
-  Hooks.on("updateChatMessage", message => {
-    void handleMessageUpdate(message).catch(exception => warn(exception));
-  });
+  registerChatMessageAutomationHooks(handleMessageUpdate, { hooks });
 }
 
 export const __test = {

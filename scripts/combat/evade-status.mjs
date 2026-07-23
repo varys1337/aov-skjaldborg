@@ -2,6 +2,7 @@ import { ACTION_CATEGORIES, EVADING_STATUS_ID, MODULE_ID } from "../constants.mj
 import { runtimeSettings } from "../runtime-settings.mjs";
 import { AoVAdapter } from "../adapter/aov-adapter.mjs";
 import {
+  canMirrorActorStatusEffect,
   effectHasStatus,
   effectIsActive,
   moduleFlag,
@@ -146,14 +147,7 @@ export function getActorEvadingState(actor) {
  * @returns {boolean}
  */
 function canMirrorEvadingEffect(actor) {
-  if (statusEffectMode === "disabled") return false;
-  if (!actor) return false;
-  return typeof CONFIG?.ActiveEffect?.documentClass === "function"
-    && (
-      typeof actor.toggleStatusEffect === "function"
-      || typeof actor.createEmbeddedDocuments === "function"
-      || Array.from(actor.effects ?? []).some(effect => typeof effect?.update === "function")
-    );
+  return canMirrorActorStatusEffect(actor, { enabled: statusEffectMode !== "disabled" });
 }
 
 /**
@@ -327,18 +321,18 @@ export async function removeExpiredEvadingEffects(combat, { logicalRound = null,
  *
  * @returns {void}
  */
-export function registerEvadingStatusHooks() {
+export function registerEvadingStatusHooks(hooks = globalThis.Hooks) {
   if (hooksRegistered) return;
   hooksRegistered = true;
 
-  Hooks.on("combatRound", (combat, updateData, updateOptions = {}) => {
+  hooks.on("combatRound", (combat, updateData, updateOptions = {}) => {
     if (!game.user?.isGM) return;
     if (Number(updateOptions?.direction ?? 1) <= 0) return;
     const nextLogicalRound = AoVAdapter.getSystemLogicalRound({ round: Number(updateData?.round ?? combat?.round ?? 0) });
     void removeExpiredEvadingEffects(combat, { logicalRound: nextLogicalRound, reason: "combat-round" });
   });
 
-  Hooks.on("updateCombat", (combat, changed = {}, options = {}) => {
+  hooks.on("updateCombat", (combat, changed = {}, options = {}) => {
     if (!game.user?.isGM) return;
     if (!Object.prototype.hasOwnProperty.call(changed ?? {}, "round")) return;
     if (Number(options?.direction ?? 1) <= 0) return;

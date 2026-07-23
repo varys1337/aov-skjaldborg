@@ -2,22 +2,11 @@ import { AoVAdapter } from "../adapter/aov-adapter.mjs";
 import { MODULE_ID, PHASES } from "../constants.mjs";
 import { computeDexLedger } from "./dex-ledger.mjs";
 import { getCombatState, getCombatantState, updateCombatantState } from "./state.mjs";
+import { runtimeSettings } from "../runtime-settings.mjs";
+import { numberOr } from "../utils/document-data.mjs";
 
 /** @type {Map<string, Promise<unknown>>} */
 const planningInitiativeLocks = new Map();
-
-/**
- * Convert a value to a finite number.
- *
- * @param {unknown} value Candidate value.
- * @param {number|null} [fallback=null] Fallback.
- * @returns {number|null}
- */
-function numberOr(value, fallback = null) {
-  if (value === null || value === undefined || value === "") return fallback;
-  const numeric = Number(value);
-  return Number.isFinite(numeric) ? numeric : fallback;
-}
 
 /**
  * Extract the DEX-rank portion of AoV's `DEX.INT` initiative convention.

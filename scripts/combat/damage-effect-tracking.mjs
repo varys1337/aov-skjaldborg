@@ -22,6 +22,7 @@ import {
 } from "./automation-helpers.mjs";
 import { warn } from "../logger.mjs";
 import { guardedUpdate } from "../utils/guarded-document-writes.mjs";
+import { itemActor } from "../utils/document-data.mjs";
 
 const IMPALED_EFFECT_NAME = "AOV_SKJALDBORG.StatusEffects.Impaled";
 const INJURY_EFFECT_NAME = "AOV_SKJALDBORG.StatusEffects.Injury";
@@ -450,10 +451,6 @@ async function processDamageCard(message, card, index) {
   };
 }
 
-function itemActor(item) {
-  return item?.parent?.documentName === "Actor" ? item.parent : (item?.actor ?? item?.parent ?? null);
-}
-
 function pendingMatchesAppliedItem(pending, item, changed = {}) {
   const actor = itemActor(item);
   if (!actor || String(actor.id ?? "") !== String(pending?.targetActorId ?? "")) return false;
@@ -641,22 +638,22 @@ function decorateHitLocationInjurySeverity(application, element) {
  *
  * @returns {void}
  */
-export function registerDamageEffectTrackingHooks() {
+export function registerDamageEffectTrackingHooks(hooks = globalThis.Hooks) {
   if (hooksRegistered) return;
   hooksRegistered = true;
-  Hooks.on("createChatMessage", message => {
+  hooks.on("createChatMessage", message => {
     void handleMessageUpdate(message).catch(exception => warn(exception));
   });
-  Hooks.on("updateChatMessage", message => {
+  hooks.on("updateChatMessage", message => {
     void handleMessageUpdate(message).catch(exception => warn(exception));
   });
-  Hooks.on("createItem", item => {
+  hooks.on("createItem", item => {
     void handleAppliedItemChange(item).catch(exception => warn(exception));
   });
-  Hooks.on("updateItem", (item, changed) => {
+  hooks.on("updateItem", (item, changed) => {
     void handleAppliedItemChange(item, changed).catch(exception => warn(exception));
   });
-  Hooks.on("renderApplicationV2", (application, element) => {
+  hooks.on("renderApplicationV2", (application, element) => {
     decorateHitLocationInjurySeverity(application, element);
   });
 }

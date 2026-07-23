@@ -1,6 +1,8 @@
 const features = new Map();
 const hookRegistrations = new Map();
 const initializedFeatures = new Map();
+const handlerIds = new WeakMap();
+let nextHandlerId = 1;
 
 function normalizeFeature(feature) {
   if (!feature || typeof feature !== "object") throw new TypeError("Feature registration must be an object.");
@@ -17,30 +19,40 @@ function normalizeFeature(feature) {
 }
 
 function hookKey(featureId, eventName, handler) {
-  return `${featureId}:${eventName}:${handler?.name ?? "anonymous"}`;
+  if (!handlerIds.has(handler)) handlerIds.set(handler, nextHandlerId++);
+  return `${featureId}:${eventName}:${handlerIds.get(handler)}`;
 }
 
-function registerFeatureHooks(feature) {
-  const registered = [];
-  for (const entry of feature.hooks) {
-    const [eventName, handler, options = {}] = entry ?? [];
+function createFeatureHookRegistrar(featureId) {
+  function register(eventName, handler, { once = false } = {}) {
     const hookName = String(eventName ?? "").trim();
-    if (!hookName || typeof handler !== "function") continue;
-    const key = hookKey(feature.id, hookName, handler);
-    if (hookRegistrations.has(key)) continue;
-    const once = options?.once === true;
+    if (!hookName || typeof handler !== "function") return null;
+    const key = hookKey(featureId, hookName, handler);
+    if (hookRegistrations.has(key)) return hookRegistrations.get(key).hookId;
     const hookId = once ? Hooks.once(hookName, handler) : Hooks.on(hookName, handler);
     const registration = {
-      featureId: feature.id,
+      featureId,
       eventName: hookName,
       hookId,
       once,
       handlerName: handler.name || ""
     };
     hookRegistrations.set(key, registration);
-    registered.push(registration);
+    return hookId;
   }
-  return registered;
+  return Object.freeze({
+    on: (eventName, handler) => register(eventName, handler),
+    once: (eventName, handler) => register(eventName, handler, { once: true }),
+    off: (eventName, hookId) => Hooks.off(eventName, hookId)
+  });
+}
+
+function registerFeatureHooks(feature, registrar) {
+  for (const entry of feature.hooks) {
+    const [eventName, handler, options = {}] = entry ?? [];
+    if (options?.once === true) registrar.once(eventName, handler);
+    else registrar.on(eventName, handler);
+  }
 }
 
 /**
@@ -63,7 +75,7 @@ export function registerFeature(feature) {
 /**
  * Initialize all registered features in insertion order.
  *
- * @returns {Map<string, {enabled: boolean, initialized: boolean, result: unknown, hookCount: number}>}
+ * @returns {Map<string, {enabled: boolean, initialized: boolean, result: unknown, trackedHookCount: number}>}
  */
 export function initializeRegisteredFeatures() {
   for (const feature of features.values()) {
@@ -75,17 +87,22 @@ export function initializeRegisteredFeatures() {
         enabled: false,
         initialized: false,
         result: null,
-        hookCount: feature.declaredHookCount || feature.hooks.length
+        declaredHookCount: feature.declaredHookCount || feature.hooks.length
       });
       continue;
     }
-    const registeredHooks = registerFeatureHooks(feature);
-    const result = feature.initialize ? feature.initialize() : null;
+    const registrar = createFeatureHookRegistrar(feature.id);
+    registerFeatureHooks(feature, registrar);
+    const result = feature.initialize ? feature.initialize(registrar) : null;
+    const trackedHookCount = Array.from(hookRegistrations.values())
+      .filter(registration => registration.featureId === feature.id)
+      .length;
     initializedFeatures.set(feature.id, {
       enabled: true,
       initialized: true,
       result,
-      hookCount: feature.declaredHookCount || registeredHooks.length
+      declaredHookCount: feature.declaredHookCount || feature.hooks.length,
+      trackedHookCount
     });
   }
   return new Map(initializedFeatures);
@@ -94,27 +111,38 @@ export function initializeRegisteredFeatures() {
 /**
  * Return a primitive-only feature registry report for diagnostics.
  *
- * @returns {{registeredFeatureCount: number, initializedFeatureCount: number, hookCount: number, features: object[]}}
+ * @returns {{registeredFeatureCount: number, initializedFeatureCount: number, hookCount: number, hookCountSource: string, trackedHookCount: number, declaredHookCount: number, features: object[]}}
  */
 export function getFeatureRegistryReport() {
   const hookCounts = new Map();
   for (const registration of hookRegistrations.values()) {
     hookCounts.set(registration.featureId, (hookCounts.get(registration.featureId) ?? 0) + 1);
   }
+  const featureReports = Array.from(features.values()).map(feature => {
+    const state = initializedFeatures.get(feature.id) ?? null;
+    const trackedHookCount = hookCounts.get(feature.id) ?? state?.trackedHookCount ?? 0;
+    const declaredHookCount = state?.declaredHookCount ?? feature.declaredHookCount;
+    return {
+      id: feature.id,
+      label: feature.label,
+      enabled: state?.enabled === true,
+      initialized: state?.initialized === true,
+      hookCount: trackedHookCount,
+      hookCountSource: "tracked",
+      trackedHookCount,
+      declaredHookCount
+    };
+  });
+  const trackedHookCount = featureReports.reduce((total, feature) => total + feature.trackedHookCount, 0);
+  const declaredHookCount = featureReports.reduce((total, feature) => total + feature.declaredHookCount, 0);
   return {
     registeredFeatureCount: features.size,
     initializedFeatureCount: initializedFeatures.size,
-    hookCount: hookRegistrations.size,
-    features: Array.from(features.values()).map(feature => {
-      const state = initializedFeatures.get(feature.id) ?? null;
-      return {
-        id: feature.id,
-        label: feature.label,
-        enabled: state?.enabled === true,
-        initialized: state?.initialized === true,
-        hookCount: hookCounts.get(feature.id) ?? state?.hookCount ?? feature.declaredHookCount
-      };
-    })
+    hookCount: trackedHookCount,
+    hookCountSource: "tracked",
+    trackedHookCount,
+    declaredHookCount,
+    features: featureReports
   };
 }
 

@@ -456,7 +456,7 @@ export function refreshCombatTrackerDecorations(detail = {}) {
  *
  * @returns {void}
  */
-export function registerTrackerHooks() {
+export function registerTrackerHooks(hooks = globalThis.Hooks) {
   const hook = (app, html) => {
     const measureId = performanceDiagnostics.markStart("tracker.decorate");
     let rowCount = 0;
@@ -486,6 +486,6 @@ export function registerTrackerHooks() {
     }
   };
 
-  Hooks.on("renderCombatTracker", hook);
-  Hooks.on("renderAoVCombatTracker", hook);
+  hooks.on("renderCombatTracker", hook);
+  hooks.on("renderAoVCombatTracker", hook);
 }

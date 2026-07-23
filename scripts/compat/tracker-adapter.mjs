@@ -1,14 +1,13 @@
 /**
- * Normalize render-hook HTML arguments across ApplicationV2 and legacy wrapper
- * shapes without taking ownership of the system tracker.
+ * Normalize the documented ApplicationV2 render-hook element without taking
+ * ownership of the system tracker.
  *
- * @param {Application|object} app Rendering application.
- * @param {HTMLElement|JQuery|undefined} html Hook HTML argument.
+ * @param {ApplicationV2|object} app Rendering application.
+ * @param {HTMLElement|undefined} html Hook HTML argument.
  * @returns {HTMLElement|null}
  */
 export function elementFromTrackerHook(app, html) {
   if (html instanceof HTMLElement) return html;
-  if (html?.[0] instanceof HTMLElement) return html[0];
   return app?.element instanceof HTMLElement ? app.element : null;
 }
 
@@ -31,7 +30,6 @@ export function combatFromTrackerApp(app) {
  */
 export function combatantRowFromElement(element) {
   if (!element || typeof element !== "object") return null;
-  if (element[0] instanceof HTMLElement) return combatantRowFromElement(element[0]);
   if (element.matches?.("[data-combatant-id]")) return element;
   return element.closest?.("[data-combatant-id]") ?? null;
 }

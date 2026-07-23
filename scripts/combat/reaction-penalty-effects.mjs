@@ -319,30 +319,30 @@ export async function reconcileReactionPenaltyEffectsForCombat(combat, { reason 
  *
  * @returns {void}
  */
-export function registerReactionPenaltyEffectHooks() {
+export function registerReactionPenaltyEffectHooks(hooks = globalThis.Hooks) {
   if (hooksRegistered) return;
   hooksRegistered = true;
 
-  Hooks.on("combatRound", (combat, _updateData, updateOptions = {}) => {
+  hooks.on("combatRound", (combat, _updateData, updateOptions = {}) => {
     if (!game.user?.isGM) return;
     if (Number(updateOptions?.direction ?? 1) <= 0) return;
     void removeExpiredReactionPenaltyEffects(combat, { reason: "combat-round" });
   });
 
-  Hooks.on("updateCombat", (combat, changed = {}, options = {}) => {
+  hooks.on("updateCombat", (combat, changed = {}, options = {}) => {
     if (!game.user?.isGM) return;
     if (!Object.prototype.hasOwnProperty.call(changed ?? {}, "round")) return;
     if (Number(options?.direction ?? 1) <= 0) return;
     void removeExpiredReactionPenaltyEffects(combat, { reason: "combat-update-round" });
   });
 
-  Hooks.on("deleteCombatant", combatant => {
+  hooks.on("deleteCombatant", combatant => {
     if (!game.user?.isGM) return;
     const actor = reactionActorForCombatant(combatant);
     void deleteReactionPenaltyEffectsForActor(actor);
   });
 
-  Hooks.on("deleteCombat", combat => {
+  hooks.on("deleteCombat", combat => {
     if (!game.user?.isGM) return;
     void clearReactionPenaltyEffectsForCombat(combat, { reason: "combat-delete" });
   });

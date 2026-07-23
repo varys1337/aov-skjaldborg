@@ -3,6 +3,7 @@ import { runtimeSettings } from "../runtime-settings.mjs";
 import { warn } from "../logger.mjs";
 import { effectHasStatus, effectIsActive, injuryThresholdSeverityFromEffects, moduleFlag } from "../compat/active-effects.mjs";
 import { guardedModuleFlag, guardedUpdate } from "../utils/guarded-document-writes.mjs";
+import { collectionArray, numberOr } from "../utils/document-data.mjs";
 import {
   getItemCritFumbleChances,
   getWeaponCritFumbleChances
@@ -14,23 +15,16 @@ import {
   serializeProneAttackModifierContext,
   serializeProneDamageContext
 } from "../combat/prone-automation.mjs";
+import {
+  AOV_IMPORTS,
+  AOV_TEMPLATES,
+  importAoVModule
+} from "./aov-contract.mjs";
 
 const CORE_ROLL_PROMPT_TIMEOUT_MS = 15000;
 const defenseCardQueues = new Map();
 const defenseCommitResults = new Map();
 const DEFENSE_COMMIT_RESULT_TTL_MS = 60000;
-
-/**
- * Convert a possibly absent or textual value to a finite number.
- *
- * @param {unknown} value Candidate numeric value.
- * @param {number} [fallback=0] Value returned when conversion fails.
- * @returns {number}
- */
-function numberOr(value, fallback = 0) {
-  const number = Number(value);
-  return Number.isFinite(number) ? number : fallback;
-}
 
 /**
  * Read a total or raw AoV ability value.
@@ -56,18 +50,6 @@ function parseMovementText(value) {
   return match ? Number(match[0]) : undefined;
 }
 
-
-/**
- * Normalize a Foundry embedded collection or ordinary iterable into an array.
- *
- * @param {Collection<Item>|Item[]|null|undefined} items Candidate item source.
- * @returns {Item[]} Item array.
- */
-function itemArray(items) {
-  if (!items) return [];
-  if (typeof items.values === "function") return Array.from(items.values());
-  return Array.from(items ?? []);
-}
 
 /**
  * Whether an AoV weapon item is currently carried/equipped.
@@ -158,18 +140,6 @@ function queuedDefenseCardAppend(messageId, operation) {
     if (defenseCardQueues.get(key) === next) defenseCardQueues.delete(key);
   }).catch(() => undefined);
   return next;
-}
-
-/**
- * Normalize a Foundry Collection or array-like source into an array.
- *
- * @param {Collection|Array|null|undefined} source Candidate collection.
- * @returns {Array}
- */
-function collectionArray(source) {
-  if (!source) return [];
-  if (typeof source.values === "function") return Array.from(source.values());
-  return Array.from(source ?? []);
 }
 
 /**
@@ -311,8 +281,7 @@ function warnAoVAdapterFailureOnce(key, message, exception = null) {
  * @returns {Promise<object>}
  */
 export function importAoVSystemModule(path) {
-  const route = foundry.utils.getRoute?.(path) ?? `/${path}`;
-  return import(route);
+  return importAoVModule(path);
 }
 
 /**
@@ -329,7 +298,7 @@ export function importAoVSystemModule(path) {
  */
 async function getAoVCheckApi() {
   if (!aovCheckApiPromise) {
-    const path = "systems/aov/system/apps/checks.mjs";
+    const path = AOV_IMPORTS.CHECKS;
     aovCheckApiPromise = importAoVSystemModule(path)
       .then(module => {
         if (typeof module.AOVCheck?._trigger !== "function") {
@@ -354,7 +323,7 @@ async function getAoVCheckApi() {
 
 async function getAoVCombatChatApi() {
   if (!aovCombatChatApiPromise) {
-    const path = "systems/aov/system/chat/combat-chat.mjs";
+    const path = AOV_IMPORTS.COMBAT_CHAT;
     aovCombatChatApiPromise = importAoVSystemModule(path)
       .then(module => {
         if (typeof module.COCard?.resolveDam !== "function" || typeof module.COCard?.COHitLoc !== "function") {
@@ -379,8 +348,8 @@ async function getAoVCombatChatApi() {
  */
 async function getAoVRollOptionsApi() {
   if (!aovRollOptionsApiPromise) {
-    const dialogPath = "systems/aov/system/setup/aov-dialog.mjs";
-    const listsPath = "systems/aov/system/apps/select-lists.mjs";
+    const dialogPath = AOV_IMPORTS.DIALOG;
+    const listsPath = AOV_IMPORTS.SELECT_LISTS;
     aovRollOptionsApiPromise = Promise.all([
       importAoVSystemModule(dialogPath),
       importAoVSystemModule(listsPath)
@@ -407,7 +376,7 @@ async function getAoVRollOptionsApi() {
 
 async function getAoVRollTypeApi() {
   if (!aovRollTypeApiPromise) {
-    const path = "systems/aov/system/apps/roll-types.mjs";
+    const path = AOV_IMPORTS.ROLL_TYPES;
     aovRollTypeApiPromise = importAoVSystemModule(path)
       .then(module => {
         if (typeof module.AOVRollType?._onDetermineCheck !== "function") {
@@ -559,7 +528,7 @@ export class AoVAdapter {
     const { AOVCheck } = await getAoVCheckApi();
     if (typeof AOVCheck.startChat === "function") return AOVCheck.startChat(aovFlags);
     return foundry.applications.handlebars.renderTemplate(
-      aovFlags.chatTemplate ?? "systems/aov/templates/chat/roll-combat.hbs",
+      aovFlags.chatTemplate ?? AOV_TEMPLATES.ROLL_COMBAT,
       aovFlags
     );
   }
@@ -633,7 +602,7 @@ export class AoVAdapter {
    * @returns {object[]}
    */
   static readAovHitLocationData(actor) {
-    return itemArray(actor?.items)
+    return collectionArray(actor?.items)
       .filter(item => item?.type === "hitloc")
       .map(item => ({
         id: String(item.id ?? item._id ?? ""),
@@ -928,7 +897,7 @@ export class AoVAdapter {
       .normalize("NFKD")
       .replace(/[\u0300-\u036f]/g, "")
       .toLowerCase();
-    return itemArray(actor?.items).find(item => {
+    return collectionArray(actor?.items).find(item => {
       if (item?.type !== "skill") return false;
       const cid = String(item.flags?.aov?.cidFlag?.id ?? "").toLowerCase();
       const name = String(item.name ?? "")
@@ -1138,7 +1107,7 @@ export class AoVAdapter {
     const readied = readiedId ? actor.items.get(readiedId) : null;
     if (readied?.type === "weapon") return readied;
 
-    const weapons = itemArray(actor.items).filter(item => item?.type === "weapon");
+    const weapons = collectionArray(actor.items).filter(item => item?.type === "weapon");
     return weapons.find(item => isCarriedWeapon(item))
       ?? weapons.find(item => isNaturalWeapon(item))
       ?? weapons[0]
@@ -1152,7 +1121,7 @@ export class AoVAdapter {
    * @returns {Item|null}
    */
   static getDodgeSkill(actor) {
-    const skills = itemArray(actor?.items).filter(item => item?.type === "skill");
+    const skills = collectionArray(actor?.items).filter(item => item?.type === "skill");
     return skills.find(item => item.flags?.aov?.cidFlag?.id === "i.skill.dodge")
       ?? skills.find(item => String(item.name ?? "").trim().toLowerCase() === "dodge")
       ?? null;
@@ -1294,7 +1263,7 @@ export class AoVAdapter {
       ctOptions: await this.#aovSelectList("cutThrust"),
       successLevel: "99"
     };
-    const html = await foundry.applications.handlebars.renderTemplate("systems/aov/templates/dialog/rollOptions.hbs", data);
+    const html = await foundry.applications.handlebars.renderTemplate(AOV_TEMPLATES.ROLL_OPTIONS, data);
     let promptTimedOut = false;
     const prompt = AOVDialog.input({
       window: { title: game.i18n.localize("AOV.card.rollMods") },
@@ -1382,7 +1351,7 @@ export class AoVAdapter {
 
   static async #renderCombatMessage(aovFlags) {
     return foundry.applications.handlebars.renderTemplate(
-      aovFlags.chatTemplate ?? "systems/aov/templates/chat/roll-combat.hbs",
+      aovFlags.chatTemplate ?? AOV_TEMPLATES.ROLL_COMBAT,
       aovFlags
     );
   }
@@ -1391,7 +1360,7 @@ export class AoVAdapter {
     const aovFlags = {
       rollType: "WP",
       cardType: "CO",
-      chatTemplate: "systems/aov/templates/chat/roll-combat.hbs",
+      chatTemplate: AOV_TEMPLATES.ROLL_COMBAT,
       state: "open",
       wait: true,
       resultLevel: 0,
@@ -1688,7 +1657,7 @@ export class AoVAdapter {
     }
 
     ui.notifications.warn(game.i18n.format("AOV_SKJALDBORG.Warnings.NoDefenderDefense", {
-      actor: actor?.name ?? game.i18n.localize("AOV_SKJALDBORG.ActionHud.UnknownActor")
+      actor: actor?.name ?? game.i18n.localize("AOV_SKJALDBORG.Labels.Unknown")
     }));
     return this.#appendNoDefenseCard({
       attackMessageId,
@@ -2366,7 +2335,7 @@ export class AoVAdapter {
     });
     if (!selectedItem && coreOptions.actionOption !== "none") {
       ui.notifications.warn(game.i18n.format("AOV_SKJALDBORG.Warnings.NoDefenderDefense", {
-        actor: actor.name ?? game.i18n.localize("AOV_SKJALDBORG.ActionHud.UnknownActor")
+        actor: actor.name ?? game.i18n.localize("AOV_SKJALDBORG.Labels.Unknown")
       }));
     }
 

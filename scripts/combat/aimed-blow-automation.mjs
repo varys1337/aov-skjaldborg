@@ -17,10 +17,12 @@ import {
   actorFromAoVParticipant,
   aovCards,
   autoDamageEnabled,
+  findDamageLocationCard,
   grossDamage,
   idTypeMatch,
   locationArmor,
   recentFlaggedMessages,
+  rerenderAoVMessage,
   resolveChatMessageElement,
   safeFromUuid
 } from "./automation-helpers.mjs";
@@ -49,24 +51,6 @@ registerCombatRule({
     return context.ruleMetadata.aimedBlow;
   }
 });
-
-/**
- * Locate the first unresolved positive AoV damage card that still needs a hit
- * location.
- *
- * @param {ChatMessage|null|undefined} message Candidate ChatMessage.
- * @returns {{card: object, index: number}|null}
- */
-function findDamageLocationCard(message) {
-  const cards = aovCards(message);
-  const index = cards.findIndex(card => (
-    card?.rollType === "DM"
-    && card.damageCF === true
-    && grossDamage(card) > 0
-    && !String(card.targetLocID ?? "").trim()
-  ));
-  return index >= 0 ? { card: cards[index], index } : null;
-}
 
 /**
  * Check whether an unresolved aimed flag plausibly belongs to one AoV damage
@@ -211,18 +195,6 @@ function applyAimedEquipmentToCard(chatCard, targetWeapon, weaponDamage, damage)
 }
 
 /**
- * Re-render a message's AoV chat content from its current flag state.
- *
- * @param {ChatMessage} message Message to re-render.
- * @returns {Promise<void>}
- */
-async function rerenderAoVMessage(message) {
-  const refreshed = game.messages?.get?.(message.id) ?? message;
-  const content = await AoVAdapter.createAovCombatCard(refreshed.flags.aov);
-  await guardedUpdate(refreshed, { content }, { category: "chat.aovRerender" });
-}
-
-/**
  * Mark the original aimed source resolved without overwriting its metadata.
  *
  * @param {ChatMessage} sourceMessage Original AoV combat message.
@@ -309,7 +281,7 @@ async function resolveAimedHitLocation(message, options = {}) {
     await markAimedSourceResolved(message, message);
   }
 
-  await rerenderAoVMessage(message);
+  await rerenderAoVMessage(message, { guarded: true });
   return true;
 }
 
@@ -393,16 +365,16 @@ function bindAimedHitLocationOverride(message, html) {
  *
  * @returns {void}
  */
-export function registerAimedBlowAutomationHooks() {
+export function registerAimedBlowAutomationHooks(hooks = globalThis.Hooks) {
   if (hooksRegistered) return;
   hooksRegistered = true;
-  Hooks.on("createChatMessage", message => {
+  hooks.on("createChatMessage", message => {
     void resolveAimedDamageMessage(message).catch(exception => warn(exception));
   });
-  Hooks.on("updateChatMessage", message => {
+  hooks.on("updateChatMessage", message => {
     void resolveAimedDamageMessage(message).catch(exception => warn(exception));
   });
-  Hooks.on("renderChatMessageHTML", bindAimedHitLocationOverride);
+  hooks.on("renderChatMessageHTML", bindAimedHitLocationOverride);
 }
 
 export const __test = {

@@ -468,7 +468,7 @@ function refreshIfActiveToken(document) {
  *
  * @returns {void}
  */
-export function registerMovementPlanPreviewHooks() {
+export function registerMovementPlanPreviewHooks(hooks = globalThis.Hooks) {
   if (hooksRegistered) return;
   hooksRegistered = true;
 
@@ -478,22 +478,22 @@ export function registerMovementPlanPreviewHooks() {
   globalThis.window?.addEventListener?.("pointerup", handleGlobalPointerUp, { capture: true, passive: true });
   globalThis.window?.addEventListener?.("blur", handleGlobalPointerUp, { capture: true, passive: true });
 
-  Hooks.on("hoverToken", onHoverToken);
-  Hooks.on("preMoveToken", clearMovementPlanPreview);
-  Hooks.on("moveToken", clearMovementPlanPreview);
-  Hooks.on("canvasReady", clearMovementPlanPreview);
-  Hooks.on("canvasTearDown", clearMovementPlanPreview);
-  Hooks.on("deleteCombat", clearMovementPlanPreview);
-  Hooks.on("updateCombat", () => {
+  hooks.on("hoverToken", onHoverToken);
+  hooks.on("preMoveToken", clearMovementPlanPreview);
+  hooks.on("moveToken", clearMovementPlanPreview);
+  hooks.on("canvasReady", clearMovementPlanPreview);
+  hooks.on("canvasTearDown", clearMovementPlanPreview);
+  hooks.on("deleteCombat", clearMovementPlanPreview);
+  hooks.on("updateCombat", () => {
     if (activeTokenId) RenderCoordinator.invalidate("movementPlanPreview", { reason: "combat-update" });
   });
-  Hooks.on("updateCombatant", refreshIfActiveCombatant);
-  Hooks.on("deleteCombatant", refreshIfActiveCombatant);
-  Hooks.on("updateToken", refreshIfActiveToken);
-  Hooks.on("refreshToken", token => {
+  hooks.on("updateCombatant", refreshIfActiveCombatant);
+  hooks.on("deleteCombatant", refreshIfActiveCombatant);
+  hooks.on("updateToken", refreshIfActiveToken);
+  hooks.on("refreshToken", token => {
     if (activeTokenId && token?.id === activeTokenId) RenderCoordinator.invalidate("movementPlanPreview", { reason: "token-refresh" });
   });
-  Hooks.on("destroyToken", token => {
+  hooks.on("destroyToken", token => {
     if (activeTokenId && token?.id === activeTokenId) clearMovementPlanPreview();
   });
 }

@@ -267,8 +267,8 @@ function refreshTokenIds(ids) {
   scheduleRedraw("tokens");
 }
 
-function registerControlsHook() {
-  Hooks.on("getSceneControlButtons", controls => {
+function registerControlsHook(hooks) {
+  hooks.on("getSceneControlButtons", controls => {
     const tokenControl = controls?.tokens;
     if (!tokenControl?.tools) return;
     const existingOrders = Object.values(tokenControl.tools)
@@ -295,47 +295,47 @@ function registerControlsHook() {
  *
  * @returns {{toggle: function(boolean): Promise<void>, applySettings: function(object=): void, redraw: function(): void, isEnabled: function(): boolean}}
  */
-export function registerReachVisualizerHooks() {
+export function registerReachVisualizerHooks(hooks = globalThis.Hooks) {
   if (!hooksRegistered) {
     hooksRegistered = true;
     overlayManager.registerHooks(Hooks);
-    registerControlsHook();
-    Hooks.on("canvasReady", () => {
+    registerControlsHook(hooks);
+    hooks.on("canvasReady", () => {
       applyReachVisualizerSettings();
     });
-    Hooks.on("canvasTearDown", () => {
+    hooks.on("canvasTearDown", () => {
       tokenOverlays.clear();
       hoveredTokenId = null;
     });
-    Hooks.on("hoverToken", (token, hovered) => {
+    hooks.on("hoverToken", (token, hovered) => {
       const id = tokenId(token);
       hoveredTokenId = hovered ? id : hoveredTokenId === id ? null : hoveredTokenId;
       if (settings.visibility === REACH_VISUALIZER_VISIBILITY.HOVER) scheduleRedraw("hover-token");
       else refreshTokenIds([id]);
     });
-    Hooks.on("controlToken", token => refreshTokenIds([tokenId(token)]));
-    Hooks.on("refreshToken", token => refreshTokenIds([tokenId(token)]));
-    Hooks.on("updateToken", document => refreshTokenIds([String(document?.id ?? document?._id ?? "")]));
-    Hooks.on("createToken", scheduleRedraw);
-    Hooks.on("deleteToken", document => {
+    hooks.on("controlToken", token => refreshTokenIds([tokenId(token)]));
+    hooks.on("refreshToken", token => refreshTokenIds([tokenId(token)]));
+    hooks.on("updateToken", document => refreshTokenIds([String(document?.id ?? document?._id ?? "")]));
+    hooks.on("createToken", scheduleRedraw);
+    hooks.on("deleteToken", document => {
       destroyOverlayEntry(String(document?.id ?? document?._id ?? ""));
       scheduleRedraw("delete-token");
     });
-    Hooks.on("updateCombatant", combatant => refreshTokenIds([String(combatant?.tokenId ?? combatant?.token?.id ?? "")]));
-    Hooks.on("updateCombat", scheduleRedraw);
-    Hooks.on("updateActor", (actor, changed) => {
+    hooks.on("updateCombatant", combatant => refreshTokenIds([String(combatant?.tokenId ?? combatant?.token?.id ?? "")]));
+    hooks.on("updateCombat", scheduleRedraw);
+    hooks.on("updateActor", (actor, changed) => {
       const relevant = foundry.utils.hasProperty(changed ?? {}, `flags.${MODULE_ID}.readiedWeapons`)
         || foundry.utils.hasProperty(changed ?? {}, `flags.${MODULE_ID}.readiedWeaponId`);
       if (relevant) refreshTokenIds(tokenIdsForActor(actor));
     });
-    Hooks.on("updateItem", (item, changed) => {
+    hooks.on("updateItem", (item, changed) => {
       if (item?.type !== "weapon" || !item.parent) return;
       const relevant = foundry.utils.hasProperty(changed ?? {}, "system.length")
         || foundry.utils.hasProperty(changed ?? {}, "system.equipStatus")
         || foundry.utils.hasProperty(changed ?? {}, "system.weaponType");
       if (relevant) refreshTokenIds(tokenIdsForActor(item.parent));
     });
-    Hooks.on("deleteItem", item => {
+    hooks.on("deleteItem", item => {
       if (item?.type === "weapon" && item.parent) refreshTokenIds(tokenIdsForActor(item.parent));
     });
   }

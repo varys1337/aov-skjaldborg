@@ -75,6 +75,18 @@ export function actorItemById(actor, itemId) {
 }
 
 /**
+ * Resolve the owning Actor for an embedded Item or Item-like value.
+ *
+ * @param {Item|object|null|undefined} item Candidate Item.
+ * @returns {Actor|object|null}
+ */
+export function itemActor(item) {
+  return item?.parent?.documentName === "Actor"
+    ? item.parent
+    : (item?.actor ?? item?.parent ?? null);
+}
+
+/**
  * Normalize authored AoV descriptor text for stable comparisons.
  *
  * @param {unknown} value Candidate descriptor.

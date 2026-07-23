@@ -12,18 +12,7 @@ import {
 } from "../constants.mjs";
 import { movementDebug } from "./movement-debugger.mjs";
 import { runtimeSettings } from "../runtime-settings.mjs";
-
-/**
- * Convert a value to a finite number.
- *
- * @param {unknown} value Candidate numeric value.
- * @param {number|null} [fallback=0] Fallback when conversion fails.
- * @returns {number|null}
- */
-function numberOr(value, fallback = 0) {
-  const number = Number(value);
-  return Number.isFinite(number) ? number : fallback;
-}
+import { numberOr } from "../utils/document-data.mjs";
 
 /**
  * Determine the scene distance corresponding to one AoV movement penalty unit.

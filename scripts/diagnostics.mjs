@@ -67,8 +67,16 @@ export async function runDiagnostics() {
   const degradedFeatures = capabilities.degradedFeatures ?? [];
   const engagementStatusMode = getEngagedStatusEffectMode();
   results.push(check("foundry-generation", capabilities.foundry.generationOk, `generation=${capabilities.foundry.generation}`));
-  results.push(check("foundry-version", true, `${capabilities.foundry.version}; minimum confirmed=${capabilities.foundry.versionOk}`));
-  results.push(check("aov-version", true, `id=${capabilities.system.id}; version=${capabilities.system.version}; minimum confirmed=${capabilities.system.versionOk}`));
+  results.push(check(
+    "foundry-version",
+    capabilities.foundry.versionOk,
+    `detected=${capabilities.foundry.version}; minimum=${capabilities.target.foundryMinimum}; verified=${capabilities.target.foundryVerified}`
+  ));
+  results.push(check(
+    "aov-version",
+    capabilities.system.idOk && capabilities.system.versionOk,
+    `id=${capabilities.system.id}; detected=${capabilities.system.version}; minimum=${capabilities.target.aovMinimum}; verified=${capabilities.target.aovVerified}`
+  ));
   results.push(check("runtime-enabled", capabilities.runtimeEnabled, hardBlockers.join(", ")));
   results.push(check("hard-blockers", hardBlockers.length === 0, hardBlockers.join(", ")));
   results.push(check("feature-warnings", true, warnings.join(", ")));
@@ -78,10 +86,6 @@ export async function runDiagnostics() {
   results.push(check("action-ring-setting", typeof game.settings.get(MODULE_ID, "enableActionRing") === "boolean"));
   results.push(check("actor-hotbar-setting", typeof game.settings.get(MODULE_ID, "enableActorHotbar") === "boolean"));
   results.push(check("appv2", capabilities.applications.applicationV2));
-  results.push(optionalCheck("document-sheet-v2", capabilities.sheets?.documentSheetV2 ? "available" : "unavailable"));
-  results.push(optionalCheck("document-sheet-integrations", capabilities.sheets?.integrationsUsed
-    ? (capabilities.sheets?.documentSheetV2 ? "enabled" : "disabled")
-    : "not used"));
   results.push(check("dialogv2", capabilities.applications.dialogV2));
   results.push(check("scene-move-tokens", true, capabilities.movement.sceneMoveTokens ? "native" : "per-token fallback"));
   results.push(check("token-move", capabilities.movement.tokenMove));

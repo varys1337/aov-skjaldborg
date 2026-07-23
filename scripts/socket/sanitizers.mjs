@@ -50,6 +50,20 @@ export function sanitizeCombatantWritePayload(payload = {}) {
   };
 }
 
+export function sanitizeCombatWritePayload(payload = {}) {
+  const source = sanitizeSocketPayload(payload);
+  return {
+    ...source,
+    combatId: cleanDocumentId(source.combatId),
+    combatantId: cleanDocumentId(source.combatantId),
+    expectedCombatUpdatedAt: cleanFiniteNumber(source.expectedCombatUpdatedAt),
+    expectedCombatantUpdatedAt: cleanFiniteNumber(source.expectedCombatantUpdatedAt),
+    actionId: cleanDocumentId(source.actionId),
+    attackerCombatantId: cleanDocumentId(source.attackerCombatantId),
+    targetCombatantId: cleanDocumentId(source.targetCombatantId)
+  };
+}
+
 export function sanitizeCommitIntentPayload(payload = {}) {
   const source = sanitizeCombatantWritePayload(payload);
   return {

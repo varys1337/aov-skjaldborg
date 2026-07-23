@@ -7,11 +7,13 @@
  * idempotent through module flags on the relevant ChatMessages.
  */
 import { MODULE_ID } from "../constants.mjs";
+import { AOV_TEMPLATES } from "../adapter/aov-contract.mjs";
 import { createModuleChatMessage } from "../compat/chat-message.mjs";
 import { effectHasStatus, upsertActorStatusEffect } from "../compat/active-effects.mjs";
 import { warn, error } from "../logger.mjs";
+import { normalizeDescriptor } from "../utils/document-data.mjs";
 import { clearReadiedWeapon, getReadiedWeaponIds } from "./weapon-state.mjs";
-import { resolveKnockbackDisengagement } from "./disengagement.mjs";
+import { resolveOutOfReachEngagementPair } from "./disengagement.mjs";
 import {
   abilityTotal,
   actorImage,
@@ -82,14 +84,6 @@ async function applyStatus(actor, statusId) {
   });
 }
 
-function normalizeDescriptor(value) {
-  return String(value ?? "")
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "");
-}
-
 function isShieldLike(item) {
   const descriptors = [item?.name, item?.system?.weaponCat, item?.system?.weaponCatName, item?.system?.skillCID]
     .map(normalizeDescriptor)
@@ -127,7 +121,7 @@ async function createKnockbackResistanceCard(context) {
   const chatMsgData = {
     rollType: "CH",
     cardType: "RE",
-    chatTemplate: "systems/aov/templates/chat/roll-resistance.hbs",
+    chatTemplate: AOV_TEMPLATES.ROLL_RESISTANCE,
     state: "open",
     wait: true,
     resultLevel: 0,
@@ -385,7 +379,7 @@ async function handleSuccessfulResistance(message, context, resultLevel) {
   await moveTokenAway({ movedTokenDocument: targetToken, sourceTokenDocument: attackerToken, spaces: distance });
 
   const combat = context.combatId ? game.combats?.get?.(context.combatId) ?? game.combat : game.combat;
-  await cleanupKnockbackEngagementPair(context);
+  await resolveOutOfReachEngagementPair(context);
 
   const additions = [];
   if (resultLevel >= 3) {
@@ -417,15 +411,6 @@ async function handleSuccessfulResistance(message, context, resultLevel) {
   });
 }
 
-async function cleanupKnockbackEngagementPair(context) {
-  const combat = context.combatId ? game.combats?.get?.(context.combatId) ?? game.combat : game.combat;
-  if (!combat || !context.attackerCombatantId || !context.targetCombatantId) return 0;
-  return resolveKnockbackDisengagement(combat, context.attackerCombatantId, context.targetCombatantId, {
-    clearAll: false,
-    onlyIfOutOfReach: true
-  });
-}
-
 async function handleUnsuccessfulAttempt(context, reason = "failed-resistance") {
   const attackerActor = await safeFromUuid(context.attackerActorUuid);
   const attackerToken = await safeFromUuid(context.attackerTokenUuid);
@@ -451,7 +436,7 @@ async function handleUnsuccessfulAttempt(context, reason = "failed-resistance") 
   if (choice === "bounce") {
     const distance = await rollDistance(context);
     await moveTokenAway({ movedTokenDocument: attackerToken, sourceTokenDocument: targetToken, spaces: distance });
-    await cleanupKnockbackEngagementPair(context);
+    await resolveOutOfReachEngagementPair(context);
     text = game.i18n.format("AOV_SKJALDBORG.KnockbackDialog.AttackerChoosesBounceCompact", {
       actor: actorName(attackerActor),
       distance
@@ -554,7 +539,7 @@ export async function startKnockbackAttack({ actor, targetToken, weapon, targetN
   const chatMsgData = {
     rollType: "WP",
     cardType: "CO",
-    chatTemplate: "systems/aov/templates/chat/roll-combat.hbs",
+    chatTemplate: AOV_TEMPLATES.ROLL_COMBAT,
     state: "open",
     wait: true,
     resultLevel: 0,
@@ -626,13 +611,13 @@ export async function startKnockbackAttack({ actor, targetToken, weapon, targetN
  *
  * @returns {void}
  */
-export function registerKnockbackAutomationHooks() {
+export function registerKnockbackAutomationHooks(hooks = globalThis.Hooks) {
   if (hooksRegistered) return;
   hooksRegistered = true;
-  Hooks.on("updateChatMessage", message => {
+  hooks.on("updateChatMessage", message => {
     void handleKnockbackChatUpdate(message).catch(warn);
   });
-  Hooks.on("renderChatMessageHTML", bindFumblePrompt);
+  hooks.on("renderChatMessageHTML", bindFumblePrompt);
 }
 
 export const __test = {

@@ -8,6 +8,7 @@
  */
 import { MODULE_ID, PHASES } from "../constants.mjs";
 import { AoVAdapter } from "../adapter/aov-adapter.mjs";
+import { AOV_TEMPLATES } from "../adapter/aov-contract.mjs";
 import { createModuleChatMessage } from "../compat/chat-message.mjs";
 import {
   effectHasStatus,
@@ -23,6 +24,8 @@ import { getCombatState } from "./state.mjs";
 import {
   abilityTotal,
   aovCards,
+  attackCardResolved,
+  attackCardSucceeded,
   buildResistanceChatCard,
   evaluateD100,
   evaluateVisibleRoll,
@@ -31,6 +34,7 @@ import {
   numberOr,
   renderActorStackCard,
   renderAoVChat,
+  rerenderAoVMessage,
   resultIconHtml,
   safeFromUuid
 } from "./automation-helpers.mjs";
@@ -40,19 +44,6 @@ const STUN_STATUS_FLAG = "stunStatus";
 const STUN_RECOVERY_FLAG = "stunRecovery";
 const processingMessages = new Set();
 let hooksRegistered = false;
-
-function attackCard(message) {
-  return aovCards(message)[0] ?? null;
-}
-
-function attackResolved(message) {
-  return message?.getFlag?.("aov", "cardType") === "CO" && message?.getFlag?.("aov", "state") === "closed";
-}
-
-function attackSucceeded(message) {
-  const card = attackCard(message);
-  return card?.rollDamage === true || Number(card?.resultLevel ?? 1) >= 2;
-}
 
 function resistanceResolved(message) {
   return message?.getFlag?.("aov", "cardType") === "RE" && message?.getFlag?.("aov", "state") === "closed";
@@ -165,14 +156,6 @@ function minimumStunDamage(actor, weapon) {
   return { supported: true, weapon: weaponTotal, bonus: bonusFormula.total, total };
 }
 
-async function rerenderAoVMessage(message) {
-  const refreshed = game.messages?.get?.(message.id) ?? message;
-  const template = refreshed.flags?.aov?.chatTemplate;
-  if (!template) return;
-  const content = await renderAoVChat(template, refreshed.flags.aov);
-  await refreshed.update({ content });
-}
-
 async function suppressStunDamagePrompt(message) {
   const cards = foundry.utils.deepClone(aovCards(message));
   let changed = false;
@@ -184,7 +167,7 @@ async function suppressStunDamagePrompt(message) {
   }
   if (!changed) return false;
   await message.update({ "flags.aov.chatCard": cards });
-  await rerenderAoVMessage(message);
+  await rerenderAoVMessage(message, { fallbackTemplate: null });
   return true;
 }
 
@@ -218,7 +201,7 @@ async function createResistanceCard(sourceMessage, stun, { activeScore, passiveS
   const chatMsgData = {
     rollType: "CH",
     cardType: "RE",
-    chatTemplate: "systems/aov/templates/chat/roll-resistance.hbs",
+    chatTemplate: AOV_TEMPLATES.ROLL_RESISTANCE,
     state: "open",
     wait: true,
     resultLevel: 0,
@@ -314,11 +297,11 @@ async function applyStunStatus(stun) {
 }
 
 async function handleCombatMessage(message) {
-  if (!game.user?.isGM || !attackResolved(message)) return;
+  if (!game.user?.isGM || !attackCardResolved(message)) return;
   const stun = message.getFlag?.(MODULE_ID, STUN_FLAG) ?? null;
   if (!stun || stun.resolved === true || stun.stage !== "attack") return;
 
-  if (!attackSucceeded(message)) {
+  if (!attackCardSucceeded(message)) {
     await markStunResolved(message, { stage: "failedAttack" });
     return;
   }
@@ -598,23 +581,23 @@ function maybeBookkeepingPrompt(combat) {
  *
  * @returns {void}
  */
-export function registerStunAutomationHooks() {
+export function registerStunAutomationHooks(hooks = globalThis.Hooks) {
   if (hooksRegistered) return;
   hooksRegistered = true;
-  Hooks.on("createChatMessage", message => {
+  hooks.on("createChatMessage", message => {
     void handleMessageUpdate(message).catch(exception => warn(exception));
   });
-  Hooks.on("updateChatMessage", message => {
+  hooks.on("updateChatMessage", message => {
     void handleMessageUpdate(message).catch(exception => warn(exception));
   });
-  Hooks.on("renderChatMessageHTML", bindRecoveryPrompt);
-  Hooks.on("updateCombat", (combat, changed = {}) => {
+  hooks.on("renderChatMessageHTML", bindRecoveryPrompt);
+  hooks.on("updateCombat", (combat, changed = {}) => {
     if (!Object.prototype.hasOwnProperty.call(changed ?? {}, `flags.${MODULE_ID}`)
       && !Object.prototype.hasOwnProperty.call(changed ?? {}, "flags")
       && !Object.prototype.hasOwnProperty.call(changed ?? {}, "round")) return;
     maybeBookkeepingPrompt(combat);
   });
-  Hooks.on("aovSkjaldborgImmediateBookkeeping", (combat, _ledger, options = {}) => {
+  hooks.on("aovSkjaldborgImmediateBookkeeping", (combat, _ledger, options = {}) => {
     const round = Number(options?.logicalRound ?? getCombatState(combat).logicalRound);
     void createRecoveryPrompts(combat, { logicalRound: round }).catch(exception => warn(exception));
   });

@@ -548,25 +548,25 @@ function markTokenStatic(document) {
  *
  * @returns {void}
  */
-export function registerTokenIntentIndicatorHooks() {
+export function registerTokenIntentIndicatorHooks(hooks = globalThis.Hooks) {
   if (hooksRegistered) return;
   hooksRegistered = true;
 
   RenderCoordinator.register("intentIndicators", invalidateTokenIntentIndicators);
 
-  Hooks.on("canvasReady", () => scheduleTokenIntentIndicatorRefresh({ reason: "canvas-ready" }));
-  Hooks.on("canvasPan", () => RenderCoordinator.invalidate("intentIndicators", { positionOnly: true, reason: "canvas-pan" }));
-  Hooks.on("canvasTearDown", clearTokenIntentIndicators);
-  Hooks.on("drawToken", token => scheduleTokenIntentIndicatorRefresh({
+  hooks.on("canvasReady", () => scheduleTokenIntentIndicatorRefresh({ reason: "canvas-ready" }));
+  hooks.on("canvasPan", () => RenderCoordinator.invalidate("intentIndicators", { positionOnly: true, reason: "canvas-pan" }));
+  hooks.on("canvasTearDown", clearTokenIntentIndicators);
+  hooks.on("drawToken", token => scheduleTokenIntentIndicatorRefresh({
     tokenIds: [tokenIdFromDocument(token?.document ?? token)].filter(Boolean),
     reason: "token-draw"
   }));
-  Hooks.on("refreshToken", updateIndicatorTokenReference);
-  Hooks.on("destroyToken", token => scheduleTokenIntentIndicatorRefresh({
+  hooks.on("refreshToken", updateIndicatorTokenReference);
+  hooks.on("destroyToken", token => scheduleTokenIntentIndicatorRefresh({
     tokenIds: [tokenIdFromDocument(token?.document ?? token)].filter(Boolean),
     reason: "token-destroy"
   }));
-  Hooks.on("updateToken", (document, changes) => {
+  hooks.on("updateToken", (document, changes) => {
     const tokenId = tokenIdFromDocument(document);
     if (changes?.x !== undefined || changes?.y !== undefined || changes?.elevation !== undefined) {
       RenderCoordinator.invalidate("intentIndicators", {
@@ -576,32 +576,32 @@ export function registerTokenIntentIndicatorHooks() {
       });
     }
   });
-  Hooks.on("preMoveToken", markTokenMoving);
-  Hooks.on("moveToken", markTokenMoving);
-  Hooks.on("pauseToken", markTokenStatic);
-  Hooks.on("stopToken", markTokenStatic);
-  Hooks.on("createCombatant", combatant => scheduleTokenIntentIndicatorRefresh({
+  hooks.on("preMoveToken", markTokenMoving);
+  hooks.on("moveToken", markTokenMoving);
+  hooks.on("pauseToken", markTokenStatic);
+  hooks.on("stopToken", markTokenStatic);
+  hooks.on("createCombatant", combatant => scheduleTokenIntentIndicatorRefresh({
     combatantIds: [combatant?.id].filter(Boolean),
     tokenIds: [tokenIdFromCombatant(combatant)].filter(Boolean),
     reason: "combatant-create"
   }));
-  Hooks.on("updateCombatant", combatant => scheduleTokenIntentIndicatorRefresh({
+  hooks.on("updateCombatant", combatant => scheduleTokenIntentIndicatorRefresh({
     combatantIds: [combatant?.id].filter(Boolean),
     tokenIds: [tokenIdFromCombatant(combatant)].filter(Boolean),
     reason: "combatant-update"
   }));
-  Hooks.on("deleteCombatant", combatant => scheduleTokenIntentIndicatorRefresh({
+  hooks.on("deleteCombatant", combatant => scheduleTokenIntentIndicatorRefresh({
     combatantIds: [combatant?.id].filter(Boolean),
     tokenIds: [tokenIdFromCombatant(combatant)].filter(Boolean),
     reason: "combatant-delete"
   }));
-  Hooks.on("updateActor", (actor, changes) => {
+  hooks.on("updateActor", (actor, changes) => {
     if (changes?.flags?.["aov-skjaldborg"]?.combatOptions !== undefined) {
       scheduleTokenIntentIndicatorRefresh(actorCombatantIndicatorDetail(actor, "actor-combat-options"));
     }
   });
-  Hooks.on("updateCombat", () => scheduleTokenIntentIndicatorRefresh({ reason: "combat-update" }));
-  Hooks.on("deleteCombat", clearTokenIntentIndicators);
+  hooks.on("updateCombat", () => scheduleTokenIntentIndicatorRefresh({ reason: "combat-update" }));
+  hooks.on("deleteCombat", clearTokenIntentIndicators);
 
   window.addEventListener("resize", () => RenderCoordinator.invalidate("intentIndicators", { positionOnly: true, reason: "resize" }));
   scheduleTokenIntentIndicatorRefresh();

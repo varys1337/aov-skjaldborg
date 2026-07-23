@@ -508,17 +508,17 @@ export async function reconcileReadiedWeapon(actor) {
  *
  * @returns {void}
  */
-export function registerReadiedWeaponHooks() {
+export function registerReadiedWeaponHooks(hooks = globalThis.Hooks) {
   if (hooksRegistered) return;
   hooksRegistered = true;
 
-  Hooks.on("updateItem", (item, changed) => {
+  hooks.on("updateItem", (item, changed) => {
     if (item?.type !== "weapon" || !item.parent) return;
     if (!foundry.utils.hasProperty(changed, "system.equipStatus")) return;
     void reconcileReadiedWeapon(item.parent);
   });
 
-  Hooks.on("deleteItem", item => {
+  hooks.on("deleteItem", item => {
     if (item?.type !== "weapon" || !item.parent) return;
     const ids = getReadiedWeaponIds(item.parent);
     if (ids.right !== item.id && ids.left !== item.id) return;

@@ -11,13 +11,16 @@ import { AoVAdapter } from "../adapter/aov-adapter.mjs";
 import { warn } from "../logger.mjs";
 import { incrementCounter } from "../performance/performance-monitor.mjs";
 import { guardedModuleFlag, guardedUpdate } from "../utils/guarded-document-writes.mjs";
+import { isAuthoritativeGmClient } from "../utils/authority.mjs";
 import {
   actorFromAoVParticipant,
   aovCards,
   autoDamageEnabled,
+  findDamageLocationCard,
   grossDamage,
   idTypeMatch,
   locationArmor,
+  rerenderAoVMessage,
   resolveChatMessageElement,
   safeFromUuid,
   showDice3dForRoll
@@ -178,17 +181,6 @@ async function resolveCoreDamageButton(sourceMessage, button, event, source) {
   return true;
 }
 
-function findDamageLocationCard(message) {
-  const cards = aovCards(message);
-  const index = cards.findIndex(card => (
-    card?.rollType === "DM"
-    && card.damageCF === true
-    && grossDamage(card) > 0
-    && !String(card.targetLocID ?? "").trim()
-  ));
-  return index >= 0 ? { card: cards[index], index } : null;
-}
-
 function damageCardMatchesRules(rules, card) {
   if (!rules || rules.resolved === true) return false;
   const targetMatches = idTypeMatch(rules.targetParticipantId, rules.targetParticipantType, card.targetId, card.targetType)
@@ -241,28 +233,12 @@ function applyHitLocationToCard(chatCard, targetActor, hitLocation, rollResult) 
   return next;
 }
 
-async function rerenderAoVMessage(message) {
-  const refreshed = game.messages?.get?.(message.id) ?? message;
-  const content = await AoVAdapter.createAovCombatCard(refreshed.flags.aov);
-  await guardedUpdate(refreshed, { content }, { category: "chat.aovRerender" });
-}
-
 function collectionValues(source) {
   if (!source) return [];
   if (Array.isArray(source)) return source;
   if (Array.isArray(source.contents)) return source.contents;
   if (typeof source.values === "function") return Array.from(source.values());
   return Array.from(source).map(entry => Array.isArray(entry) ? entry[1] : entry).filter(Boolean);
-}
-
-function authoritativeGmUser() {
-  return collectionValues(game.users).find(user => user?.active === true && user?.isGM === true) ?? null;
-}
-
-function isAuthoritativeGmClient() {
-  if (game.user?.isGM !== true) return false;
-  const authoritative = authoritativeGmUser();
-  return !authoritative || authoritative.id === game.user.id;
 }
 
 export async function resolveProneDamageMessage(message) {
@@ -305,7 +281,7 @@ export async function resolveProneDamageMessage(message) {
       [`flags.${MODULE_ID}.${PRONE_DAMAGE_FLAG}.targetLocName`]: hitLocation.name ?? "",
       [`flags.${MODULE_ID}.${PRONE_DAMAGE_FLAG}.resolvedAt`]: Date.now()
     }, { category: "chat.proneHitLocation" });
-    await rerenderAoVMessage(latestMessage);
+    await rerenderAoVMessage(latestMessage, { guarded: true });
     return true;
   } finally {
     resolvingProneDamageMessages.delete(messageKey);
@@ -424,18 +400,18 @@ function bindProneHitLocationOverride(message, html) {
   }, { capture: true });
 }
 
-export function registerProneDamageAutomationHooks() {
+export function registerProneDamageAutomationHooks(hooks = globalThis.Hooks) {
   if (hooksRegistered) return;
   hooksRegistered = true;
-  Hooks.on("renderChatMessageHTML", (message, html) => {
+  hooks.on("renderChatMessageHTML", (message, html) => {
     bindProneDamageButtonOverride(message, html);
     bindProneHitLocationOverride(message, html);
     insertProneAutomationNote(message, html);
   });
-  Hooks.on("createChatMessage", message => {
+  hooks.on("createChatMessage", message => {
     void resolveProneDamageMessage(message).catch(exception => warn(exception));
   });
-  Hooks.on("updateChatMessage", message => {
+  hooks.on("updateChatMessage", message => {
     void resolveProneDamageMessage(message).catch(exception => warn(exception));
   });
 }

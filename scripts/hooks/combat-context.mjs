@@ -65,9 +65,9 @@ function addSetCurrentTurnOption(application, menuItems) {
  *
  * @returns {void}
  */
-export function registerCombatContextHooks() {
+export function registerCombatContextHooks(hooks = globalThis.Hooks) {
   if (combatContextHooksRegistered) return;
   combatContextHooksRegistered = true;
-  Hooks.on("getAoVCombatTrackerContextOptions", addSetCurrentTurnOption);
-  Hooks.on("getCombatTrackerContextOptions", addSetCurrentTurnOption);
+  hooks.on("getAoVCombatTrackerContextOptions", addSetCurrentTurnOption);
+  hooks.on("getCombatTrackerContextOptions", addSetCurrentTurnOption);
 }

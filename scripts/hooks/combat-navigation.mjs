@@ -83,12 +83,12 @@ export function isForwardCombatNavigation(combat, changed, options) {
  *
  * @returns {void}
  */
-export function registerCombatNavigationHooks() {
-  Hooks.on("combatStart", (combat, updateData) => {
+export function registerCombatNavigationHooks(hooks = globalThis.Hooks) {
+  hooks.on("combatStart", (combat, updateData) => {
     prepareInitialPlanningTurn(combat, updateData);
   });
 
-  Hooks.on("preUpdateCombat", (combat, changed, options) => {
+  hooks.on("preUpdateCombat", (combat, changed, options) => {
     if (!AoVAdapter.isAoVWorld() || !AoVAdapter.enabledSetting) return;
     if (PhaseController.isInternalCombatUpdate(combat, options)) return;
 

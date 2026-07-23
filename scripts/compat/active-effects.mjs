@@ -320,6 +320,23 @@ export function effectIsActive(effect) {
 }
 
 /**
+ * Whether the runtime can mirror a module status onto an Actor ActiveEffect.
+ *
+ * @param {Actor|object|null} actor Candidate Actor.
+ * @param {{enabled?: boolean}} [options={}] Feature-level availability.
+ * @returns {boolean}
+ */
+export function canMirrorActorStatusEffect(actor, { enabled = true } = {}) {
+  if (!enabled || !actor) return false;
+  return typeof CONFIG?.ActiveEffect?.documentClass === "function"
+    && (
+      typeof actor.toggleStatusEffect === "function"
+      || typeof actor.createEmbeddedDocuments === "function"
+      || Array.from(actor.effects ?? []).some(effect => typeof effect?.update === "function")
+    );
+}
+
+/**
  * Read the highest Skjaldborg injury-threshold severity from an effect list.
  *
  * @param {Iterable<ActiveEffect|object>|null|undefined} effects Candidate effects.

@@ -1,5 +1,6 @@
 import { MODULE_ID } from "../constants.mjs";
 import { AoVAdapter } from "../adapter/aov-adapter.mjs";
+import { AOV_TEMPLATES } from "../adapter/aov-contract.mjs";
 import { cleanString, numberOr } from "../utils/document-data.mjs";
 import { cleanTargetRefs, runeMagicNarrativeKey } from "./runic-magic-data.mjs";
 import {
@@ -161,7 +162,7 @@ export function buildRunicResistanceChatData({ actor, casterToken, targetActor, 
   return {
     rollType: "CH",
     cardType: "RE",
-    chatTemplate: "systems/aov/templates/chat/roll-resistance.hbs",
+    chatTemplate: AOV_TEMPLATES.ROLL_RESISTANCE,
     state: "open",
     wait: true,
     resultLevel: 0,

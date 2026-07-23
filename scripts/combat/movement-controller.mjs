@@ -3300,11 +3300,11 @@ async function startMovementPhaseUnlocked(combat) {
  * @param {(action: string, payload?: object) => Promise<unknown>} requestGm GM request function.
  * @returns {void}
  */
-export function registerMovementHooks(requestGm) {
+export function registerMovementHooks(requestGm, hooks = globalThis.Hooks) {
   installMovementRulerCapture(requestGm);
-  Hooks.on("canvasReady", () => installMovementRulerCapture(requestGm));
+  hooks.on("canvasReady", () => installMovementRulerCapture(requestGm));
 
-  Hooks.on("preMoveToken", (document, movement, operation) => {
+  hooks.on("preMoveToken", (document, movement, operation) => {
     const decision = movementCaptureDecision(document, operation);
     debugCaptureDecision(document, movement, operation, decision);
     if (!decision.capture) return undefined;
@@ -3441,7 +3441,7 @@ export function registerMovementHooks(requestGm) {
   // Foundry v14 documents recordToken as a single-argument notification. It is
   // diagnostic only here; treating its nonexistent second and third arguments
   // as movement data previously created competing, incomplete plan writes.
-  Hooks.on("recordToken", document => {
+  hooks.on("recordToken", document => {
     const decision = movementCaptureDecision(document, {});
     movementDebug(MOVEMENT_DEBUG_CATEGORIES.CAPTURE, "record-token-hook", () => ({
       tokenId: document?.id ?? document?._id ?? null,
@@ -3459,7 +3459,7 @@ export function registerMovementHooks(requestGm) {
     });
   });
 
-  Hooks.on("moveToken", (document, _movement, _operation, user) => {
+  hooks.on("moveToken", (document, _movement, _operation, user) => {
     if (!game.user?.isGM || user?.id !== game.user.id) return;
     if (isInternalMovementOperation(_operation)) {
       performanceDiagnostics.count("movement.hook.engagementScan.suppressed", 1, {
@@ -3486,7 +3486,7 @@ export function registerMovementHooks(requestGm) {
     void checkMovementEngagements(combat).catch(warn);
   });
 
-  Hooks.on("stopToken", document => {
+  hooks.on("stopToken", document => {
     if (!game.user?.isGM) return;
     const combat = game.combat;
     const run = activeRuns.get(combat?.id);

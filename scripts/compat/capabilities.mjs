@@ -2,8 +2,10 @@ import {
   MINIMUM_AOV_VERSION,
   MINIMUM_FOUNDRY_VERSION,
   MODULE_ID,
+  VERIFIED_AOV_VERSION,
   VERIFIED_FOUNDRY_VERSION
 } from "../constants.mjs";
+import { AOV_IMPORTS, importAoVModule } from "../adapter/aov-contract.mjs";
 
 let lastCapabilityReport = null;
 
@@ -53,10 +55,6 @@ function statusEffectMode(statusEffects, capabilities) {
   if (capabilities.effects.statusEffectsArray && capabilities.effects.activeEffectClass) return "module-fallback";
   if (!statusEffects && capabilities.effects.activeEffectClass) return "module-fallback";
   return "disabled";
-}
-
-function routeForImport(path) {
-  return foundry.utils.getRoute?.(path) ?? `/${path}`;
 }
 
 function dataModelHasSystemField(itemType, fieldName) {
@@ -110,7 +108,8 @@ export function detectV14Capabilities() {
     target: {
       foundryMinimum: MINIMUM_FOUNDRY_VERSION,
       foundryVerified: VERIFIED_FOUNDRY_VERSION,
-      aovMinimum: MINIMUM_AOV_VERSION
+      aovMinimum: MINIMUM_AOV_VERSION,
+      aovVerified: VERIFIED_AOV_VERSION
     },
     foundry: {
       generation: releaseGeneration,
@@ -122,7 +121,9 @@ export function detectV14Capabilities() {
       id: game.system?.id ?? "",
       version: aovVersion,
       idOk: game.system?.id === "aov",
-      versionOk: versionAtLeast(aovVersion, MINIMUM_AOV_VERSION)
+      versionOk: versionAtLeast(aovVersion, MINIMUM_AOV_VERSION),
+      verifiedVersion: VERIFIED_AOV_VERSION,
+      verified: aovVersion === VERIFIED_AOV_VERSION
     },
     applications: {
       applicationV2: typeof applicationApi.ApplicationV2 === "function",
@@ -196,7 +197,7 @@ export function detectV14Capabilities() {
   const hardBlockers = capabilities.hardBlockers;
   addIfMissing(hardBlockers, "Foundry generation 14", capabilities.foundry.generationOk);
   addIfMissing(hardBlockers, "Age of Vikings system id", capabilities.system.idOk);
-  // ApplicationV2 is required by ActionRing, ActorHotbar, CombatHUD, and settings applications.
+  // ApplicationV2 is required by ActionRing, ActorHotbar, and settings applications.
   addIfMissing(hardBlockers, "ApplicationV2", capabilities.applications.applicationV2);
   // HandlebarsApplicationMixin is required by the module's AppV2 Handlebars surfaces.
   addIfMissing(hardBlockers, "HandlebarsApplicationMixin", capabilities.applications.handlebarsMixin);
@@ -221,7 +222,6 @@ export function detectV14Capabilities() {
   addIfMissing(warnings, "AoV tracker adjustInit unavailable", capabilities.combat.trackerAdjustInit);
   addIfMissing(warnings, "AoV tracker adjDex unavailable", capabilities.combat.trackerAdjDex);
   addIfMissing(warnings, "Foundry route-resolved import support unavailable", capabilities.aovApi.routeResolvedImports);
-  addIfMissing(warnings, "DocumentSheetV2 unavailable; custom document sheet integrations disabled", capabilities.sheets.documentSheetV2);
   if (capabilities.dataModels.skillCritMult === false || capabilities.dataModels.skillFumbleMult === false) {
     warnings.push("AoV skill data model does not expose critMult/fumbleMult");
   }
@@ -238,7 +238,6 @@ export function detectV14Capabilities() {
   if (!capabilities.movement.sceneMoveTokens) degraded.push("scene-move-tokens");
   if (!capabilities.movement.completeMovementPath) degraded.push("complete-movement-path");
   if (!capabilities.combat.trackerAdjustInit || !capabilities.combat.trackerAdjDex) degraded.push("adjust-initiative-integration");
-  if (!capabilities.sheets.documentSheetV2) degraded.push("document-sheet-integrations");
   if (!capabilities.effects.activeEffectFromStatusEffect) degraded.push("active-effect-from-status-fallback");
   capabilities.statusEffectMode = statusEffectMode(statusEffects, capabilities);
   if (!capabilities.effects.statusEffectsObject && !capabilities.effects.statusEffectsMap && capabilities.effects.activeEffectClass) {
@@ -262,7 +261,7 @@ export async function detectAoVApiCapabilities(capabilities = detectV14Capabilit
   if (!capabilities?.system?.idOk) return capabilities;
 
   try {
-    const checks = await import(routeForImport("systems/aov/system/apps/checks.mjs"));
+    const checks = await importAoVModule(AOV_IMPORTS.CHECKS);
     capabilities.aovApi.checkApiImport = true;
     capabilities.aovApi.trigger = typeof checks.AOVCheck?._trigger === "function";
     capabilities.aovApi.successLevel = typeof checks.AOVCheck?.successLevel === "function";
@@ -277,7 +276,7 @@ export async function detectAoVApiCapabilities(capabilities = detectV14Capabilit
   }
 
   try {
-    const rollTypes = await import(routeForImport("systems/aov/system/apps/roll-types.mjs"));
+    const rollTypes = await importAoVModule(AOV_IMPORTS.ROLL_TYPES);
     capabilities.aovApi.rollTypesImport = true;
     capabilities.aovApi.aovRollType = typeof rollTypes.AOVRollType?._onDetermineCheck === "function";
   } catch (_exception) {
