@@ -1,3 +1,12 @@
+## 0.6.0
+
+- Adds a DialogV2 compatibility base (`SkjDialogV2`) to coalesce ApplicationV2 content refits and replaces direct DialogV2 subclasses to use it.
+- Replaces legacy boolean `Application.render` signatures with option objects.
+- Centralizes ChatMessage creation through module chat delivery helpers for background and interactive delivery.
+- Adds version utilities for `compareVersions` / `versionAtLeast` handling.
+- Hardens async paths with defensive promise catches and logger usage.
+- Updates diagnostics and `module-tool` validation coverage for metadata and imports.
+
 ## 0.3.0-alpha.24
 
 - Narrows the Attack button footer column from 108px to 96px.

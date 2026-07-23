@@ -686,16 +686,21 @@ function createDeterministicZip(sourceDirectory, outputPath) {
 
 function buildRelease() {
   const source = buildFolder();
-  const manifest = readJson(join(ROOT, "module.json"));
   const releaseRoot = join(ROOT, "release");
+  cleanBuildPath(releaseRoot);
   mkdirSync(releaseRoot, { recursive: true });
-  const zipPath = join(releaseRoot, `aov-skjaldborg-v${manifest.version}.zip`);
+  const zipPath = join(releaseRoot, "aov-skjaldborg.zip");
+  const manifestPath = join(releaseRoot, "module.json");
+  const checksumsPath = join(releaseRoot, "SHA256SUMS.txt");
   cleanBuildPath(zipPath);
-  cleanBuildPath(`${zipPath}.sha256`);
+  cleanBuildPath(manifestPath);
+  cleanBuildPath(checksumsPath);
   createDeterministicZip(source, zipPath);
+  cpSync(join(source, "module.json"), manifestPath);
   const digest = createHash("sha256").update(readFileSync(zipPath)).digest("hex");
-  writeFileSync(`${zipPath}.sha256`, `${digest}  ${posixPath(relative(releaseRoot, zipPath))}\n`, "utf8");
+  writeFileSync(checksumsPath, `${digest}  ${posixPath(relative(releaseRoot, zipPath))}\n`, "utf8");
   console.log(`build: ${relativePath(zipPath)}`);
+  console.log(`manifest: ${relativePath(manifestPath)}`);
   console.log(`sha256: ${digest}`);
 }
 
