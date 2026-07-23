@@ -17,7 +17,7 @@
     "test:contracts": "node tools/module-tool.mjs contracts",
     "build": "node tools/module-tool.mjs build",
     "build:folder": "node tools/module-tool.mjs build-folder",
-    "ci": "npm run validate && npm run test:contracts",
+    "ci": "npm run styles:release && npm run validate && npm run test:contracts",
     "set-version": "node tools/module-tool.mjs set-version"
   },
   "devDependencies": {
