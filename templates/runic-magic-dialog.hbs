@@ -125,13 +125,14 @@
       <p class="skj-roll-dialog__note" data-seidur-skill-note {{#if selectedRuneMode}}hidden{{/if}}>{{localize "AOV_SKJALDBORG.RunicMagic.SeidurSkill" skill=seidurMagicSkillName}}</p>
     </fieldset>
 
-    <div class="skj-roll-dialog__footer skj-runic-magic-dialog__footer">
-      <div class="skj-roll-dialog__summary">
-        <span>{{#if targets.hasTargets}}{{localize "AOV_SKJALDBORG.RunicMagic.Targets" targets=targets.targetNames}}{{else}}{{localize "AOV_SKJALDBORG.RunicMagic.Unopposed"}}{{/if}}</span>
-      </div>
-      <button type="button" class="skj-roll-dialog__action" data-action="runicMagicSubmit" {{#unless hasMagic}}disabled{{/unless}}>
-        {{localize "AOV_SKJALDBORG.RunicMagic.Submit"}}
-      </button>
-    </div>
   </section>
+
+  <div class="skj-dialog-footer skj-roll-dialog__footer skj-runic-magic-dialog__footer">
+    <div class="skj-roll-dialog__summary">
+      <span>{{#if targets.hasTargets}}{{localize "AOV_SKJALDBORG.RunicMagic.Targets" targets=targets.targetNames}}{{else}}{{localize "AOV_SKJALDBORG.RunicMagic.Unopposed"}}{{/if}}</span>
+    </div>
+    <button type="button" class="skj-roll-dialog__action" data-action="runicMagicSubmit" {{#unless hasMagic}}disabled{{/unless}}>
+      {{localize "AOV_SKJALDBORG.RunicMagic.Submit"}}
+    </button>
+  </div>
 </div>

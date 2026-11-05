@@ -3,10 +3,10 @@
   "type": "module",
   "title": "Age of Vikings - Skjaldborg",
   "description": "Combat workflow automation, movement planning, intent tracking, actor hotbar, action ring, combat dialogs, chat cards, and tactical canvas indicators for Age of Vikings on Foundry VTT v14.",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "compatibility": {
-    "minimum": "14.363",
-    "verified": "14.365"
+    "minimum": "14.370",
+    "verified": "14.370"
   },
   "authors": [
     {
@@ -19,8 +19,8 @@
         "id": "aov",
         "type": "system",
         "compatibility": {
-          "minimum": "14.4",
-          "verified": "14.5"
+          "minimum": "14.7",
+          "verified": "14.7"
         }
       }
     ]
@@ -43,7 +43,7 @@
   "media": [],
   "url": "https://github.com/varys1337/aov-skjaldborg",
   "manifest": "https://github.com/varys1337/aov-skjaldborg/releases/latest/download/module.json",
-  "download": "https://github.com/varys1337/aov-skjaldborg/releases/download/v0.6.0/aov-skjaldborg.zip",
+  "download": "https://github.com/varys1337/aov-skjaldborg/releases/download/v0.7.0/aov-skjaldborg.zip",
   "bugs": "https://github.com/varys1337/aov-skjaldborg/issues",
   "changelog": "https://github.com/varys1337/aov-skjaldborg/releases"
 }

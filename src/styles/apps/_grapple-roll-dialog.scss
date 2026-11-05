@@ -2,18 +2,6 @@
 /* Grapple workflow                                                           */
 /* ------------------------------------------------------------------------- */
 
-.skj-grapple-roll-window .skj-roll-dialog {
-  width: min(390px, 92vw);
-}
-
-.skj-roll-dialog--grapple .skj-roll-dialog__footer {
-  grid-template-columns: minmax(0, 1fr) 104px;
-}
-
-.skj-roll-dialog--grapple .skj-roll-dialog__action {
-  width: 104px;
-}
-
 .skj-roll-dialog__row--grapple-mode {
   grid-template-columns: 68px minmax(0, 1fr);
 }
@@ -46,8 +34,8 @@
 }
 
 .skj-grapple-location-segments {
-  grid-template-columns: repeat(2, minmax(0, 140px));
-  max-width: 288px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  max-width: none;
 }
 
 .skj-grapple-manual-location {
@@ -105,17 +93,6 @@
   width: 100%;
 }
 
-@media (max-width: 460px) {
-  .skj-roll-dialog__row--grapple-modifier,
-  .skj-roll-dialog__row--grapple-mode {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .skj-grapple-raw-note {
-    justify-self: stretch;
-    width: 100%;
-  }
-}
 
 /* Grapple cards must fit inside the narrow AoV chat column. */
 .chat-message .aov.aov-skjaldborg-grapple-chat {

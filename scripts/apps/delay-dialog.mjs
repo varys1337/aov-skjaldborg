@@ -4,7 +4,8 @@ import { getCombatantState } from "../combat/state.mjs";
 import { requestGm } from "../socket.mjs";
 import { RenderCoordinator } from "../ui/render-coordinator.mjs";
 import { error } from "../logger.mjs";
-import { actionThemeClass } from "../ui/dom-utils.mjs";
+import { actionThemeClasses, actionThemeClass } from "../ui/dom-utils.mjs";
+import { ACTION_DIALOG_WIDTHS, actionDialogPosition } from "./base/dialog-v2.mjs";
 import { numberOr } from "../utils/document-data.mjs";
 
 const { DialogV2 } = foundry.applications.api;
@@ -63,12 +64,13 @@ export class DelayDialog {
 
     const themeClass = actionThemeClass();
     const result = await DialogV2.input({
-      classes: ["aov-skjaldborg", "dialog", "skj-attack-roll-window", "skj-delay-dialog-window", themeClass],
+      classes: ["aov-skjaldborg", "dialog", "skj-attack-roll-window", "skj-delay-dialog-window", "skj-action-dialog-window", themeClass, "skj-owned-dialog-window", ...actionThemeClasses()],
       window: {
         title: game.i18n.localize("AOV_SKJALDBORG.Delay.Title"),
         contentClasses: ["aov-skjaldborg", "skj-attack-roll-content", themeClass]
       },
       content,
+      position: actionDialogPosition(ACTION_DIALOG_WIDTHS.compact),
       rejectClose: false,
       modal: true,
       ok: { label: game.i18n.localize("AOV_SKJALDBORG.Delay.Apply") }

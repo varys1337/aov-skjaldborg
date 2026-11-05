@@ -3,8 +3,8 @@ import { getReadiedWeapon } from "../combat/weapon-state.mjs";
 import { mountedCapSummary, mountedWeaponCap } from "../combat/mounted-combat.mjs";
 import { resolveNaturalWeaponSkill } from "../combat/weapon-skill-resolver.mjs";
 import { startDialogCombatWorkflowBatch } from "../socket.mjs";
-import { createSplitAttackPrompt } from "../combat/dialog-target-queue.mjs";
-import { createCombatRuleContext, prepareAttackContext, prepareDamageContext } from "../combat/rule-kernel.mjs";
+import { completeSplitAttack, createSplitAttackPrompt } from "../combat/dialog-target-queue.mjs";
+import { createCombatRuleContext, prepareAttackContext, prepareDamageContext, serializeCombatRuleReports } from "../combat/rule-kernel.mjs";
 import {
   serializeProneAttackModifierContext,
   serializeProneDamageContext
@@ -35,7 +35,7 @@ import {
   unregisterTargetRefresh,
   validChoiceValue
 } from "./target-refresh-helpers.mjs";
-import { SkjDialogV2 } from "./base/dialog-v2.mjs";
+import { ACTION_DIALOG_WIDTHS, actionDialogPosition, SkjDialogV2 } from "./base/dialog-v2.mjs";
 
 const RANGE_BANDS = Object.freeze(["medium", "long"]);
 const MISSILE_WEAPON_TYPES = Object.freeze(new Set(["missile", "thrown"]));
@@ -144,7 +144,7 @@ function getReadiedMissileWeapon(actor) {
  * @param {Item|object|null|undefined} weapon Candidate weapon.
  * @returns {Promise<boolean>}
  */
-async function requiresAmmunition(weapon) {
+export async function requiresAmmunition(weapon) {
   if (!weapon) return false;
   if (weaponType(weapon) === "thrown") return false;
   if (weaponType(weapon) === "missile") return true;
@@ -223,10 +223,7 @@ export class MissileRollDialog extends SkjDialogV2 {
       contentTag: "form",
       contentClasses: ["aov-skjaldborg", "skj-attack-roll-content"]
     },
-    position: {
-      width: 390,
-      height: "auto"
-    },
+    position: actionDialogPosition(ACTION_DIALOG_WIDTHS.standard),
     actions: {
       ...super.DEFAULT_OPTIONS.actions,
       submitMissile: function (event, target) {
@@ -261,10 +258,7 @@ export class MissileRollDialog extends SkjDialogV2 {
           label: game.i18n.localize("Cancel")
         }
       ],
-      position: {
-        width: 390,
-        height: "auto"
-      }
+      position: actionDialogPosition(ACTION_DIALOG_WIDTHS.standard)
     });
     dialog = this;
     this.actor = actor;
@@ -783,11 +777,13 @@ export class MissileRollDialog extends SkjDialogV2 {
       targetActor,
       targetToken,
       weapon: weapon ?? this.weapon,
+      workflowType: "missile",
       aimed: aimedEnabled
     })));
     const proneRules = ruleContext.proneRules ?? null;
     const proneModifier = Number(proneRules?.total) || 0;
-    const preMultiplierChance = baseChance + situationalModifier + aimedModifier + augmentModifier + proneModifier;
+    const evadingModifier = Number(ruleContext.evadingModifier) || 0;
+    const preMultiplierChance = baseChance + situationalModifier + aimedModifier + augmentModifier + proneModifier + evadingModifier;
     const rangeEnabled = augmentOptions.has("range") && isProjectileWeapon(weapon ?? this.weapon);
     const selectedRangeBand = missileRangeBand(data.get("missileRangeBand"));
     const rangeMultiplier = rangeEnabled ? missileRangeMultiplier(selectedRangeBand) : 1;
@@ -822,6 +818,8 @@ export class MissileRollDialog extends SkjDialogV2 {
       situationalModifier,
       aimedModifier,
       proneModifier,
+      evadingModifier,
+      ruleReports: ruleContext.ruleReports,
       proneRules,
       proneDamageRules,
       rangeModifier: rangedChance - preMultiplierChance,
@@ -958,7 +956,9 @@ export class MissileRollDialog extends SkjDialogV2 {
       ? ` · ${game.i18n.format("AOV_SKJALDBORG.AttackDialog.ProneSummary", { prone: signed(proneModifier) })}`
       : "";
     const mounted = mountedCapSummary(state.mountedCap);
-    return `${summary}${prone}${mounted ? ` · ${mounted}` : ""}`;
+    const evading = state.evadingModifier
+      ? ` · ${game.i18n.format("AOV_SKJALDBORG.AttackDialog.EvadeSummary", { modifier: signed(state.evadingModifier) })}` : "";
+    return `${summary}${prone}${evading}${mounted ? ` · ${mounted}` : ""}`;
   }
 
   _buildDamageContext(state, ammunitionChange = null) {
@@ -1011,6 +1011,8 @@ export class MissileRollDialog extends SkjDialogV2 {
       situationalModifier: state.situationalModifier,
       aimedModifier: state.aimedModifier,
       proneModifier: state.proneModifier,
+      evadingModifier: state.evadingModifier,
+      ruleReports: serializeCombatRuleReports(state.ruleReports),
       proneRules: serializeProneAttackModifierContext(state.proneRules),
       proneDamageRules: serializeProneDamageContext(state.proneDamageRules),
       rangeModifier: state.rangeModifier,
@@ -1022,6 +1024,7 @@ export class MissileRollDialog extends SkjDialogV2 {
       missileRange: state.missileRange,
       augmentations: state.augmentations,
       splitAttack: state.splitAttack,
+      splitAttackSourceMessageId: this.forcedSplitAttack?.sourceMessageId ?? null,
       targets: this.targetSnapshots.map(serializeTargetSnapshot).filter(Boolean),
       targetOptionsByTokenUuid: Object.fromEntries(this.targetOptionValues),
       originEvent: this.originEvent
@@ -1051,7 +1054,10 @@ export class MissileRollDialog extends SkjDialogV2 {
    */
   async _submit(form) {
     if (!(form instanceof HTMLFormElement)) return null;
+    if (this._submitting) return null;
+    this._submitting = true;
     try {
+      if (this.forcedSplitAttack?.sourceMessageId && await completeSplitAttack(this.forcedSplitAttack.sourceMessageId, { actorUuid: this.actor?.uuid })) return null;
       this._captureForm(form);
       if (!this.targetSnapshots.length) {
         ui.notifications.warn(game.i18n.localize("AOV_SKJALDBORG.Warnings.MissileTargetRequired"));
@@ -1092,6 +1098,7 @@ export class MissileRollDialog extends SkjDialogV2 {
       for (const requestPayload of payloads) Hooks.callAll("aovSkjaldborgMissileRollRequested", requestPayload);
       const workflowResults = await startDialogCombatWorkflowBatch(payloads, {
         beforeCreate: async promptedPayloads => {
+          if (promptedPayloads[0]?.actionClaim) return true;
           if (!this.ammunitionRequired) return true;
           const ammunitionChange = await this._deductAmmunition(state.ammunition, promptedPayloads.length);
           for (const requestPayload of promptedPayloads) {
@@ -1113,6 +1120,7 @@ export class MissileRollDialog extends SkjDialogV2 {
           secondChance: state.splitAttack.secondChance,
           naturalSkill: state.splitAttack.naturalSkill,
           secondDexRank: state.splitAttack.secondDexRank,
+          sourceMessageIds: workflowResults.filter(result => result?.started && result.attackMessageId).map(result => result.attackMessageId),
           sourceWorkflow: "missile"
         });
       }
@@ -1123,6 +1131,8 @@ export class MissileRollDialog extends SkjDialogV2 {
       error("Failed to prepare the Skjaldborg missile workflow request.", exception);
       ui.notifications.error(game.i18n.localize("AOV_SKJALDBORG.Warnings.AmmunitionDeductFailed"));
       return null;
+    } finally {
+      this._submitting = false;
     }
   }
 

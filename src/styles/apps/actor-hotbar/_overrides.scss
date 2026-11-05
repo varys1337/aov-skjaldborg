@@ -8,10 +8,6 @@
   grid-column: 1 / -1;
 }
 
-.skj-history-general-grid .skj-info-row strong {
-  text-align: right;
-}
-
 /* Keep every category label centred while placing the actor's authoritative
  * total ENC at the far-left edge of each equipment category heading. */
 .skj-equipment-group h3.skj-equipment-group-heading {
@@ -59,10 +55,10 @@
   align-self: stretch;
   background: transparent;
   border: 0;
-  border-right: 1px solid rgba(255, 255, 255, 0.18);
+  border-right: 1px solid var(--skj-frame);
   border-radius: 0;
   box-shadow: none;
-  color: #f5ede7;
+  color: var(--skj-text);
   cursor: pointer;
   display: flex;
   font-size: 12px;
@@ -103,7 +99,7 @@
 
 .skj-equipment-weapon-hp-input {
   appearance: textfield;
-  background: rgba(7, 7, 8, 0.72);
+  background: var(--skj-palette-field);
   border: 1px solid var(--skj-frame);
   border-radius: 4px;
   box-shadow: none;
@@ -392,12 +388,7 @@
 /* v0.3.0-alpha.8 Transparent empty wounds and authoritative AoV HP display  */
 /* ------------------------------------------------------------------------- */
 
-.skj-active-wounds-section.is-empty {
-  background: transparent;
-}
-
-.skj-active-wounds-section.is-empty > .skj-empty-actions {
-  background: transparent;
+.skj-wellbeing-section > .skj-empty-actions {
   border: 0;
   border-radius: 0;
   color: var(--skj-text);
@@ -506,7 +497,7 @@
 }
 
 .skj-weapon-control-stack .skj-readied-weapon-label {
-  background: none;
+  background: transparent;
   box-sizing: border-box;
   height: 10px;
   line-height: 10px;

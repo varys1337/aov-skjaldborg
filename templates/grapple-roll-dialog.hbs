@@ -94,11 +94,12 @@
       </div>
     </section>
 
-    <div class="skj-roll-dialog__footer skj-attack-roll-dialog__actions">
-      <button type="button" class="skj-roll-dialog__action skj-attack-roll-dialog__roll-button" data-action="submitGrapple" {{#unless hasTargets}}disabled{{/unless}}>
-        <i class="fa-solid fa-people-pulling" aria-hidden="true"></i>
-        <span data-grapple-submit-label>{{localize "AOV_SKJALDBORG.GrappleDialog.RollGrapple"}}</span>
-      </button>
-    </div>
   </section>
+
+  <div class="skj-dialog-footer skj-roll-dialog__footer skj-attack-roll-dialog__actions">
+    <button type="button" class="skj-roll-dialog__action skj-attack-roll-dialog__roll-button" data-action="submitGrapple" {{#unless hasTargets}}disabled{{/unless}}>
+      <i class="fa-solid fa-people-pulling" aria-hidden="true"></i>
+      <span data-grapple-submit-label>{{localize "AOV_SKJALDBORG.GrappleDialog.RollGrapple"}}</span>
+    </button>
+  </div>
 </div>

@@ -117,10 +117,11 @@ export function markStart(name) {
 }
 
 export function markEnd(id, detail = null) {
-  if (!id || !performanceDiagnosticsEnabled()) return 0;
+  if (!id) return 0;
   const started = pendingMarks.get(id);
   if (!started) return 0;
   pendingMarks.delete(id);
+  if (!performanceDiagnosticsEnabled()) return 0;
   const endedAt = globalThis.performance?.now?.() ?? Date.now();
   const duration = Math.max(0, endedAt - started.startedAt);
   recordMeasure(started.name, duration, detail);
@@ -132,8 +133,17 @@ export async function measureAsync(name, operation, detailFactory = null) {
   try {
     return await operation();
   } finally {
-    const detail = typeof detailFactory === "function" ? detailFactory() : detailFactory;
-    markEnd(id, detail);
+    if (id) {
+      // A diagnostic builder must neither run when disabled nor replace the
+      // operation's result/error if optional diagnostic preparation fails.
+      let detail = null;
+      try {
+        if (performanceDiagnosticsEnabled()) detail = typeof detailFactory === "function" ? detailFactory() : detailFactory;
+      } catch (error) {
+        detail = { diagnosticError: String(error?.message ?? error) };
+      }
+      markEnd(id, detail);
+    }
   }
 }
 

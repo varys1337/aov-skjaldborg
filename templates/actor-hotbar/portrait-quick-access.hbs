@@ -30,7 +30,7 @@
             {{#unless empty}}data-tooltip="{{tooltip}}"{{/unless}}
           >
             {{#unless empty}}
-              {{#if img}}<img src="{{img}}" alt="">{{else}}<i class="{{icon}}" inert></i>{{/if}}
+              {{#if img}}<img src="{{img}}" class="{{#if monochromeImage}}skj-monochrome-icon{{/if}}" alt="">{{else}}<i class="{{icon}}" inert></i>{{/if}}
               {{#if score}}<span class="skj-slot-score">{{score}}</span>{{/if}}
             {{/unless}}
           </button>

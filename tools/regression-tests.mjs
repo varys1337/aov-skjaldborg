@@ -463,7 +463,7 @@ async function testReachVisualizerConfigAndGeometry() {
   ]);
 
   const source = readFileSync(new URL("../scripts/canvas/reach-visualizer.mjs", import.meta.url), "utf8");
-  assert.match(source, /Hooks\.on\("getSceneControlButtons"/);
+  assert.match(source, /hooks\.on\("getSceneControlButtons"/);
   assert.match(source, /controls\?\.tokens/);
   assert.match(source, /button:\s*true/);
   assert.match(source, /reachUnitsForCombatant/);
@@ -480,7 +480,7 @@ async function testReachVisualizerConfigAndGeometry() {
   assert.match(settingsSource, /config:\s*false/);
 
   const mainSource = readFileSync(new URL("../scripts/main.mjs", import.meta.url), "utf8");
-  assert.match(mainSource, /registerReachVisualizerHooks\(\)/);
+  assert.match(mainSource, /\["reach-visualizer", "Reach Visualizer", registerReachVisualizerHooks\]/);
   assert.match(mainSource, /reachVisualizer,/);
 
   const valid = normalizeReachVisualizerSettings({
@@ -1291,6 +1291,13 @@ async function testDamageEffectTrackingHelpers() {
   assert.equal(sourceFreeMessage.getFlag(MODULE_ID, "damageEffectTracking"), undefined);
 
   sourceFreeMessage.flags.aov.chatCard[0].targetLocID = "loc-arm";
+  assert.deepEqual(await damage.__test.processDamageCard(sourceFreeMessage, sourceFreeMessage.flags.aov.chatCard[0], 0), {
+    status: "pending", reason: "native-result-has-no-source", results: []
+  }, "native cards without source proof must not enter historical tracking");
+  // The following cases exercise persisted pre-provenance tracking, which is
+  // intentionally distinct from a newly created, source-free native card.
+  const historicalFlags = () => ({ damageEffectTracking: { cards: { historical: { status: "skipped" } } } });
+  sourceFreeMessage.flags[MODULE_ID] = historicalFlags();
   const pending = await damage.__test.processDamageCard(sourceFreeMessage, sourceFreeMessage.flags.aov.chatCard[0], 0);
   assert.equal(pending.status, "pending");
   assert.equal(pending.pending.injurySeverity, 2);
@@ -1321,7 +1328,7 @@ async function testDamageEffectTrackingHelpers() {
       aov: {
         chatCard: [{ ...sourceFreeMessage.flags.aov.chatCard[0], rollVal: 4 }]
       },
-      [MODULE_ID]: {}
+      [MODULE_ID]: historicalFlags()
     },
     getFlag: sourceFreeMessage.getFlag,
     update: async data => {
@@ -1362,7 +1369,7 @@ async function testDamageEffectTrackingHelpers() {
       aov: {
         chatCard: [{ ...sourceFreeMessage.flags.aov.chatCard[0], targetLocID: "loc-leg", rollVal: 12 }]
       },
-      [MODULE_ID]: {}
+      [MODULE_ID]: historicalFlags()
     },
     getFlag: sourceFreeMessage.getFlag,
     update: async data => {
@@ -1390,7 +1397,7 @@ async function testDamageEffectTrackingHelpers() {
       aov: {
         chatCard: [{ ...sourceFreeMessage.flags.aov.chatCard[0], rollVal: 8 }]
       },
-      [MODULE_ID]: {}
+      [MODULE_ID]: historicalFlags()
     },
     getFlag: sourceFreeMessage.getFlag,
     update: async data => {

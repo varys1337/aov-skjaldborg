@@ -24,6 +24,7 @@ import {
 } from "./constants.mjs";
 import { getCombatState, getCombatantState, setCombatState, setCombatantState } from "./combat/state.mjs";
 import { ActionUiSettings } from "./apps/action-ui-settings.mjs";
+import { CombatActionRecovery } from "./apps/combat-action-recovery.mjs";
 import { CombatTrackingSettings } from "./apps/combat-tracking-settings.mjs";
 import { ReportSettings } from "./apps/report-settings.mjs";
 import { PhaseStructureSettings } from "./apps/phase-structure-settings.mjs";
@@ -31,6 +32,8 @@ import { debug } from "./logger.mjs";
 import { RenderCoordinator } from "./ui/render-coordinator.mjs";
 import { normalizeReachVisualizerSettings } from "./canvas/reach-visualizer-config.mjs";
 import { refreshRuntimeSetting, refreshRuntimeSettings } from "./runtime-settings.mjs";
+import { refreshActionThemes } from "./ui/dom-utils.mjs";
+import { isAuthoritativeGmClient } from "./utils/authority.mjs";
 
 
 function cacheSettingOnChange(key, handler = null) {
@@ -39,6 +42,26 @@ function cacheSettingOnChange(key, handler = null) {
     if (typeof handler === "function") return handler(value);
     return undefined;
   };
+}
+
+/** Keep the diagnostic submenu in the documented settings-menu registry only while enabled. */
+function syncCombatRecoveryMenu(enabled) {
+  const key = `${MODULE_ID}.combatActionRecovery`;
+  if (enabled === true) {
+    if (!game.settings.menus.has(key)) game.settings.registerMenu(MODULE_ID, "combatActionRecovery", {
+      name: "AOV_SKJALDBORG.Recovery.Title", label: "AOV_SKJALDBORG.Recovery.Open",
+      hint: "AOV_SKJALDBORG.Recovery.MenuHint", icon: "fa-solid fa-magnifying-glass-chart",
+      type: CombatActionRecovery, restricted: true
+    });
+    return;
+  }
+  game.settings.menus.delete(key);
+  const app = CombatActionRecovery.current;
+  if (app) {
+    app.evidenceRevision += 1;
+    app.element?.replaceChildren();
+    void app.close();
+  }
 }
 
 /**
@@ -176,10 +199,7 @@ export function registerSettings() {
       [ACTION_UI_THEMES.CLASSIC]: "AOV_SKJALDBORG.Settings.ActionUiTheme.Classic"
     },
     default: ACTION_UI_DEFAULTS.actionUiTheme,
-    onChange: () => {
-      game.aovSkjaldborg?.ui?.refreshActorHotbar?.();
-      game.aovSkjaldborg?.ui?.refreshActionRing?.();
-    }
+    onChange: () => refreshActionThemes()
   });
 
   game.settings.register(MODULE_ID, "actorHotbarCollapsed", {
@@ -241,6 +261,18 @@ export function registerSettings() {
         void game.aovSkjaldborg?.phase?.reconcilePlanningTurnMode?.(game.combat);
       }
       RenderCoordinator.invalidateCombatTracker("setting-dynamic-planning", { parts: ["rows"] });
+    })
+  });
+
+  game.settings.register(MODULE_ID, "showPlayerInitiative", {
+    name: "AOV_SKJALDBORG.Settings.ShowPlayerInitiative.Name",
+    hint: "AOV_SKJALDBORG.Settings.ShowPlayerInitiative.Hint",
+    scope: "world",
+    config: false,
+    type: Boolean,
+    default: false,
+    onChange: cacheSettingOnChange("showPlayerInitiative", () => {
+      RenderCoordinator.invalidateCombatTracker("setting-player-initiative", { full: true, parts: ["rows"] });
     })
   });
 
@@ -475,7 +507,7 @@ export function registerSettings() {
     config: true,
     type: Boolean,
     default: false,
-    onChange: cacheSettingOnChange("debug")
+    onChange: cacheSettingOnChange("debug", syncCombatRecoveryMenu)
   });
 
   game.settings.register(MODULE_ID, "movementDebugEnabled", {
@@ -559,6 +591,7 @@ export function registerSettings() {
     default: ""
   });
   refreshRuntimeSettings();
+  syncCombatRecoveryMenu(game.settings.get(MODULE_ID, "debug"));
 }
 
 /**
@@ -594,13 +627,11 @@ export async function migrateActionUiSettings() {
  * @returns {Promise<void>}
  */
 export async function migrateLegacyReportSettings() {
-  if (!game.user?.isGM) return;
+  if (!isAuthoritativeGmClient()) return;
   if (game.settings.get(MODULE_ID, "reportSettingsMigrated")) return;
   const enabled = game.settings.get(MODULE_ID, "chatReports");
-  await Promise.all([
-    ...PHASE_ORDER.map(phase => game.settings.set(MODULE_ID, REPORT_PHASE_SETTING_KEYS[phase], enabled)),
-    game.settings.set(MODULE_ID, "reportSettingsMigrated", true)
-  ]);
+  await Promise.all(PHASE_ORDER.map(phase => game.settings.set(MODULE_ID, REPORT_PHASE_SETTING_KEYS[phase], enabled)));
+  await game.settings.set(MODULE_ID, "reportSettingsMigrated", true);
 }
 
 
@@ -615,7 +646,7 @@ export async function migrateLegacyReportSettings() {
  * @returns {Promise<void>}
  */
 export async function migrateCombatTrackingSettings() {
-  if (!game.user?.isGM) return;
+  if (!isAuthoritativeGmClient()) return;
   const version = Number(game.settings.get(MODULE_ID, "combatTrackingMigrationVersion")) || 0;
   if (version >= 2) return;
   const writes = [];
@@ -626,8 +657,8 @@ export async function migrateCombatTrackingSettings() {
       game.settings.set(MODULE_ID, "adaptiveCheckpointMaxBatchSize", 1)
     );
   }
-  writes.push(game.settings.set(MODULE_ID, "combatTrackingMigrationVersion", 2));
   await Promise.all(writes);
+  await game.settings.set(MODULE_ID, "combatTrackingMigrationVersion", 2);
 }
 
 /**
@@ -637,15 +668,15 @@ export async function migrateCombatTrackingSettings() {
  * @returns {Promise<void>}
  */
 export async function migrateUnifiedDebugSetting() {
-  if (!game.user?.isGM) return;
+  if (!isAuthoritativeGmClient()) return;
   if (game.settings.get(MODULE_ID, "debugSettingsMigrated")) return;
   const enabled = game.settings.get(MODULE_ID, "debug") === true
     || game.settings.get(MODULE_ID, "movementDebugEnabled") === true;
-  await Promise.all([
-    game.settings.set(MODULE_ID, "debug", enabled),
-    game.settings.set(MODULE_ID, "movementDebugEnabled", false),
-    game.settings.set(MODULE_ID, "debugSettingsMigrated", true)
-  ]);
+  // Persist the combined value before clearing the legacy switch so a retry
+  // cannot lose an enabled setting after a partial failure.
+  await game.settings.set(MODULE_ID, "debug", enabled);
+  await game.settings.set(MODULE_ID, "movementDebugEnabled", false);
+  await game.settings.set(MODULE_ID, "debugSettingsMigrated", true);
 }
 
 /**
@@ -658,7 +689,7 @@ export async function migrateUnifiedDebugSetting() {
  * @returns {Promise<void>}
  */
 export async function migrateV14WorldState() {
-  if (!game.user?.isGM) return;
+  if (!isAuthoritativeGmClient()) return;
   const version = Number(game.settings.get(MODULE_ID, "v14MigrationVersion")) || 0;
   if (version >= V14_MIGRATION_VERSION) return;
 
@@ -675,9 +706,7 @@ export async function migrateV14WorldState() {
   }
 
   await Promise.all(writes);
-  await Promise.all([
-    game.settings.set(MODULE_ID, "v14MigrationVersion", V14_MIGRATION_VERSION),
-    game.settings.set(MODULE_ID, "v14MigrationLastRun", new Date().toISOString())
-  ]);
+  await game.settings.set(MODULE_ID, "v14MigrationLastRun", new Date().toISOString());
+  await game.settings.set(MODULE_ID, "v14MigrationVersion", V14_MIGRATION_VERSION);
   debug(`Migrated Skjaldborg world state to v14 migration version ${V14_MIGRATION_VERSION}.`);
 }

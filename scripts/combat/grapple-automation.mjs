@@ -1,3 +1,4 @@
+import { actionThemeClasses } from "../ui/dom-utils.mjs";
 /**
  * Grapple follow-up automation.
  *
@@ -12,6 +13,7 @@ import { AOV_TEMPLATES } from "../adapter/aov-contract.mjs";
 import { createModuleChatMessage } from "../compat/chat-message.mjs";
 import {
   effectHasStatus,
+  effectIsActive,
   moduleFlag,
   registerStatusEffect,
   safeDeleteActiveEffect,
@@ -75,13 +77,16 @@ function grappleData(effect) {
  * @param {string} [options.attackerActorUuid] Source Actor UUID.
  * @param {string} [options.targetActorUuid] Target Actor UUID.
  * @param {string|null} [options.statusId=null] Optional required status id.
+ * @param {boolean} [options.activeOnly=true] Require an applicable hold for rules checks.
  * @returns {boolean}
  */
-export function isMatchingGrappleEffect(effect, { attackerActorUuid, targetActorUuid, statusId = null } = {}) {
-  if (!effect || effect.disabled === true) return false;
+export function isMatchingGrappleEffect(effect, { attackerActorUuid, targetActorUuid, attackerTokenUuid = null, targetTokenUuid = null, statusId = null, activeOnly = true } = {}) {
+  if (!effect || (activeOnly && !effectIsActive(effect))) return false;
   if (statusId && !effectHasStatus(effect, statusId)) return false;
   const data = grappleData(effect);
   if (!data) return false;
+  if (attackerTokenUuid && data.sourceTokenUuid !== attackerTokenUuid) return false;
+  if (targetTokenUuid && data.targetTokenUuid !== targetTokenUuid) return false;
   return String(data.sourceActorUuid ?? "") === String(attackerActorUuid ?? "")
     && String(data.targetActorUuid ?? "") === String(targetActorUuid ?? "");
 }
@@ -93,11 +98,12 @@ export function isMatchingGrappleEffect(effect, { attackerActorUuid, targetActor
  * @param {Actor|object|null} attackerActor Grappling Actor.
  * @returns {ActiveEffect|object|null}
  */
-export function grappleHoldForPair(targetActor, attackerActor) {
+export function grappleHoldForPair(targetActor, attackerActor, tokens = {}) {
   if (!targetActor || !attackerActor) return null;
   return Array.from(targetActor.effects ?? []).find(effect => isMatchingGrappleEffect(effect, {
     attackerActorUuid: attackerActor.uuid,
     targetActorUuid: targetActor.uuid,
+    ...tokens,
     statusId: GRAPPLED_STATUS_ID
   })) ?? null;
 }
@@ -109,8 +115,8 @@ export function grappleHoldForPair(targetActor, attackerActor) {
  * @param {Actor|object|null} attackerActor Grappling Actor.
  * @returns {boolean}
  */
-export function hasGrappleHoldForPair(targetActor, attackerActor) {
-  return !!grappleHoldForPair(targetActor, attackerActor);
+export function hasGrappleHoldForPair(targetActor, attackerActor, tokens = {}) {
+  return !!grappleHoldForPair(targetActor, attackerActor, tokens);
 }
 
 function locationPayload(actor, locationId = "") {
@@ -356,6 +362,7 @@ async function createResistanceCard(context, { activeScore, passiveScore, active
         successLevelLabel: ""
       },
       [MODULE_ID]: {
+        ...(context.actionClaim ? { actionClaim: foundry.utils.deepClone(context.actionClaim) } : {}),
         [GRAPPLE_FLAG]: {
           ...context,
           stage: "resistance",
@@ -393,7 +400,10 @@ async function removeGrappleEffects(context) {
   if (!targetActor) return 0;
   const effects = Array.from(targetActor.effects ?? []).filter(effect => isMatchingGrappleEffect(effect, {
     attackerActorUuid: context.attackerActorUuid,
-    targetActorUuid: context.targetActorUuid
+    targetActorUuid: context.targetActorUuid,
+    attackerTokenUuid: context.attackerTokenUuid,
+    targetTokenUuid: context.targetTokenUuid,
+    activeOnly: false
   }));
   let removed = 0;
   for (const effect of effects) {
@@ -414,7 +424,10 @@ async function upsertGrappleEffect(actor, statusId, data) {
     predicate: effect => isMatchingGrappleEffect(effect, {
       attackerActorUuid: data.sourceActorUuid,
       targetActorUuid: data.targetActorUuid,
-      statusId
+      attackerTokenUuid: data.sourceTokenUuid,
+      targetTokenUuid: data.targetTokenUuid,
+      statusId,
+      activeOnly: false
     }),
     useToggle: false
   });
@@ -468,7 +481,7 @@ async function promptWeaponArmLocation(actor) {
     <select name="locationId">${choices}</select>
   </form>`;
   return DialogV2.prompt({
-    classes: ["aov-skjaldborg", "dialog", "skj-grapple-choice-window"],
+    classes: ["aov-skjaldborg", "dialog", "skj-grapple-choice-window", "skj-owned-dialog-window", ...actionThemeClasses()],
     window: { title: localize("AOV_SKJALDBORG.GrappleDialog.WeaponArmChoiceTitle") },
     content,
     rejectClose: false,
@@ -559,6 +572,8 @@ function getExistingHoldData(targetActor, context) {
   const hold = Array.from(targetActor?.effects ?? []).find(effect => isMatchingGrappleEffect(effect, {
     attackerActorUuid: context.attackerActorUuid,
     targetActorUuid: context.targetActorUuid,
+    attackerTokenUuid: context.attackerTokenUuid,
+    targetTokenUuid: context.targetTokenUuid,
     statusId: GRAPPLED_STATUS_ID
   })) ?? null;
   return grappleData(hold) ?? null;
@@ -695,7 +710,7 @@ async function promptThrowDestinationDialog(targetToken, distance) {
     callback: () => choice
   }));
   const result = await DialogV2.wait({
-    classes: ["aov-skjaldborg", "dialog", "skj-grapple-throw-window"],
+    classes: ["aov-skjaldborg", "dialog", "skj-grapple-throw-window", "skj-owned-dialog-window", ...actionThemeClasses()],
     window: { title: localize("AOV_SKJALDBORG.GrappleDialog.ThrowDestinationTitle") },
     position: { width: 420, height: "auto" },
     content: `<p>${foundry.utils.escapeHTML(game.i18n.format("AOV_SKJALDBORG.GrappleDialog.ThrowDestinationPrompt", { distance }))}</p>`,
@@ -910,14 +925,15 @@ async function handleGrappleChatUpdate(message) {
  * @param {Event|null} [request.originEvent=null] Originating UI event.
  * @returns {Promise<ChatMessage|object|null>}
  */
-export async function startGrappleAttack({ actor, targetToken, weapon, targetNumber, situationalModifier, augmentModifier, augmentations, mode = "grapple", locationMode = "roll", manualLocationId = "", batchId = "", batchIndex = 0, batchSize = 1, originEvent = null }) {
+export async function startGrappleAttack({ actor, targetToken, weapon, targetNumber, situationalModifier, augmentModifier, augmentations, mode = "grapple", locationMode = "roll", manualLocationId = "", batchId = "", batchIndex = 0, batchSize = 1, originEvent = null, actionClaim = null }) {
   if (!actor || !targetToken?.actor || !weapon) return null;
   const combat = game.combat ?? null;
-  const attackerToken = actor.getActiveTokens?.()?.[0]?.document ?? actor.token ?? null;
+  const attackerToken = AoVAdapter.resolveActorTokenDocument(actor);
   const attackerCombatant = combatantForToken(combat, attackerToken, actor);
   const targetCombatant = combatantForToken(combat, targetToken.document, targetToken.actor);
   const flatMod = (Number(situationalModifier) || 0) + (Number(augmentModifier) || 0);
   const sharedContext = {
+    ...(actionClaim ? { actionClaim: foundry.utils.deepClone(actionClaim) } : {}),
     actorUuid: actor.uuid ?? null,
     attackerActorUuid: actor.uuid ?? null,
     targetActorUuid: targetToken.actor.uuid ?? null,
@@ -979,6 +995,7 @@ export async function startGrappleAttack({ actor, targetToken, weapon, targetNum
         successLevelLabelVisible: chatMsgData.successLevelLabelVisible
       },
       [MODULE_ID]: {
+        ...(actionClaim ? { actionClaim: foundry.utils.deepClone(actionClaim) } : {}),
         combatCardBatch: {
           batchId: String(batchId ?? ""),
           batchIndex: Number(batchIndex) || 0,

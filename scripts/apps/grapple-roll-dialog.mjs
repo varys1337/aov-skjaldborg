@@ -1,4 +1,5 @@
 import { hasGrappleHoldForPair, startGrappleAttack } from "../combat/grapple-automation.mjs";
+import { AoVAdapter } from "../adapter/aov-adapter.mjs";
 import { error } from "../logger.mjs";
 import { actionThemeClass, actorPortraitSource, isVideoSource } from "../ui/dom-utils.mjs";
 import {
@@ -20,7 +21,7 @@ import {
   unregisterTargetRefresh,
   validChoiceValue
 } from "./target-refresh-helpers.mjs";
-import { SkjDialogV2 } from "./base/dialog-v2.mjs";
+import { ACTION_DIALOG_WIDTHS, actionDialogPosition, SkjDialogV2 } from "./base/dialog-v2.mjs";
 
 const GRAPPLE_SKILL_CID = "i.skill.grapple";
 const TARGET_OPTION_FIELDS = Object.freeze(["mode", "locationMode", "manualLocationId"]);
@@ -60,7 +61,7 @@ export class GrappleRollDialog extends SkjDialogV2 {
       contentTag: "form",
       contentClasses: ["aov-skjaldborg", "skj-attack-roll-content"]
     },
-    position: { width: 390, height: "auto" },
+    position: actionDialogPosition(ACTION_DIALOG_WIDTHS.standard),
     actions: {
       ...super.DEFAULT_OPTIONS.actions,
       submitGrapple: function (event, target) {
@@ -89,7 +90,7 @@ export class GrappleRollDialog extends SkjDialogV2 {
         },
         { action: "cancel", label: game.i18n.localize("Cancel") }
       ],
-      position: { width: 390, height: "auto" }
+      position: actionDialogPosition(ACTION_DIALOG_WIDTHS.standard)
     });
     dialog = this;
     this.actor = actor;
@@ -223,7 +224,10 @@ export class GrappleRollDialog extends SkjDialogV2 {
     if (!weapons.some(item => item.id === this.weapon?.id)) this.weapon = weapons[0] ?? null;
     const baseChance = itemTotal(this.weapon);
     const targetImg = actorPortraitSource(this.targetActor, this.targetToken);
-    const held = hasGrappleHoldForPair(this.targetActor, this.actor);
+    const held = hasGrappleHoldForPair(this.targetActor, this.actor, {
+      attackerTokenUuid: AoVAdapter.resolveActorTokenDocument(this.actor)?.uuid,
+      targetTokenUuid: this.targetToken?.document?.uuid
+    });
     const locations = targetHitLocationChoices(this.targetActor);
     return {
       actorName: this.actor?.name ?? "",
@@ -296,7 +300,10 @@ export class GrappleRollDialog extends SkjDialogV2 {
     const situationalModifier = Number(data.get("situationalModifier")) || 0;
     const augmentModifier = Number(data.get("customAugmentValue")) || 0;
     const customReason = String(data.get("customAugmentReason") ?? "").trim();
-    const held = hasGrappleHoldForPair(targetActor, this.actor);
+    const held = hasGrappleHoldForPair(targetActor, this.actor, {
+      attackerTokenUuid: AoVAdapter.resolveActorTokenDocument(this.actor)?.uuid,
+      targetTokenUuid: targetSnapshot?.tokenUuid
+    });
     const requestedMode = String(targetValue("mode", held ? "immobilize" : "grapple"));
     const mode = (requestedMode === "immobilize" || requestedMode === "throw")
       ? (held ? requestedMode : "grapple")

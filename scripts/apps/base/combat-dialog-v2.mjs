@@ -1,5 +1,5 @@
 import { actionThemeClass } from "../../ui/dom-utils.mjs";
-import { SkjDialogV2 } from "./dialog-v2.mjs";
+import { ACTION_DIALOG_WIDTHS, actionDialogPosition, SkjDialogV2 } from "./dialog-v2.mjs";
 
 const BASE_DEFAULT_OPTIONS = SkjDialogV2.DEFAULT_OPTIONS ?? {};
 const BASE_WINDOW_OPTIONS = BASE_DEFAULT_OPTIONS.window ?? {};
@@ -21,7 +21,7 @@ export class SkjCombatDialogV2 extends SkjDialogV2 {
       contentTag: "form",
       contentClasses: ["aov-skjaldborg", "skj-combat-dialog-content"]
     },
-    position: { width: 390, height: "auto" },
+    position: actionDialogPosition(),
     actions: {
       ...BASE_ACTIONS,
       submitWorkflow(event, target) {
@@ -37,7 +37,7 @@ export class SkjCombatDialogV2 extends SkjDialogV2 {
    * @param {object} [config={}] Shared dialog configuration.
    * @param {string} [config.title=""] Window title.
    * @param {string} [config.template=""] Handlebars template path.
-   * @param {number} [config.width=390] Window width.
+   * @param {number} [config.width=560] Window width.
    * @param {string[]} [config.classes=[]] Extra window classes.
    * @param {string[]} [config.contentClasses=[]] Extra content classes.
    * @param {object[]} [config.buttons=[]] DialogV2 footer buttons.
@@ -59,7 +59,7 @@ export class SkjCombatDialogV2 extends SkjDialogV2 {
           ...(config.contentClasses ?? [])
         ]
       },
-      position: { width: config.width ?? 390, height: "auto" },
+      position: actionDialogPosition(config.width ?? ACTION_DIALOG_WIDTHS.standard),
       modal: config.modal === true,
       buttons: Array.isArray(config.buttons) ? config.buttons : []
     };

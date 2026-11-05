@@ -14,7 +14,7 @@ import { requestGm } from "../socket.mjs";
 import { RenderCoordinator } from "../ui/render-coordinator.mjs";
 import { error } from "../logger.mjs";
 import { actionThemeClass, actorPortraitSource, isVideoSource } from "../ui/dom-utils.mjs";
-import { SkjDialogV2 } from "./base/dialog-v2.mjs";
+import { ACTION_DIALOG_WIDTHS, actionDialogPosition, SkjDialogV2 } from "./base/dialog-v2.mjs";
 
 function numberWithin(value, min, max) {
   const number = Number(value);
@@ -151,7 +151,7 @@ export class UtilityDialog extends SkjDialogV2 {
       contentTag: "form",
       contentClasses: ["aov-skjaldborg", "skj-attack-roll-content"]
     },
-    position: { width: 400, height: "auto" },
+    position: actionDialogPosition(ACTION_DIALOG_WIDTHS.standard),
     actions: {
       ...super.DEFAULT_OPTIONS.actions,
       applyUtility: function (event, target) {
@@ -178,7 +178,7 @@ export class UtilityDialog extends SkjDialogV2 {
           callback: async (_event, button) => dialog._submit(button.form)
         }
       ],
-      position: { width: 400, height: "auto" },
+      position: actionDialogPosition(ACTION_DIALOG_WIDTHS.standard),
       modal: false,
       rejectClose: false
     });
@@ -300,6 +300,7 @@ export class UtilityDialog extends SkjDialogV2 {
   _onFormChange(event, form) {
     const target = event.target;
     if (target instanceof HTMLInputElement && target.name === "twoWeaponEnabled") this._syncTwoWeaponPanel(form);
+    if (target?.name === "utilityTab") this.requestContentRefit();
   }
 
   _toggleLocation(form, id) {

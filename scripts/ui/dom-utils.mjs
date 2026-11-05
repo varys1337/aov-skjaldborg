@@ -1,4 +1,5 @@
 import { MODULE_ID } from "../constants.mjs";
+import { AOV_MONOCHROME_ACTION_IMAGES } from "../adapter/aov-contract.mjs";
 
 /**
  * Escape text before inserting module-generated strings into HTML snippets.
@@ -25,6 +26,96 @@ export function actionThemeClass() {
   } catch (_exception) {
     return "skj-theme-aov";
   }
+}
+
+/** Read the registered core preference without assuming a meaning for "". */
+function coreUiConfiguration() {
+  try {
+    return game.settings.settings.has("core.uiConfig") ? game.settings.get("core", "uiConfig") : null;
+  } catch (_exception) {
+    return null;
+  }
+}
+
+/**
+ * Resolve Interface and Application palettes independently. The CSS fallback
+ * reads Foundry's resolved surface token, never an OS preference or version guess.
+ * @param {"interface"|"applications"} surface Surface whose preference to use.
+ * @param {HTMLElement|null} [root=null] Existing application frame.
+ * @param {object|null} [config=null] Configuration supplied by the setting hook.
+ * @returns {"light"|"dark"|null}
+ */
+function actionColorMode(surface, root = null, config = null) {
+  const mode = (config ?? coreUiConfiguration())?.colorScheme?.[surface];
+  if (mode === "light" || mode === "dark") return mode;
+  const source = surface === "interface"
+    ? document.getElementById("interface")
+    : root?.isConnected ? root : document.body;
+  if (!source) return null;
+  const resolved = getComputedStyle(source).getPropertyValue("--color-scheme").trim();
+  return resolved === "light" || resolved === "dark" ? resolved : null;
+}
+
+/** Initial classes for module-owned frames, including native DialogV2 prompts. */
+export function actionThemeClasses(surface = "applications") {
+  const mode = actionColorMode(surface);
+  return ["skj-themed-surface", actionThemeClass(), ...(mode ? [`skj-color-${mode}`] : [])];
+}
+
+/** Apply presentation only; retain all form DOM, values, focus and scroll. */
+export function applyActionTheme(root, surface = "applications", config = null) {
+  if (!(root instanceof HTMLElement)) return;
+  root.classList.add("skj-themed-surface");
+  const theme = actionThemeClass();
+  for (const element of [root, ...root.querySelectorAll(".skj-theme-aov, .skj-theme-classic")]) {
+    element.classList.toggle("skj-theme-aov", theme === "skj-theme-aov");
+    element.classList.toggle("skj-theme-classic", theme === "skj-theme-classic");
+  }
+  const mode = actionColorMode(surface, root, config);
+  if (!mode) return; // Retain the existing palette if core cannot resolve one.
+  root.classList.toggle("skj-color-light", mode === "light");
+  root.classList.toggle("skj-color-dark", mode === "dark");
+}
+
+/** Refresh only module-owned frames using the documented AppV2 registry. */
+export function refreshActionThemes(config = null) {
+  for (const app of foundry.applications.api.ApplicationV2.instances()) {
+    if (!app.rendered) continue;
+    const root = app.element;
+    if (!root?.classList?.contains("skj-themed-surface")) continue;
+    const surface = root.matches(".skj-actor-hotbar, .skj-action-ring-app") ? "interface" : "applications";
+    applyActionTheme(root, surface, config);
+  }
+}
+
+let actionThemeHooksRegistered = false;
+/** One setting listener, registered through the feature registry. */
+export function registerActionThemeHooks(hooks) {
+  if (actionThemeHooksRegistered) return;
+  actionThemeHooksRegistered = true;
+  let refreshFrame = null;
+  let pendingConfig = null;
+  hooks.on("clientSettingChanged", (key, value) => {
+    if (key !== "core.uiConfig") return;
+    pendingConfig = value;
+    if (refreshFrame !== null) return;
+    // Run after the setting's synchronous callbacks, before the next paint.
+    refreshFrame = requestAnimationFrame(() => {
+      refreshFrame = null;
+      const config = pendingConfig;
+      pendingConfig = null;
+      refreshActionThemes(config);
+    });
+  });
+}
+
+// Verified black/white AoV defaults only. Never infer monochrome from an SVG
+// extension or Item type: those can also contain user-provided coloured art.
+const MONOCHROME_ACTION_IMAGES = new Set(AOV_MONOCHROME_ACTION_IMAGES);
+
+/** Mark only verified default art for palette-aware image treatment. */
+export function isMonochromeActionImage(source) {
+  return MONOCHROME_ACTION_IMAGES.has(String(source ?? "").replace(/^\//, "").split(/[?#]/, 1)[0]);
 }
 
 /**

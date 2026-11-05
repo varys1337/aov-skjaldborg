@@ -14,6 +14,14 @@
     </div>
 
     <div class="form-group">
+      <label for="skj-show-player-initiative">{{localize "AOV_SKJALDBORG.Settings.ShowPlayerInitiative.Name"}}</label>
+      <div class="form-fields">
+        <input id="skj-show-player-initiative" type="checkbox" name="showPlayerInitiative" value="true" data-dtype="Boolean" {{checked showPlayerInitiative}}>
+      </div>
+      <p class="hint">{{localize "AOV_SKJALDBORG.Settings.ShowPlayerInitiative.Hint"}}</p>
+    </div>
+
+    <div class="form-group">
       <label>{{localize "AOV_SKJALDBORG.Settings.RequireAllCommit.Name"}}</label>
       <div class="form-fields">
         <input type="checkbox" name="requireAllCommit" value="true" data-dtype="Boolean" {{checked requireAllCommit}}>

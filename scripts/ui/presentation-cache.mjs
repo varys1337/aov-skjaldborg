@@ -5,31 +5,33 @@ const cachesByActor = new WeakMap();
 function actorCaches(actor) {
   let caches = cachesByActor.get(actor);
   if (!caches) {
-    caches = new Map();
+    caches = { entries: new Map(), generation: 0, categories: new Map() };
     cachesByActor.set(actor, caches);
   }
   return caches;
 }
 
-function revisionFor(actor, category) {
+function revisionFor(actor, category, caches) {
   return [
     actor?.uuid ?? actor?.id ?? "",
     actor?.updatedAt ?? actor?._stats?.modifiedTime ?? "",
-    category
+    category,
+    caches.generation,
+    caches.categories.get(category) ?? 0
   ].join(":");
 }
 
 export function getCachedPresentation(actor, category, build) {
   if (!actor || typeof build !== "function") return build?.();
   const caches = actorCaches(actor);
-  const revision = revisionFor(actor, category);
-  const cached = caches.get(category);
-  if (cached?.revision === revision) {
+  const revision = revisionFor(actor, category, caches);
+  const cached = caches.entries.get(category);
+  if (cached?.revision === revision && !cached.pending) {
     incrementCounter(`presentationCache.hit.${category}`);
     return cached.value;
   }
   const value = build();
-  caches.set(category, { revision, value });
+  if (revisionFor(actor, category, caches) === revision) caches.entries.set(category, { revision, value });
   incrementCounter(`presentationCache.miss.${category}`);
   return value;
 }
@@ -37,28 +39,41 @@ export function getCachedPresentation(actor, category, build) {
 export async function getCachedPresentationAsync(actor, category, build) {
   if (!actor || typeof build !== "function") return build?.();
   const caches = actorCaches(actor);
-  const revision = revisionFor(actor, category);
-  const cached = caches.get(category);
+  const revision = revisionFor(actor, category, caches);
+  const cached = caches.entries.get(category);
   if (cached?.revision === revision) {
     incrementCounter(`presentationCache.hit.${category}`);
-    return cached.value;
+    return cached.pending ?? cached.value;
   }
-  const value = await build();
-  caches.set(category, { revision, value });
+  const entry = { revision, pending: null };
+  // Defer the builder until the pending entry is visible to concurrent readers.
+  entry.pending = Promise.resolve().then(build).then(value => {
+    if (caches.entries.get(category) === entry && revisionFor(actor, category, caches) === revision) {
+      caches.entries.set(category, { revision, value });
+    }
+    return value;
+  }).catch(error => {
+    if (caches.entries.get(category) === entry) caches.entries.delete(category);
+    throw error;
+  });
+  caches.entries.set(category, entry);
   incrementCounter(`presentationCache.miss.${category}`);
-  return value;
+  return entry.pending;
 }
 
 export function invalidateActorPresentation(actor, categories = null) {
   const caches = actor ? cachesByActor.get(actor) : null;
   if (!caches) return;
   if (!categories) {
-    caches.clear();
+    caches.generation += 1;
+    caches.entries.clear();
+    caches.categories.clear();
     incrementCounter("presentationCache.invalidate.all");
     return;
   }
   for (const category of categories) {
-    caches.delete(category);
+    caches.categories.set(category, (caches.categories.get(category) ?? 0) + 1);
+    caches.entries.delete(category);
     incrementCounter(`presentationCache.invalidate.${category}`);
   }
 }

@@ -8,6 +8,8 @@
  * remains only as a fallback for cards that reach the hit-location button.
  */
 import { MODULE_ID } from "../constants.mjs";
+import { findCombatDamageSource } from "./result-provenance.mjs";
+import { isAuthoritativeGmClient } from "../utils/authority.mjs";
 import { AoVAdapter } from "../adapter/aov-adapter.mjs";
 import { warn } from "../logger.mjs";
 import { incrementCounter } from "../performance/performance-monitor.mjs";
@@ -21,7 +23,6 @@ import {
   grossDamage,
   idTypeMatch,
   locationArmor,
-  recentFlaggedMessages,
   rerenderAoVMessage,
   resolveChatMessageElement,
   safeFromUuid
@@ -103,22 +104,12 @@ function matchesDamageCard(aimed, damageCard) {
  * @returns {{message: ChatMessage, aimed: object}|null}
  */
 function findMatchingAimedSource(damageMessage, damageCard) {
-  const direct = damageMessage.getFlag?.(MODULE_ID, "aimedBlow") ?? null;
-  if (matchesDamageCard(direct, damageCard)) return { message: damageMessage, aimed: direct };
-
-  const [match = null] = recentFlaggedMessages({
-    excludeMessage: damageMessage,
+  const match = findCombatDamageSource(damageMessage, damageCard, {
     flag: "aimedBlow",
     windowMs: AIMED_MATCH_WINDOW_MS,
-    predicate: entry => {
-      const targetKind = String(entry.flag?.targetKind ?? "hitLocation");
-      const hasTarget = targetKind === "equipment"
-        ? !!(String(entry.flag?.targetWeaponId ?? "").trim() || String(entry.flag?.targetWeaponUuid ?? "").trim())
-        : !!String(entry.flag?.hitLocationId ?? "").trim();
-      return hasTarget && matchesDamageCard(entry.flag, damageCard);
-    }
+    matches: matchesDamageCard
   });
-  return match ? { message: match.message, aimed: match.flag } : null;
+  return match.flag ? { ...match, aimed: match.flag } : null;
 }
 
 /**
@@ -214,16 +205,19 @@ async function markAimedSourceResolved(sourceMessage, damageMessage) {
  * Resolve one AoV damage ChatMessage to the selected aimed-blow location.
  *
  * @param {ChatMessage} message AoV damage ChatMessage.
- * @param {{card?: object, index?: number, source?: {message: ChatMessage, aimed: object}}} [options={}] Resolution context.
+ * @param {{index?: number}} [options={}] Exact result-card index, if supplied.
  * @returns {Promise<boolean>} Whether the aimed-blow override was applied.
  */
 async function resolveAimedHitLocation(message, options = {}) {
-  if (!game.user?.isGM) return false;
+  if (!isAuthoritativeGmClient()) return false;
 
-  const located = options.card ? { card: options.card, index: Number(options.index ?? 0) } : findDamageLocationCard(message);
+  message = game.messages?.get?.(message.id) ?? message;
+  const located = Number.isInteger(options.index)
+    ? { card: aovCards(message)[options.index], index: options.index }
+    : findDamageLocationCard(message);
   if (!located?.card || !Number.isInteger(located.index)) return false;
 
-  const source = options.source ?? findMatchingAimedSource(message, located.card);
+  const source = findMatchingAimedSource(message, located.card);
   const aimed = source?.aimed ?? null;
   if (!aimed || aimed.resolved === true) return false;
 
@@ -236,6 +230,9 @@ async function resolveAimedHitLocation(message, options = {}) {
   let damageFlag = {
     resolved: true,
     sourceMessageId: source?.message?.id ?? null,
+    sourceCardIndex: source?.sourceCardIndex ?? null,
+    damageCardIndex: located.index,
+    sourceResolution: source?.resolution ?? "missing",
     targetKind,
     resolvedAt: Date.now()
   };
@@ -292,7 +289,7 @@ async function resolveAimedHitLocation(message, options = {}) {
  * @returns {Promise<void>}
  */
 async function resolveAimedDamageMessage(message) {
-  if (!game.user?.isGM) return;
+  if (!isAuthoritativeGmClient()) return;
   incrementCounter("automation.aimed.message", 1, {
     cardType: message.getFlag?.("aov", "cardType") ?? null,
     state: message.getFlag?.("aov", "state") ?? null
@@ -343,7 +340,7 @@ function bindAimedHitLocationOverride(message, html) {
   if (!button) return;
 
   const source = findMatchingAimedSource(message, located.card);
-  if (!source || !game.user?.isGM) return;
+  if (!source || !isAuthoritativeGmClient()) return;
   if (button.dataset.skjAimedBlowBound === "true") return;
   button.dataset.skjAimedBlowBound = "true";
 
@@ -378,6 +375,7 @@ export function registerAimedBlowAutomationHooks(hooks = globalThis.Hooks) {
 }
 
 export const __test = {
+  findMatchingAimedSource,
   grossDamage,
   isHooksRegistered: () => hooksRegistered
 };

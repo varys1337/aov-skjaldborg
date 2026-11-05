@@ -1,3 +1,146 @@
+/* Only Skjaldborg action windows opt in; native AoV dialogs stay independent. */
+.application.dialog.skj-action-dialog-window {
+  --skj-dialog-action-width: 11rem;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100dvh - 32px);
+  min-width: 0;
+}
+
+.skj-action-dialog-window .window-content {
+  --skj-dialog-control-height: 1.8rem;
+  --skj-dialog-section-padding: 0.625rem;
+  --skj-dialog-gap-sm: 0.375rem;
+  --skj-dialog-gap-md: 0.5rem;
+  box-sizing: border-box;
+  container: skj-action / inline-size;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+.skj-action-dialog-window :is(.skj-roll-dialog, .skj-disengage-dialog) {
+  flex: 1 1 auto;
+  max-height: none;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+}
+
+.skj-action-dialog-window :is(.skj-roll-dialog__header, .skj-disengage-dialog__header, .skj-dialog-footer, .form-footer) {
+  flex: 0 0 auto;
+}
+
+.skj-action-dialog-window :is(.skj-roll-dialog__body, .skj-disengage-dialog__body) {
+  align-content: start;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.skj-action-dialog-window :is(.skj-roll-dialog, .skj-disengage-dialog) .skj-dialog-footer {
+  align-items: center;
+  border-top: 1px solid var(--skj-roll-frame-soft);
+  display: grid;
+  gap: var(--skj-dialog-gap-sm);
+  grid-template-columns: minmax(0, 1fr) minmax(0, var(--skj-dialog-action-width));
+  min-width: 0;
+  padding: var(--skj-dialog-gap-md) var(--skj-dialog-section-padding);
+}
+
+.skj-action-dialog-window .skj-dialog-footer > :last-child {
+  grid-column: 2;
+  justify-self: stretch;
+  min-width: 0;
+  width: 100%;
+  max-width: none;
+  transition: background-color 150ms, border-color 150ms, box-shadow 150ms, color 150ms;
+}
+
+.skj-action-dialog-window .skj-dialog-footer .skj-roll-dialog__summary {
+  justify-self: start;
+}
+
+.skj-action-dialog-window .window-content :is(button, select, input, textarea):focus-visible,
+.skj-action-dialog-window :is(.skj-roll-dialog__segment, .skj-utility-dialog__toggle) input:focus-visible + span,
+.skj-action-dialog-window .skj-utility-dialog__tabs > input:focus-visible + label,
+.skj-action-dialog-window .skj-disengage-option input:focus-visible + span {
+  outline: 2px solid var(--skj-palette-focus);
+  outline-offset: 2px;
+}
+
+/* 30rem/20rem are 480px/320px at normal text size and adapt to larger text. */
+@container skj-action (min-width: 30rem) {
+  .skj-action-dialog-window .skj-runic-magic-dialog__panel[data-rune-panel] {
+    align-items: center;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .skj-action-dialog-window .skj-runic-magic-dialog__field--dex {
+    grid-template-columns: minmax(0, 5rem) 3.5rem;
+  }
+
+  .skj-action-dialog-window .skj-utility-dialog__panel--equipped,
+  .skj-action-dialog-window .skj-utility-dialog__allocation,
+  .skj-action-dialog-window .skj-utility-dialog__location-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .skj-action-dialog-window .skj-utility-dialog__panel--equipped > :not(.skj-utility-dialog__row) {
+    grid-column: 1 / -1;
+  }
+}
+
+@container skj-action (width < 30rem) {
+  .skj-action-dialog-window .skj-roll-dialog__combat-options > .skj-roll-dialog__row--modifier {
+    flex-basis: 100%;
+  }
+
+  .skj-action-dialog-window :is(.skj-roll-dialog, .skj-disengage-dialog) .skj-dialog-footer {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .skj-action-dialog-window .skj-dialog-footer > :last-child {
+    grid-column: 1;
+  }
+
+  .skj-action-dialog-window:is(.skj-delay-dialog-window, .skj-other-intent-dialog-window) .form-footer button {
+    width: 100%;
+  }
+
+  .skj-action-dialog-window :is(.skj-attack-roll-dialog__detail--stun, .skj-attack-roll-dialog__detail--disarm) {
+    grid-template-columns: 5rem minmax(0, 1fr);
+  }
+
+  .skj-action-dialog-window .skj-roll-dialog:not(.skj-roll-dialog--attack, .skj-roll-dialog--missile) .skj-roll-dialog__row--modifier {
+    grid-template-columns: 5rem minmax(0, 1fr);
+  }
+
+  .skj-action-dialog-window .skj-roll-dialog__row--modifier > :is(.skj-roll-dialog__damage-pill, .skj-knockback-resistance-note, .skj-grapple-raw-note) {
+    grid-column: 1 / -1;
+  }
+}
+
+@container skj-action (width < 20rem) {
+  .skj-action-dialog-window .skj-roll-dialog .skj-roll-dialog__segments,
+  .skj-action-dialog-window :is(.skj-utility-dialog__tabs, .skj-utility-dialog__row, .skj-disengage-options, .skj-disengage-opponents__list, .skj-runic-magic-dialog__options),
+  .skj-action-dialog-window .skj-roll-dialog :is(.skj-roll-dialog__row, .skj-roll-dialog__detail, .skj-roll-dialog__control, .skj-roll-dialog__footer, .skj-roll-dialog__header),
+  .skj-action-dialog-window :is(.skj-utility-dialog__header, .skj-disengage-dialog__header) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .skj-action-dialog-window .skj-attack-roll-dialog__disarm-controls {
+    grid-column: 1;
+  }
+
+  /* A stacked header keeps its result in one compact row for large text. */
+  .skj-action-dialog-window .skj-roll-dialog:is(.skj-roll-dialog--attack, .skj-roll-dialog--missile) .skj-roll-dialog__rating-card {
+    grid-template-columns: auto auto minmax(0, 1fr);
+  }
+}
+
 .aov-skjaldborg .skj-dialog-shell {
   display: grid;
   gap: var(--skj-dialog-gap-md);
@@ -38,10 +181,4 @@
 
 .aov-skjaldborg .skj-dialog-summary-card__row.is-muted {
   opacity: 0.68;
-}
-
-@media (max-width: 460px) {
-  .aov-skjaldborg .skj-dialog-footer {
-    grid-template-columns: minmax(0, 1fr);
-  }
 }

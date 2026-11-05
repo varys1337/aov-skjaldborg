@@ -2,6 +2,8 @@
 node_modules/
 
 # Generated build and release output
+.maintenance/
+.ci/
 dist/
 release/
 *.zip

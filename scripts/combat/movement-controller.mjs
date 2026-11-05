@@ -14,6 +14,8 @@ import { getReadiedWeapon } from "./weapon-state.mjs";
 import {
   appendRoutePoint,
   cleanMovementPoint,
+  cleanMovementRoute,
+  mergeMovementRoutes,
   normalizeMovementRoute,
   sameMovementPoint
 } from "./movement-route.mjs";
@@ -42,7 +44,7 @@ import {
 } from "./movement-debug-reporting.mjs";
 import { notifyMovementPlanCaptured } from "./movement-capture-notifications.mjs";
 
-export { cleanMovementPoint, normalizeMovementRoute } from "./movement-route.mjs";
+export { cleanMovementPoint, mergeMovementRoutes, normalizeMovementRoute } from "./movement-route.mjs";
 export { tokenDocumentForCombatant } from "./combatant-token-resolution.mjs";
 
 const activeRuns = new Map();
@@ -560,87 +562,6 @@ export function movementExecutionWaypoints(document, storedWaypoints) {
       storedCount: storedWaypoints?.length ?? 0
     });
   }
-}
-
-/**
- * Normalize a route into plain ordered movement points.
- *
- * @param {unknown[]} points Candidate route points.
- * @param {{x: number, y: number}|null} [origin=null] Optional origin to omit.
- * @returns {object[]}
- */
-function cleanMovementRoute(points, origin = null) {
-  const route = [];
-  if (!Array.isArray(points)) return route;
-  for (const point of points) {
-    const clean = cleanMovementPoint(point);
-    if (!clean) continue;
-    if (!route.length && sameMovementPoint(clean, cleanMovementPoint(origin))) continue;
-    appendRoutePoint(route, point);
-  }
-  return route;
-}
-
-/**
- * Return whether every required point occurs in the same order within a route.
- *
- * @param {object[]} route Candidate containing route.
- * @param {object[]} required Ordered points that must be retained.
- * @returns {boolean}
- */
-function routeContainsOrderedPoints(route, required) {
-  if (!required.length) return true;
-  let index = 0;
-  for (const point of route) {
-    if (!sameMovementPoint(cleanMovementPoint(point), cleanMovementPoint(required[index]))) continue;
-    index += 1;
-    if (index >= required.length) return true;
-  }
-  return false;
-}
-
-/**
- * Merge a live ruler draft with the final Foundry movement operation.
- *
- * The final `pending.waypoints` route is preferred when it already contains
- * every explicit ruler corner. If the final operation only exposes its current
- * destination, the cached explicit corners are retained and the destination is
- * appended. The largest shared suffix/prefix is removed when two partial route
- * revisions are joined.
- *
- * @param {unknown[]} draftRoute Explicit corners captured from TokenRuler data.
- * @param {unknown[]} operationRoute Route captured from preMoveToken.
- * @param {object|null} [destination=null] Final movement destination.
- * @returns {object[]}
- */
-export function mergeMovementRoutes(draftRoute, operationRoute, destination = null) {
-  const draft = cleanMovementRoute(draftRoute);
-  const operation = cleanMovementRoute(operationRoute);
-  let merged;
-
-  if (!draft.length) merged = operation;
-  else if (!operation.length) merged = draft;
-  else if (routeContainsOrderedPoints(operation, draft)) merged = operation;
-  else if (routeContainsOrderedPoints(draft, operation)) merged = draft;
-  else {
-    let overlap = Math.min(draft.length, operation.length);
-    while (overlap > 0) {
-      const draftTail = draft.slice(draft.length - overlap);
-      const operationHead = operation.slice(0, overlap);
-      const matches = draftTail.every((point, index) => {
-        return sameMovementPoint(cleanMovementPoint(point), cleanMovementPoint(operationHead[index]));
-      });
-      if (matches) break;
-      overlap -= 1;
-    }
-    merged = [...draft, ...operation.slice(overlap)];
-  }
-
-  const result = cleanMovementRoute(merged);
-  if (destination && !sameMovementPoint(cleanMovementPoint(destination), cleanMovementPoint(result.at(-1)))) {
-    appendRoutePoint(result, destination);
-  }
-  return result;
 }
 
 /**
@@ -3157,8 +3078,13 @@ export async function startMovementPhase(combat = game.combat, options = {}) {
  */
 async function startMovementPhaseUnlocked(combat) {
   if (isMovementRunActive(combat)) return getCombatState(combat).movementRun;
+  if (!await settleMovementWrites(combat.id, { quietMs: 100, timeoutMs: 1000 })) {
+    ui.notifications.warn(game.i18n.format("AOV_SKJALDBORG.Warnings.MovementPlansPending", {
+      names: game.i18n.localize("AOV_SKJALDBORG.Warnings.UnknownMovementPlan")
+    }));
+    return null;
+  }
   const measureId = performanceDiagnostics.markStart("movement.phase");
-  await settleMovementWrites(combat.id, { quietMs: 100, timeoutMs: 1000 });
   const runId = newMovementDebugRunId(combat);
 
   const planned = orderMovementCombatants(combat, combatantValues(combat).filter(combatant => {

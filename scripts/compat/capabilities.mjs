@@ -182,6 +182,8 @@ export function detectV14Capabilities() {
   const hardBlockers = capabilities.hardBlockers;
   addIfMissing(hardBlockers, "Foundry generation 14", capabilities.foundry.generationOk);
   addIfMissing(hardBlockers, "Age of Vikings system id", capabilities.system.idOk);
+  addIfMissing(hardBlockers, `Foundry ${MINIMUM_FOUNDRY_VERSION}+`, capabilities.foundry.versionOk);
+  addIfMissing(hardBlockers, `AoV ${MINIMUM_AOV_VERSION}+`, capabilities.system.versionOk);
   // ApplicationV2 is required by ActionRing, ActorHotbar, and settings applications.
   addIfMissing(hardBlockers, "ApplicationV2", capabilities.applications.applicationV2);
   // HandlebarsApplicationMixin is required by the module's AppV2 Handlebars surfaces.
@@ -200,8 +202,6 @@ export function detectV14Capabilities() {
   addIfMissing(hardBlockers, "module socket", capabilities.sockets.available);
 
   const warnings = capabilities.warnings;
-  addIfMissing(warnings, `Foundry patch ${MINIMUM_FOUNDRY_VERSION}+ not confirmed`, capabilities.foundry.versionOk);
-  addIfMissing(warnings, `AoV version ${MINIMUM_AOV_VERSION}+ not confirmed`, capabilities.system.versionOk);
   addIfMissing(warnings, "AoV Combat class name not recognized", capabilities.combat.aovCombatClass);
   addIfMissing(warnings, "AoV CombatTracker class name not recognized", capabilities.combat.aovTrackerClass);
   addIfMissing(warnings, "AoV tracker adjustInit unavailable", capabilities.combat.trackerAdjustInit);

@@ -103,6 +103,7 @@ export class CombatTrackingSettings extends HandlebarsApplicationMixin(Applicati
     return {
       ...context,
       dynamicPlanningInitiative: game.settings.get(MODULE_ID, "dynamicPlanningInitiative") === true,
+      showPlayerInitiative: game.settings.get(MODULE_ID, "showPlayerInitiative") === true,
       requireAllCommit: game.settings.get(MODULE_ID, "requireAllCommit") === true,
       movementRounding: currentRounding,
       movementTickDelayMs: game.settings.get(MODULE_ID, "movementTickDelayMs"),
@@ -194,6 +195,7 @@ export class CombatTrackingSettings extends HandlebarsApplicationMixin(Applicati
       : ENGAGEMENT_VISUAL_MODE_DEFAULT;
     const values = {
       dynamicPlanningInitiative: data.dynamicPlanningInitiative === true,
+      showPlayerInitiative: data.showPlayerInitiative === true,
       requireAllCommit: data.requireAllCommit === true,
       movementRounding: rounding,
       movementTickDelayMs: normalizeNumberSetting(data.movementTickDelayMs, 250, LIMITS.movementTickDelayMs),

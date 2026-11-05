@@ -1,3 +1,8 @@
+/* Player initiative is presentation-only; keep permitted roll buttons native. */
+.skj-player-initiative .token-initiative > :not([data-action="rollInitiative"]):not([data-skj-initiative-score]) {
+  display: none;
+}
+
 /* ------------------------------------------------------------------------- */
 /* v0.2.26 restored tracker intent and workflow indicators                    */
 /* ------------------------------------------------------------------------- */

@@ -58,7 +58,12 @@ export function actorHotbarPartsForActorChange(changed) {
     parts.add("skills");
     parts.add("historyFamily");
   }
-  if (hasAnyChangedPath(paths, ["flags.aov-skjaldborg.quickAccess", "flags.aov-skjaldborg.actionOrder"])) parts.add("quickAccess");
+  if (hasAnyChangedPath(paths, ["flags.aov-skjaldborg.actorHotbarQuickAccess"])) parts.add("quickAccess");
+  if (hasAnyChangedPath(paths, ["flags.aov-skjaldborg.actorHotbarOrder"])) {
+    parts.add("tabBody");
+    // Uncustomized quick access uses the first ordered equipped weapons.
+    parts.add("quickAccess");
+  }
   if (hasAnyChangedPath(paths, ["flags.aov-skjaldborg.preparedIntent"])) {
     parts.add("workflow");
     parts.add("weaponControls");
@@ -101,7 +106,11 @@ export function actorHotbarPartsForItemChange(changed) {
     parts.add("tabBody");
     parts.add("magic");
   }
-  if (hasAnyChangedPath(paths, ["system.damageTaken", "system.treated", "system.location", "system.ap"])) {
+  if (hasAnyChangedPath(paths, [
+    "system.damageTaken", "system.damage", "system.treated", "system.location", "system.hitLocId",
+    "system.ap", "system.npcDmg", "system.npcAP", "system.hpMax", "system.currHp",
+    "system.locType", "system.gridPos", "system.lowRoll", "system.highRoll"
+  ])) {
     parts.add("resources");
     parts.add("tabBody");
     parts.add("wellbeing");

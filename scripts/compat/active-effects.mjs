@@ -81,8 +81,8 @@ export async function safeDeleteActiveEffect(effect, { reason = "active-effect-c
   if (typeof effect?.delete !== "function") return false;
   if (!effectStillEmbedded(effect)) return false;
   try {
-    await effect.delete();
-    return true;
+    // Document#delete returns undefined when its pre-delete workflow cancels.
+    return (await effect.delete()) !== undefined;
   }
   catch (exception) {
     if (staleDeleteMessage(exception)) return false;

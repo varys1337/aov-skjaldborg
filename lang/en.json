@@ -26,7 +26,7 @@
       },
       "Debug": {
         "Name": "Debug logging",
-        "Hint": "Enable full Skjaldborg diagnostics with one switch, including general logs and all former advanced movement diagnostics at trace detail."
+        "Hint": "Enable full Skjaldborg diagnostics with one switch, including general logs, all former advanced movement diagnostics at trace detail, and the GM Combat Action Recovery menu."
       },
       "PerformanceDiagnostics": {
         "Name": "Performance diagnostics",
@@ -199,6 +199,10 @@
       "DynamicPlanningInitiative": {
         "Name": "Use simultaneous live initiative during Planning",
         "Hint": "Optional advanced mode. Planning has no active combatant turn: initiative changes are tracked and re-sorted live, while Next Turn and Next Round advance to the next configured phase. Disable this to retain the normal sequential turn cursor during Planning."
+      },
+      "ShowPlayerInitiative": {
+        "Name": "Show initiative to players",
+        "Hint": "Show read-only initiative scores and encounter order for combatants visible to each player. When disabled, hide scores and list those combatants alphabetically. The GM view is unchanged."
       },
       "MovementPlanVisibility": {
         "Name": "Movement plan preview visibility",
@@ -468,6 +472,8 @@
       "Uncommitted": "Cannot advance: these combatants have not committed or held intent: {names}",
       "ItemUnavailable": "That actor item is no longer available.",
       "ActionFailed": "The selected action could not be completed. See the browser console for details.",
+      "ActionClaimBusy": "Another client is preparing this action. Please wait; an unstarted reservation can be retried after one minute.",
+      "ActionClaimUncertain": "This action was authorized to start, but its result is not confirmed. It is locked against replay. The GM should reconcile the source card before retrying.",
       "ResourceUpdateFailed": "The actor resource could not be updated. See the browser console for details.",
       "StatUnavailable": "That actor statistic is no longer available.",
       "WeaponMustBeCarried": "Only a carried weapon can be drawn.",
@@ -522,6 +528,15 @@
     },
     "ActorHotbar": {
       "Navigation": "Actor hotbar sections",
+      "CharacteristicNames": {
+        "str": "Strength",
+        "con": "Constitution",
+        "siz": "Size",
+        "dex": "Dexterity",
+        "int": "Intelligence",
+        "pow": "Power",
+        "cha": "Charisma"
+      },
       "HitPoints": "Hit Points",
       "MagicPoints": "Magic Points",
       "LockedMagic": "{locked} locked / {max} total",
@@ -735,6 +750,11 @@
       "Placeholder": "Enter the action or declaration that other players should see…",
       "Save": "Set Intent"
     },
+    "CoreRollDialog": {
+      "AimedSummary": "Aimed at {target}: {penalty}% already applied by Skjaldborg. Change the aimed choice in Skjaldborg; the core action stays Attack.",
+      "AdditionalModifier": "Additional modifier",
+      "AdditionalModifierHint": "Added to the Skjaldborg modifiers already applied to this attack. Leave at 0 to keep the current total."
+    },
     "AttackDialog": {
       "Title": "Attack Roll",
       "Target": "Target",
@@ -793,7 +813,8 @@
       "DamageTypeFixedTooltip": "{label} ({abbreviation})",
       "DamageTypeSwitchTooltip": "{label} ({abbreviation}). Click to switch to {nextLabel} ({nextAbbreviation}). Weapon type: {sourceLabel} ({sourceAbbreviation}).",
       "MeleeMissileDamageTooltip": "Melee use of {sourceLabel} ({sourceAbbreviation}) is treated as {label} ({abbreviation}). Use the Missile action for the weapon's ranged damage type.",
-      "ProneSummary": "Prone/ground {prone}%"
+      "ProneSummary": "Prone/ground {prone}%",
+      "EvadeSummary": "Evading target {modifier}%"
     },
     "StunDialog": {
       "ResultTitle": "Stun Result",
@@ -1061,6 +1082,105 @@
       },
       "GraspedLocationInline": "Grappled location: {location}{range}.",
       "GraspedItemInline": "Grappled object: {item}."
+    },
+    "Recovery": {
+      "Title": "Combat Action Recovery",
+      "Open": "Inspect combat actions",
+      "MenuHint": "GM-only inspection of interrupted actions, saved ammunition receipts and linked result cards. Recovery operations are currently disabled.",
+      "Unavailable": "Recovery inspection is available after Skjaldborg's runtime checks pass in an Age of Vikings world.",
+      "DebugRequired": "Enable Debug logging in Skjaldborg settings to open Combat Action Recovery.",
+      "InspectionOnly": "Inspection only — no combat or resource changes",
+      "Prerequisite": "Automatic recovery remains unavailable until supported combat stages have complete, reliable source links. A created attack card does not prove that damage was applied.",
+      "SelectedGm": "Selected authoritative GM:",
+      "SecondaryGm": "You are inspecting as another GM",
+      "Scope": "Search scope",
+      "CurrentCombat": "Current combat (unscoped actions if none)",
+      "LoadedChat": "All loaded chat, within the selected window",
+      "SourceId": "Exact source message ID (optional)",
+      "IncludeCommitted": "Include pending and committed history",
+      "ApplyFilter": "Apply filters",
+      "Navigation": "Evidence navigation",
+      "Refresh": "Re-evaluate evidence",
+      "Older": "Previous loaded window",
+      "Newer": "Next loaded window",
+      "History": "Loaded-message window {page} of {pages}: {count} readable messages",
+      "SearchBound": "Each window inspects up to 1,000 loaded messages. Use the window controls or enter an exact source ID. Missing cards may be outside the search window; absence is never proof that an action did not occur.",
+      "LimitNotice": "The evidence limit was reached. Narrow the search to an exact source message; the displayed evidence may be incomplete.",
+      "Incidents": "Saved action incidents",
+      "Empty": "No matching claim incidents in this window. Try all loaded chat, another window, or an exact source message ID.",
+      "Workflow": "Workflow",
+      "Source": "Source message",
+      "UpdatePermission": "Source update permission",
+      "Yes": "Allowed by the document; console writes remain disabled",
+      "No": "Not allowed by the document",
+      "Attempt": "Attempt ID",
+      "Claimant": "Claimant",
+      "Offline": "inactive or unavailable",
+      "ClaimAge": "Reservation age",
+      "Age": "{seconds} seconds; diagnostic only",
+      "Unknown": "Unknown",
+      "Actor": "Attacker Actor UUID",
+      "AttackerToken": "Attacker Token UUID",
+      "Weapon": "Weapon Item UUID",
+      "TargetActor": "Target Actor UUID",
+      "TargetToken": "Target Token UUIDs",
+      "Context": "Saved combat / round / phase",
+      "NoSavedContext": "No saved combat context",
+      "Ammunition": "Ammunition UUID / current quantity",
+      "Receipt": "Saved ammunition receipt",
+      "NoReceipt": "No valid resource receipt recorded",
+      "ResultCount": "Claim-linked result cards: {found}; expected count: {expected}",
+      "ViewSource": "View source",
+      "ViewResult": "View linked result",
+      "SourceCard": "Source card index",
+      "BatchIndex": "Batch index / size",
+      "AttackCardProof": "Exact claim and attack-card creation proof; downstream completion unverified",
+      "ClaimProofOnly": "Exact claim receipt; complete combat-stage provenance unavailable",
+      "ResultUnverified": "Recorded ID unavailable or its claim proof does not match",
+      "Preview": "Message inspection",
+      "PreviewReadOnly": "Read-only message text. Native roll and application controls are not reproduced here.",
+      "NoPreview": "Choose a source or linked result to inspect its current message text.",
+      "PreviewUnavailable": "The source or selected result is missing, no longer visible, or no longer matches the saved attempt.",
+      "ManualReview": "Manual review",
+      "ManualSource": "Inspect the source and every linked result. Check the target and batch indices; a partial batch must not be replayed as a whole.",
+      "ManualReceipt": "Compare the saved receipt with the current ammunition Item. A spent receipt without a card is ambiguous; do not assume a refund is due.",
+      "ManualDamage": "Inspect native wounds, hit-location damage and effects separately. Neither a claim nor an attack card proves those consequences were applied.",
+      "ManualPreserve": "Export the evidence before a separately reviewed correction. Preserve claim history and receipts; do not clear an executing claim to make it retryable.",
+      "Release": "Release unstarted reservation",
+      "Reconcile": "Reconcile result cards",
+      "RepairDisabled": "Both operations are disabled in this inspection-only release. No ammunition refund, replay, roll, or damage application is available.",
+      "PreviousPage": "Previous page",
+      "NextPage": "Next page",
+      "Page": "Page {page} of {pages} · {count} incident rows",
+      "Export": "Export this page",
+      "ExportLimit": "The diagnostic export exceeds its size limit. Narrow the source filter and try again.",
+      "States": { "pending": "Pending", "claimed": "Reserved", "executing": "Executing", "committed": "Committed", "unknown": "Unknown state" },
+      "Classes": {
+        "Reserved": "Reservation only; no execution recorded",
+        "Executing": "Executing; no resource receipt",
+        "ExecutingSpent": "Executing; resource receipt exists",
+        "ResultFound": "Result cards linked; source not updated",
+        "PartialSplit": "Partial split result set",
+        "Malformed": "Historical, malformed or incomplete evidence",
+        "Committed": "Already committed",
+        "Pending": "Pending history"
+      },
+      "Reasons": {
+        "Malformed": "The claim version, state, row or required fields cannot be validated.",
+        "SubjectChanged": "The saved claim subject no longer matches its source row.",
+        "LimitReached": "The bounded evidence limit was reached.",
+        "ResultUnavailable": "A recorded result is missing or cannot be read by this GM.",
+        "ResultMismatch": "Result identity or count conflicts with the saved claim.",
+        "AttackProofIncomplete": "A linked result lacks validated attack-card creation proof.",
+        "BatchMismatch": "Split indices or batch size do not match the admitted targets.",
+        "ReceiptMalformed": "The ammunition receipt is inconsistent or malformed.",
+        "SubjectUnavailable": "The Actor or owned weapon is missing or inconsistent.",
+        "TargetUnavailable": "An exact target Token or Actor is missing or changed.",
+        "AmmunitionUnavailable": "The ammunition Item is missing or is not readable by this GM.",
+        "CombatUnavailable": "The saved combat is no longer available.",
+        "ContextChanged": "The active combat, logical round or phase differs from the saved context.",
+        "SourceUnavailable": "The source message was deleted. A surviving result receipt does not prove the missing source's authoritative state."
+      }
     },
     "ProneAutomation": {
       "AttackerPronePenalty": "Attacker prone",

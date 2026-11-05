@@ -9,7 +9,30 @@
  */
 
 const combatantQueues = new Map();
+const documentQueues = new Map();
 const movementActivity = new Map();
+
+function enqueueWrite(queues, key, metadata, operation, activity = null) {
+  if (typeof operation !== "function") throw new TypeError("A queued document write requires an operation function.");
+  const previous = queues.get(key)?.promise ?? Promise.resolve();
+  activity?.();
+  const promise = previous.catch(() => undefined).then(() => {
+    activity?.();
+    return operation();
+  });
+  queues.set(key, { ...metadata, promise });
+  void promise.finally(() => {
+    if (queues.get(key)?.promise === promise) queues.delete(key);
+    activity?.();
+  }).catch(() => undefined);
+  return promise;
+}
+
+/** Serialize authoritative writes to an exact document, including chat claims. */
+export function enqueueDocumentWrite(documentUuid, operation) {
+  if (!documentUuid) throw new TypeError("A queued document write requires a UUID.");
+  return enqueueWrite(documentQueues, String(documentUuid), {}, operation);
+}
 
 /** @returns {Promise<void>} */
 function delay(milliseconds) {
@@ -51,33 +74,12 @@ function markMovementActivity(combatId) {
  * @returns {Promise<T>}
  */
 export function enqueueCombatantWrite(combatId, combatantId, operation, { movement = false } = {}) {
-  if (typeof operation !== "function") throw new TypeError("A queued Combatant write requires an operation function.");
-
   const key = queueKey(combatId, combatantId);
-  const previous = combatantQueues.get(key)?.promise ?? Promise.resolve();
-  if (movement) markMovementActivity(combatId);
-
-  const promise = previous
-    .catch(() => undefined)
-    .then(async () => {
-      if (movement) markMovementActivity(combatId);
-      return operation();
-    });
-
-  const entry = {
+  return enqueueWrite(combatantQueues, key, {
     combatId: combatId ?? null,
     combatantId: combatantId ?? null,
-    movement,
-    promise
-  };
-  combatantQueues.set(key, entry);
-
-  void promise.finally(() => {
-    if (combatantQueues.get(key)?.promise === promise) combatantQueues.delete(key);
-    if (movement) markMovementActivity(combatId);
-  }).catch(() => undefined);
-
-  return promise;
+    movement
+  }, operation, movement ? () => markMovementActivity(combatId) : null);
 }
 
 /**
@@ -85,16 +87,32 @@ export function enqueueCombatantWrite(combatId, combatantId, operation, { moveme
  * catches writes which were enqueued while an earlier batch was settling.
  *
  * @param {string|null|undefined} combatId Combat id.
- * @returns {Promise<void>}
+ * @param {{deadline?: number}} [options={}] Optional absolute wait deadline.
+ * @returns {Promise<boolean>} Whether all writes settled before the deadline.
  */
-export async function awaitCombatantWrites(combatId) {
-  if (!combatId) return;
+export async function awaitCombatantWrites(combatId, { deadline = Infinity } = {}) {
+  if (!combatId) return true;
   while (true) {
     const pending = Array.from(combatantQueues.values())
       .filter(entry => entry.combatId === combatId)
       .map(entry => entry.promise);
-    if (!pending.length) return;
-    await Promise.allSettled(pending);
+    if (!pending.length) return true;
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return false;
+    if (!Number.isFinite(remaining)) {
+      await Promise.allSettled(pending);
+      continue;
+    }
+    let timer;
+    try {
+      const settled = await Promise.race([
+        Promise.allSettled(pending).then(() => true),
+        new Promise(resolve => { timer = globalThis.setTimeout(() => resolve(false), remaining); })
+      ]);
+      if (!settled) return false;
+    } finally {
+      globalThis.clearTimeout(timer);
+    }
   }
 }
 
@@ -111,10 +129,11 @@ export async function awaitCombatantWrites(combatId) {
 export async function settleMovementWrites(combatId, { quietMs = 200, timeoutMs = 2000 } = {}) {
   if (!combatId) return true;
   const startedAt = Date.now();
-  const deadline = startedAt + Math.max(quietMs, timeoutMs);
+  quietMs = Math.max(0, Number(quietMs) || 0);
+  const deadline = startedAt + Math.max(0, Number(timeoutMs) || 0);
 
   while (true) {
-    await awaitCombatantWrites(combatId);
+    if (!await awaitCombatantWrites(combatId, { deadline })) return false;
 
     const lastActivity = Math.max(startedAt, movementActivity.get(combatId) ?? 0);
     const quietFor = Date.now() - lastActivity;
@@ -122,7 +141,7 @@ export async function settleMovementWrites(combatId, { quietMs = 200, timeoutMs 
     if (!hasPending && quietFor >= quietMs) return true;
     if (Date.now() >= deadline) return false;
 
-    await delay(Math.max(10, Math.min(50, quietMs - quietFor)));
+    await delay(Math.min(deadline - Date.now(), Math.max(1, Math.min(50, quietMs - quietFor))));
   }
 }
 

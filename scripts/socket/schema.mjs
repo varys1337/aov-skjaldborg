@@ -1,6 +1,7 @@
 import { handlePromptDefenseRoll } from "./actions.mjs";
 import {
   sanitizeCombatantWritePayload,
+  sanitizeChatActionClaimPayload,
   sanitizeCombatWritePayload,
   sanitizeCommitDefensePayload,
   sanitizeCommitIntentPayload,
@@ -79,6 +80,21 @@ function isDocumentLike(value) {
 
 export function normalizeSocketActionResult(action, result) {
   const id = String(action ?? "");
+  if (id === "chatActionClaim") {
+    const source = result ?? {};
+    return {
+      ...plainActionResult(id, source),
+      state: cleanString(source.state, 30),
+      key: cleanString(source.key, 300),
+      attemptId: cleanString(source.attemptId, 100),
+      slot: cleanString(source.slot, 80),
+      resultMessageIds: Array.isArray(source.resultMessageIds) ? source.resultMessageIds.slice(0, 32).map(value => cleanString(value, 100)) : [],
+      ammunitionRequired: source.ammunitionRequired === true,
+      ...(source.ammunitionChange && ["before", "after", "count"].every(key => Number.isFinite(Number(source.ammunitionChange[key]))) ? { ammunitionChange: {
+        before: Number(source.ammunitionChange.before), after: Number(source.ammunitionChange.after), count: Number(source.ammunitionChange.count)
+      } } : {})
+    };
+  }
   if (id === "recordMovement" || id === "clearMovement") return movementActionResult(id, result);
   if (id === "promptDefenseRoll" || id === "commitDefenseCard") return defenseActionResult(id, result);
   if (result === null || result === undefined) return plainActionResult(id);
@@ -186,6 +202,7 @@ export const SOCKET_ACTIONS = Object.freeze({
   incrementReaction: ownerAction("incrementReaction"),
   decrementReaction: ownerAction("decrementReaction"),
   commitDefenseCard: ownerAction("commitDefenseCard", sanitizeCommitDefensePayload),
+  chatActionClaim: ownerAction("chatActionClaim", sanitizeChatActionClaimPayload),
   promptDefenseRoll: actionDescriptor("promptDefenseRoll", {
     authority: SOCKET_AUTHORITY.LOCAL_CLIENT,
     sanitize: sanitizePromptDefensePayload,

@@ -8,6 +8,8 @@
  * idempotent and guarded by module flags.
  */
 import { MODULE_ID } from "../constants.mjs";
+import { findCombatDamageSource } from "./result-provenance.mjs";
+import { isAuthoritativeGmClient } from "../utils/authority.mjs";
 import { createModuleChatMessage } from "../compat/chat-message.mjs";
 import { warn } from "../logger.mjs";
 import { incrementCounter } from "../performance/performance-monitor.mjs";
@@ -18,7 +20,6 @@ import {
   actorName,
   idTypeMatch,
   localize,
-  recentFlaggedMessages,
   registerChatMessageAutomationHooks,
   renderActorStackCard,
   rerenderAoVMessage,
@@ -207,18 +208,12 @@ function findResolvedDamageLocationCard(message) {
 }
 
 function findMatchingMissileShot(damageMessage, damageCard) {
-  const direct = damageMessage.getFlag?.(MODULE_ID, "missileShot") ?? null;
-  if (matchesDamageCard(direct, damageCard)) return { message: damageMessage, shot: direct };
-
-  const [match = null] = recentFlaggedMessages({
-    excludeMessage: damageMessage,
+  const match = findCombatDamageSource(damageMessage, damageCard, {
     flag: "missileShot",
     windowMs: MISSILE_MATCH_WINDOW_MS,
-    predicate: entry => entry.flag?.sourceMessageId
-      && entry.message?.getFlag?.(MODULE_ID, MISSILE_HIT_LOCATION_FLAG)?.resolved !== true
-      && matchesDamageCard(entry.flag, damageCard)
+    matches: matchesDamageCard
   });
-  return match ? { message: match.message, shot: match.flag } : null;
+  return match.flag ? { ...match, shot: match.flag } : null;
 }
 
 async function createIntoMeleePrompt(message, intoMelee, roll) {
@@ -247,7 +242,7 @@ async function createIntoMeleePrompt(message, intoMelee, roll) {
 }
 
 async function resolveIntoMeleeMessage(message) {
-  if (!game.user?.isGM || message?.getFlag?.("aov", "cardType") !== "CO" || message?.getFlag?.("aov", "state") !== "closed") return;
+  if (!isAuthoritativeGmClient() || message?.getFlag?.("aov", "cardType") !== "CO" || message?.getFlag?.("aov", "state") !== "closed") return;
   const intoMelee = message.getFlag?.(MODULE_ID, MISSILE_INTO_MELEE_FLAG) ?? null;
   if (!intoMelee || intoMelee.resolved === true) return;
   const attacker = aovCards(message)[0] ?? null;
@@ -268,7 +263,7 @@ async function resolveIntoMeleeMessage(message) {
 }
 
 async function persistMissileHitLocation(message) {
-  if (!game.user?.isGM || message?.getFlag?.(MODULE_ID, MISSILE_HIT_LOCATION_FLAG)?.resolved === true) return;
+  if (!isAuthoritativeGmClient() || message?.getFlag?.(MODULE_ID, MISSILE_HIT_LOCATION_FLAG)?.resolved === true) return;
   const located = findResolvedDamageLocationCard(message);
   if (!located) return;
   const source = findMatchingMissileShot(message, located.card);
@@ -289,6 +284,9 @@ async function persistMissileHitLocation(message) {
     [`flags.${MODULE_ID}.${MISSILE_HIT_LOCATION_FLAG}`]: {
       resolved: true,
       sourceMessageId: source.message.id,
+      sourceCardIndex: source.sourceCardIndex,
+      damageCardIndex: located.index,
+      sourceResolution: source.resolution,
       damageMessageId: message.id,
       resolvedAt: Date.now(),
       selectedBy: source.shot.aimedLocationId === locationId ? "aimed" : "core",
@@ -312,7 +310,7 @@ async function persistMissileHitLocation(message) {
 }
 
 async function resolveShieldCoverForMissileHit(message) {
-  if (!game.user?.isGM || message?.getFlag?.(MODULE_ID, MISSILE_SHIELD_COVER_FLAG)?.resolved === true) return false;
+  if (!isAuthoritativeGmClient() || message?.getFlag?.(MODULE_ID, MISSILE_SHIELD_COVER_FLAG)?.resolved === true) return false;
   const located = findResolvedDamageLocationCard(message);
   if (!located) return false;
   const source = findMatchingMissileShot(message, located.card);
@@ -343,6 +341,9 @@ async function resolveShieldCoverForMissileHit(message) {
     [`flags.${MODULE_ID}.${MISSILE_SHIELD_COVER_FLAG}`]: {
       resolved: true,
       sourceMessageId: source.message.id,
+      sourceCardIndex: source.sourceCardIndex,
+      damageCardIndex: located.index,
+      sourceResolution: source.resolution,
       damageMessageId: message.id,
       resolvedAt: Date.now(),
       targetActorUuid: source.shot.targetActorUuid ?? null,
@@ -387,5 +388,6 @@ export function registerMissileAutomationHooks(hooks = globalThis.Hooks) {
 }
 
 export const __test = {
+  findMatchingMissileShot,
   isHooksRegistered: () => hooksRegistered
 };

@@ -20,7 +20,7 @@ import { RenderCoordinator } from "../ui/render-coordinator.mjs";
 import { actionThemeClass, actorPortraitSource, isVideoSource } from "../ui/dom-utils.mjs";
 import { error } from "../logger.mjs";
 import { ensureDialogPartialsLoaded } from "./base/dialog-partials.mjs";
-import { SkjDialogV2 } from "./base/dialog-v2.mjs";
+import { ACTION_DIALOG_WIDTHS, actionDialogPosition, SkjDialogV2 } from "./base/dialog-v2.mjs";
 
 function safeState(combatant) {
   return combatant ? getCombatantState(combatant) : { runeMagic: {}, updatedAt: 0 };
@@ -173,7 +173,7 @@ export class RunicMagicDialog extends SkjDialogV2 {
           callback: async (_event, button) => dialog._submit(button.form)
         }
       ],
-      position: { width: 390, height: "auto" },
+      position: actionDialogPosition(ACTION_DIALOG_WIDTHS.standard),
       modal: false,
       rejectClose: false
     });

@@ -291,15 +291,13 @@ export function registerActorHotbarHooks(ActorHotbar, hooks = globalThis.Hooks) 
     }
   });
   hooks.on("updateActor", (actor, changed) => {
-    const current = ActorHotbar.current;
-    if (current?._xpUpdatePending && current.actor?.id === actor.id) return;
     if (!documentBelongsToCurrentHotbarActor(actor)) return;
     invalidateActorHotbar(actorHotbarPartsForActorChange(changed), "actor-update", actor);
   });
   hooks.on("updateItem", (item, changed) => {
-    const current = ActorHotbar.current;
     const sameActor = documentBelongsToCurrentHotbarActor(item);
-    if (sameActor && (current?._xpUpdatePending || current?._magicPreparationUpdatesPending?.size > 0)) return;
+    // Pending local controls only prevent duplicate submissions. Document hooks
+    // remain authoritative for cache invalidation, including unrelated writes.
     if (sameActor) invalidateActorHotbar(actorHotbarPartsForItemChange(changed), "item-update", item.actor);
   });
   hooks.on("createItem", item => {

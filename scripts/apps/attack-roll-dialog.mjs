@@ -3,13 +3,13 @@ import { getAttackWeapons, getCombatOptions, getReadiedWeapon, getReadiedWeaponL
 import { mountedCapSummary, mountedWeaponCap } from "../combat/mounted-combat.mjs";
 import { resolveNaturalWeaponSkill, resolveWeaponSkill } from "../combat/weapon-skill-resolver.mjs";
 import { getCombatantState } from "../combat/state.mjs";
-import { createCombatRuleContext, prepareAttackContext, prepareDamageContext } from "../combat/rule-kernel.mjs";
+import { createCombatRuleContext, prepareAttackContext, prepareDamageContext, serializeCombatRuleReports } from "../combat/rule-kernel.mjs";
 import {
   serializeProneAttackModifierContext,
   serializeProneDamageContext
 } from "../combat/prone-automation.mjs";
 import { startDialogCombatWorkflowBatch } from "../socket.mjs";
-import { createSplitAttackPrompt } from "../combat/dialog-target-queue.mjs";
+import { completeSplitAttack, createSplitAttackPrompt } from "../combat/dialog-target-queue.mjs";
 import { error } from "../logger.mjs";
 import { actionThemeClass, actorPortraitSource, isVideoSource } from "../ui/dom-utils.mjs";
 import {
@@ -34,7 +34,7 @@ import {
   unregisterTargetRefresh,
   validChoiceValue
 } from "./target-refresh-helpers.mjs";
-import { SkjDialogV2 } from "./base/dialog-v2.mjs";
+import { ACTION_DIALOG_WIDTHS, actionDialogPosition, SkjDialogV2 } from "./base/dialog-v2.mjs";
 
 const DISARM_PENALTIES = Object.freeze([0, -20, -40]);
 const DISARM_MODES = Object.freeze(["strikeWeapon", "hitFlat", "entangle"]);
@@ -117,10 +117,7 @@ export class AttackRollDialog extends SkjDialogV2 {
       contentTag: "form",
       contentClasses: ["aov-skjaldborg", "skj-attack-roll-content"]
     },
-    position: {
-      width: 390,
-      height: "auto"
-    },
+    position: actionDialogPosition(ACTION_DIALOG_WIDTHS.standard),
     actions: {
       ...super.DEFAULT_OPTIONS.actions,
       submitAttack: function (event, target) {
@@ -155,10 +152,7 @@ export class AttackRollDialog extends SkjDialogV2 {
           label: game.i18n.localize("Cancel")
         }
       ],
-      position: {
-        width: 390,
-        height: "auto"
-      }
+      position: actionDialogPosition(ACTION_DIALOG_WIDTHS.standard)
     });
     dialog = this;
     this.actor = actor;
@@ -731,7 +725,7 @@ export class AttackRollDialog extends SkjDialogV2 {
   _readFormState(form, targetSnapshot = this._activeTarget()) {
     const data = new FormData(form);
     const weaponId = String(data.get("weaponId") ?? this.weapon?.id ?? "");
-    const weapon = this._getAvailableWeapon(weaponId) ?? this.weapon;
+    const weapon = this._getAvailableWeapon(weaponId);
     this.weapon = weapon;
     const targetActor = targetSnapshot?.actor ?? this.targetActor;
     const targetToken = targetSnapshot?.token ?? this.targetToken;
@@ -792,6 +786,7 @@ export class AttackRollDialog extends SkjDialogV2 {
       targetActor,
       targetToken,
       weapon,
+      workflowType: damageSelection.workflow ?? "melee",
       aimed: aimedEnabled
     })));
     const proneRules = ruleContext.proneRules ?? null;
@@ -818,6 +813,7 @@ export class AttackRollDialog extends SkjDialogV2 {
       proneModifier,
       proneRules,
       proneDamageRules,
+      ruleReports: ruleContext.ruleReports,
       targetNumber: baseChance + situationalModifier + aimedModifier + disarmModifier + stunModifier + augmentModifier + proneModifier,
       targetSnapshot,
       targetToken,
@@ -965,7 +961,7 @@ export class AttackRollDialog extends SkjDialogV2 {
     if (hiddenDamageType instanceof HTMLInputElement) hiddenDamageType.value = state.damageType.key;
     const submit = form.querySelector("[data-action='submitAttack']");
     if (submit instanceof HTMLButtonElement) {
-      submit.disabled = !this.targetSnapshots.length || !state.splitAttack.valid;
+      submit.disabled = !this.targetSnapshots.length || !state.weapon || !state.splitAttack.valid;
     }
     updateModifierSummary(form, state, this._formatSummary(state));
   }
@@ -1038,6 +1034,7 @@ export class AttackRollDialog extends SkjDialogV2 {
       stunModifier: state.stunModifier,
       augmentModifier: state.augmentModifier,
       proneModifier: state.proneModifier,
+      ruleReports: serializeCombatRuleReports(state.ruleReports),
       proneRules: serializeProneAttackModifierContext(state.proneRules),
       proneDamageRules: serializeProneDamageContext(state.proneDamageRules),
       targetNumber: state.targetNumber,
@@ -1047,6 +1044,7 @@ export class AttackRollDialog extends SkjDialogV2 {
       stun: state.stun,
       augmentations: state.augmentations,
       splitAttack: state.splitAttack,
+      splitAttackSourceMessageId: this.forcedSplitAttack?.sourceMessageId ?? null,
       targets: this.targetSnapshots.map(serializeTargetSnapshot).filter(Boolean),
       targetOptionsByTokenUuid: Object.fromEntries(this.targetOptionValues),
       originEvent: this.originEvent
@@ -1061,13 +1059,20 @@ export class AttackRollDialog extends SkjDialogV2 {
    */
   async _submit(form) {
     if (!(form instanceof HTMLFormElement)) return null;
+    if (this._submitting) return null;
+    this._submitting = true;
     try {
+      if (this.forcedSplitAttack?.sourceMessageId && await completeSplitAttack(this.forcedSplitAttack.sourceMessageId, { actorUuid: this.actor?.uuid })) return null;
       this._captureForm(form);
       if (!this.targetSnapshots.length) {
         ui.notifications.warn(game.i18n.localize("AOV_SKJALDBORG.Warnings.AttackTargetRequired"));
         return null;
       }
       const activeState = this._readFormState(form, this._activeTarget());
+      if (!activeState.weapon) {
+        ui.notifications.warn(game.i18n.localize("AOV_SKJALDBORG.TargetQueue.MissingDocuments"));
+        return null;
+      }
       if (!activeState.splitAttack.valid) {
         ui.notifications.warn(activeState.splitAttack.message);
         return null;
@@ -1097,6 +1102,7 @@ export class AttackRollDialog extends SkjDialogV2 {
           secondChance: activeState.splitAttack.secondChance,
           naturalSkill: activeState.splitAttack.naturalSkill,
           secondDexRank: activeState.splitAttack.secondDexRank,
+          sourceMessageIds: workflowResults.filter(result => result?.started && result.attackMessageId).map(result => result.attackMessageId),
           sourceWorkflow: "attack"
         });
       }
@@ -1107,6 +1113,8 @@ export class AttackRollDialog extends SkjDialogV2 {
       error("Failed to prepare the Skjaldborg attack workflow request.", exception);
       ui.notifications.error(game.i18n.localize("AOV_SKJALDBORG.Warnings.ActionFailed"));
       return null;
+    } finally {
+      this._submitting = false;
     }
   }
 

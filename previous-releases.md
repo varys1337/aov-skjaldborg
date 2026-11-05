@@ -1,11 +1,58 @@
+## 0.7.0
+
+- Requires Foundry VTT 14.370+ and Age of Vikings 14.7+. Minimum/verified declarations are Foundry 14.370 and AoV 14.7, based on automated source/API, contract, and packaging checks. **Live Foundry gameplay has not been tested for this release.**
+- Updates the integration contract to native AoV 14.7 while preserving system sheet/image-picker behavior and the initiative compatibility guards still required by that version.
+- Includes the completed combat reliability, exact result-provenance, source-aware effect, saved-action synchronization, dialog stability, and read-only GM recovery improvements developed since the published 0.6.0 package.
+- Bounds movement-plan waits, makes migration completion retry-safe and GM-authoritative, serializes coordinated rendering, prevents stale async presentation caching, and restores XP/preparation controls after success or failure.
+- Makes disabled diagnostics inexpensive, consolidates dialog launchers and route helpers, and organizes styles while retaining the maintenance baseline's identical compiled CSS.
+- Unifies release packaging and historical CLI entry points. CI validates pinned AoV 14.7 source, exercises both maintained contract suites, verifies reproducible archives and checksums, and publishes the ZIP, manifest, and SHA256SUMS.txt together.
+- Updates the existing Sass toolchain's transitive source-map-js dependency to the patched 1.2.2 version; no runtime dependency is added.
+- Preserves module identity, settings keys, socket action names, saved schemas, and existing combat mechanics. No world-data migration version is changed.
+
 ## 0.6.0
 
-- Adds a DialogV2 compatibility base (`SkjDialogV2`) to coalesce ApplicationV2 content refits and replaces direct DialogV2 subclasses to use it.
-- Replaces legacy boolean `Application.render` signatures with option objects.
-- Centralizes ChatMessage creation through module chat delivery helpers for background and interactive delivery.
-- Adds version utilities for `compareVersions` / `versionAtLeast` handling.
-- Hardens async paths with defensive promise catches and logger usage.
-- Updates diagnostics and `module-tool` validation coverage for metadata and imports.
+- Integrates Foundry 14.365's documented `ApplicationV2#_refit` API through a
+  guarded, coalesced DialogV2 base so dynamic combat, utility, and Runic Magic
+  forms resize without redundant layout work while retaining the declared
+  Foundry 14.363 minimum.
+- Centralizes every module-authored ChatMessage creation and uses the 14.365
+  notification/scroll operation options for automated phase reports without
+  changing chat-card data, flags, recipients, or combat mechanics.
+- Removes residual boolean ApplicationV2 render calls and pre-v14 array-like
+  chat-render handling; v14 `HTMLElement` hook shapes are now enforced by the
+  validator.
+- Extends runtime diagnostics for AppV2 refitting, chat presentation controls,
+  and `ActiveEffect#shouldApplyChange`, and strengthens compatibility metadata,
+  import-boundary, and contract validation.
+- Updates the locked Sass toolchain to 1.101.6 and resolves its vulnerable
+  transitive Immutable.js dependency. No runtime dependency or world-data
+  migration is introduced.
+
+## 0.5.8
+
+- Completes schema-owned socket validation and dispatch while preserving all
+  action names, payload fields, authority rules, timeouts, queues, and compact
+  response summaries.
+- Finishes the focused AoV import/template boundary behind the stable
+  `AoVAdapter` facade and preserves the existing prone-before-aimed rule-kernel
+  ordering without adding or reinterpreting combat mechanics.
+- Makes feature hook counts runtime-observed, removes obsolete tracker wrapper
+  shapes, and narrows tracker invalidation to relevant document changes.
+- Certifies the hardened runtime and ApplicationV2 settings surfaces against
+  Foundry 14.365 with Age of Vikings 14.5.
+
+## 0.5.7
+
+- Reconciles the source release metadata with the installed 0.5.6 baseline and
+  verifies the module contract against Age of Vikings 14.5 while retaining
+  AoV 14.4 as the minimum supported system version.
+- Repairs the source validation and packaging commands with one maintained,
+  cross-platform module tool.
+- Removes statically unreachable UI and dialog-helper code and consolidates
+  exact helper duplication without changing persisted flags, settings, socket
+  action names, or combat mechanics.
+- Corrects capability and feature-hook diagnostics while retaining the AoV 14.5
+  initiative roll-mode and Adjust Initiative compatibility integrations.
 
 ## 0.3.0-alpha.24
 

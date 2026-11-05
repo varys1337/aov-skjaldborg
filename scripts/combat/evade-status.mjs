@@ -13,6 +13,7 @@ import {
 } from "../compat/active-effects.mjs";
 import { RenderCoordinator } from "../ui/render-coordinator.mjs";
 import { warn } from "../logger.mjs";
+import { registerCombatRule } from "./rule-kernel.mjs";
 
 export const EVADE_MODES = Object.freeze({
   RANGED: "ranged",
@@ -119,6 +120,20 @@ export function evadingEffectData(effect) {
   return data && typeof data === "object" ? data : null;
 }
 
+function sameEvadeSource(effect, data) {
+  const existing = evadingEffectData(effect);
+  return moduleFlag(effect, "managedEvading") === true && !!existing
+    && ["combatId", "combatantId", "tokenUuid", "actorUuid"].every(key => (existing[key] ?? null) === (data[key] ?? null));
+}
+
+function evadeDataCurrent(data) {
+  if (data?.active !== true) return false;
+  if (!data.combatId) return true;
+  const combat = game.combats?.get?.(data.combatId) ?? (game.combat?.id === data.combatId ? game.combat : null);
+  return !!combat && Number.isFinite(Number(data.expiresAtLogicalRound))
+    && AoVAdapter.getSystemLogicalRound(combat) < Number(data.expiresAtLogicalRound);
+}
+
 /**
  * Return all Evading effects on an Actor.
  *
@@ -135,8 +150,13 @@ export function evadingEffectsForActor(actor) {
  * @param {Actor|object|null} actor Actor document.
  * @returns {object|null}
  */
-export function getActorEvadingState(actor) {
-  const effect = evadingEffectsForActor(actor).find(effect => effectIsActive(effect)) ?? null;
+export function getActorEvadingState(actor, { token = null } = {}) {
+  const tokenUuid = (token?.document ?? token)?.uuid ?? null;
+  const effect = evadingEffectsForActor(actor).find(effect => {
+    if (moduleFlag(effect, "managedEvading") !== true || !effectIsActive(effect)) return false;
+    const data = evadingEffectData(effect);
+    return evadeDataCurrent(data) && (!tokenUuid || !data.tokenUuid || data.tokenUuid === tokenUuid);
+  }) ?? null;
   const data = evadingEffectData(effect);
   return data ? foundry.utils.deepClone(data) : null;
 }
@@ -154,8 +174,8 @@ function canMirrorEvadingEffect(actor) {
 /**
  * Build persisted metadata for Evade/Fighting Defensively.
  *
- * This payload intentionally does not apply mechanical modifiers yet. It records
- * enough rule context for the later ranged-attack and all-attacks automation pass.
+ * The missile rule provider reads this declaration; other interpretations remain
+ * metadata until their own AoV rule has been established.
  *
  * @param {Combat|null} combat Active Combat.
  * @param {Combatant|object|null} combatant Declaring Combatant.
@@ -217,11 +237,11 @@ export async function activateEvadingForActor(actor, { combat = null, combatant 
       managedEvading: true,
       evade: data
     },
-    predicate: isEvadingEffect,
-    useToggle: true
+    predicate: effect => sameEvadeSource(effect, data),
+    useToggle: false
   });
 
-  if (effect) await deleteDuplicateEvadingEffects(actor, effect);
+  if (effect) await deleteDuplicateEvadingEffects(actor, effect, data);
   RenderCoordinator.invalidateCombatTracker("evade-status");
   return {
     active: true,
@@ -252,8 +272,8 @@ export async function activateEvadingForCombatant(combat, combatant) {
  * @param {ActiveEffect|object|null} primary Effect to keep.
  * @returns {Promise<void>}
  */
-async function deleteDuplicateEvadingEffects(actor, primary) {
-  const duplicates = evadingEffectsForActor(actor).filter(effect => effect && effect !== primary);
+async function deleteDuplicateEvadingEffects(actor, primary, data) {
+  const duplicates = evadingEffectsForActor(actor).filter(effect => effect && effect !== primary && sameEvadeSource(effect, data));
   for (const duplicate of duplicates) {
     await safeDeleteActiveEffect(duplicate, { reason: "evading-duplicate" });
   }
@@ -268,8 +288,9 @@ async function deleteDuplicateEvadingEffects(actor, primary) {
  * @returns {boolean}
  */
 function evadingEffectExpired(effect, combat, logicalRound) {
-  if (!isEvadingEffect(effect)) return false;
-  if (!effectIsActive(effect)) return false;
+  if (moduleFlag(effect, "managedEvading") !== true) return false;
+  // Expiry is owned by the recorded logical round, independently of temporary
+  // disable/suppression. Suppression by itself is never a deletion reason.
   const data = evadingEffectData(effect);
   if (!data) return moduleFlag(effect, "managedEvading") === true;
   if (data.combatId && combat?.id && data.combatId !== combat.id) return false;
@@ -288,7 +309,7 @@ function evadingEffectExpired(effect, combat, logicalRound) {
  */
 export async function removeExpiredEvadingEffects(combat, { logicalRound = null, reason = "combat-round" } = {}) {
   if (!game.user?.isGM || !combat) return 0;
-  const round = Number.isFinite(Number(logicalRound))
+  const round = logicalRound !== null && logicalRound !== undefined && Number.isFinite(Number(logicalRound))
     ? Number(logicalRound)
     : AoVAdapter.getSystemLogicalRound(combat);
   const lockKey = `${combat.id}:${round}:${reason}`;
@@ -347,7 +368,23 @@ export function registerEvadingStatusHooks(hooks = globalThis.Hooks) {
 }
 
 export const __test = {
+  sameEvadeSource,
   ROUND_CLEANUP_REASONS,
   buildEvadeData,
   evadingEffectExpired
 };
+
+// AoV combat rules, Shooting at Moving Targets (book p. 113): a declared
+// evading target imposes -40 on missile attacks, before range/melee scaling.
+registerCombatRule({
+  id: "evading-target",
+  priority: 150,
+  prepareAttackContext(context) {
+    let modifier = 0;
+    const targetActor = (context.targetToken?.document ?? context.targetToken)?.actor ?? context.targetActor;
+    const data = context.workflowType === "missile" ? getActorEvadingState(targetActor, { token: context.targetToken }) : null;
+    if (data?.active === true) modifier = -40;
+    context.evadingModifier = modifier;
+    return { evadingModifier: modifier, reason: modifier ? "evading-missile-target" : "not-applicable" };
+  }
+});

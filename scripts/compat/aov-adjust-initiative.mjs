@@ -1,3 +1,4 @@
+import { actionThemeClasses } from "../ui/dom-utils.mjs";
 import { MODULE_ID } from "../constants.mjs";
 import { debug, error } from "../logger.mjs";
 import { requestGm } from "../socket.mjs";
@@ -133,7 +134,7 @@ export async function promptAdjustInitiative(combatant) {
   );
 
   const result = await foundry.applications.api.DialogV2.input({
-    classes: ["aov", "item", "aov-skjaldborg", "skj-weapon-adjust-dialog"],
+    classes: ["aov", "item", "aov-skjaldborg", "skj-weapon-adjust-dialog", "skj-owned-dialog-window", ...actionThemeClasses()],
     window: { title: game.i18n.localize("AOV.Combat.adjInit") },
     content,
     rejectClose: false,

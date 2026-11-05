@@ -19,6 +19,8 @@ import { getCombatState, getCombatantState } from "./combat/state.mjs";
 import { AoVAdapter } from "./adapter/aov-adapter.mjs";
 import { buildResolutionQueue } from "./combat/resolution-queue.mjs";
 import { runDiagnostics } from "./diagnostics.mjs";
+import { CombatActionRecovery, registerCombatActionRecoveryHooks } from "./apps/combat-action-recovery.mjs";
+import { combatRuleDiagnostics } from "./combat/rule-kernel.mjs";
 import { debug, warn } from "./logger.mjs";
 import {
   getAdjustInitiativeIntegrationStatus,
@@ -75,6 +77,7 @@ import { performanceDiagnostics } from "./performance/performance-monitor.mjs";
 import { refreshRuntimeSettings } from "./runtime-settings.mjs";
 import { getFeatureRegistryReport, initializeRegisteredFeatures, registerFeature } from "./core/feature-registry.mjs";
 import { isAuthoritativeGmClient } from "./utils/authority.mjs";
+import { registerActionThemeHooks } from "./ui/dom-utils.mjs";
 import {
   combatTrackerAffectedByCombatantChange,
   combatTrackerAffectedByCombatChange
@@ -87,7 +90,8 @@ let runtimeFeaturesRegistered = false;
 RenderCoordinator.register("combatTracker", detail => {
   performanceDiagnostics.count("combatTracker.render.request", 1, detail);
   if (refreshCombatTrackerDecorations(detail)) return;
-  ui.combat?.render?.();
+  const trackers = new Set([ui.combat, ui.combat?.popout].filter(Boolean));
+  return Promise.all(Array.from(trackers, tracker => tracker.render()));
 });
 
 function registerRuntimeFeatures() {
@@ -114,13 +118,15 @@ function registerRuntimeFeatures() {
     ["evade", "Evading Status Hooks", registerEvadingStatusHooks],
     ["reaction-penalties", "Reaction Penalty Hooks", registerReactionPenaltyEffectHooks],
     ["action-ring", "Action Ring Hooks", registerActionRingHooks],
+    ["action-theme", "Action Interface Theme Hooks", registerActionThemeHooks],
     ["actor-hotbar", "Actor Hotbar Hooks", registerActorHotbarHooks],
     ["intent-indicators", "Token Intent Indicators", registerTokenIntentIndicatorHooks],
     ["movement-plan-preview", "Movement Plan Preview", registerMovementPlanPreviewHooks],
     ["engagement-indicators", "Engagement Indicators", registerEngagementIndicatorHooks],
     ["reach-visualizer", "Reach Visualizer", registerReachVisualizerHooks],
     ["chat-report", "Chat Report Hooks", registerChatReportHooks],
-    ["dialog-target-queue", "Dialog Target Queue", registerDialogTargetQueueHooks]
+    ["dialog-target-queue", "Dialog Target Queue", registerDialogTargetQueueHooks],
+    ["combat-recovery", "Combat Action Recovery Inspection", registerCombatActionRecoveryHooks]
   ].forEach(([id, label, initialize]) => registerFeature({ id, label, initialize }));
 }
 
@@ -176,6 +182,7 @@ Hooks.once("ready", async () => {
       adapter: AoVAdapter,
       diagnostics: {
         run: runDiagnostics,
+        combatRules: combatRuleDiagnostics,
         performance: performanceDiagnostics,
         features: getFeatureRegistryReport
       },
@@ -251,6 +258,8 @@ Hooks.once("ready", async () => {
     },
     diagnostics: {
       run: runDiagnostics,
+      recovery: { open: () => CombatActionRecovery.open() },
+      combatRules: combatRuleDiagnostics,
       performance: performanceDiagnostics,
       features: getFeatureRegistryReport
     }

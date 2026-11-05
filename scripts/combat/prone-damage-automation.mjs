@@ -10,7 +10,8 @@ import { MODULE_ID } from "../constants.mjs";
 import { AoVAdapter } from "../adapter/aov-adapter.mjs";
 import { warn } from "../logger.mjs";
 import { incrementCounter } from "../performance/performance-monitor.mjs";
-import { guardedModuleFlag, guardedUpdate } from "../utils/guarded-document-writes.mjs";
+import { guardedUpdate } from "../utils/guarded-document-writes.mjs";
+import { COMBAT_PROVENANCE_FLAG, resolveDamageProvenance, resultProvenance } from "./result-provenance.mjs";
 import { isAuthoritativeGmClient } from "../utils/authority.mjs";
 import {
   actorFromAoVParticipant,
@@ -60,16 +61,19 @@ function sourceFlagForDamageButton(message, button) {
   if (!shouldApplyProneDamageRules(sourceFlag)) return null;
   const cards = aovCards(message);
   const index = Number(button?.dataset?.card ?? 0);
-  const card = cards[Number.isInteger(index) ? index : 0] ?? cards[0] ?? null;
+  if (index !== 0) return null; // This flag describes the attack, never the neighboring defense.
+  const card = cards[index] ?? null;
   if (!card || card.rollType !== "WP") return null;
-  return { sourceFlag, card, index: Number.isInteger(index) ? index : 0 };
+  return { sourceFlag, card, index };
 }
 
 async function resolveFlaggedActorAndToken(flag, actorId, actorType) {
   const token = await safeFromUuid(flag?.attackerTokenUuid) ?? null;
+  if (flag?.attackerTokenUuid && !token?.actor) return { actor: null, token: null };
   const actor = token?.actor
     ?? await safeFromUuid(flag?.attackerActorUuid)
     ?? actorFromAoVParticipant(actorId, actorType);
+  if (flag?.attackerActorUuid && actor?.uuid !== flag.attackerActorUuid) return { actor: null, token: null };
   return { actor, token };
 }
 
@@ -114,8 +118,9 @@ function applyProneDamageSuppressionToConfig(config, rules) {
 
 async function markDamageMessage(messageId, sourceMessage, source, rules) {
   const message = game.messages?.get?.(messageId) ?? null;
-  if (!message?.setFlag) return null;
-  await guardedModuleFlag(message, PRONE_DAMAGE_FLAG, {
+  if (!message?.update) return null;
+  const provenance = resultProvenance(sourceMessage, { sourceCardIndex: source.index });
+  const damageRules = {
     ...primitiveRules(rules),
     resolved: false,
     createdAt: Date.now(),
@@ -135,17 +140,29 @@ async function markDamageMessage(messageId, sourceMessage, source, rules) {
     targetTokenId: source.sourceFlag.targetTokenId ?? null,
     targetParticipantId: source.sourceFlag.targetParticipantId ?? source.card.targetId ?? null,
     targetParticipantType: source.sourceFlag.targetParticipantType ?? source.card.targetType ?? null
+  };
+  const updated = await guardedUpdate(message, {
+    [`flags.${MODULE_ID}.${PRONE_DAMAGE_FLAG}`]: damageRules,
+    ...(provenance ? { [`flags.${MODULE_ID}.${COMBAT_PROVENANCE_FLAG}`]: provenance } : {})
   }, { category: "chat.proneDamageFlag" });
+  if (!updated) return null;
   if (sourceMessage?.update) {
-    await guardedUpdate(sourceMessage, {
-      [`flags.${MODULE_ID}.${PRONE_SOURCE_FLAG}.damageMessageId`]: message.id,
-      [`flags.${MODULE_ID}.${PRONE_SOURCE_FLAG}.damageResolvedAt`]: Date.now()
-    }, { category: "chat.proneSourceLink" });
+    try {
+      await guardedUpdate(sourceMessage, {
+        [`flags.${MODULE_ID}.${PRONE_SOURCE_FLAG}.damageMessageId`]: message.id,
+        [`flags.${MODULE_ID}.${PRONE_SOURCE_FLAG}.damageResolvedAt`]: Date.now()
+      }, { category: "chat.proneSourceLink" });
+    } catch (exception) {
+      warn("The damage result retained its source proof, but the source card could not be refreshed.", exception);
+    }
   }
   return message;
 }
 
-async function resolveCoreDamageButton(sourceMessage, button, event, source) {
+async function resolveCoreDamageButton(sourceMessage, button, event) {
+  sourceMessage = game.messages?.get?.(sourceMessage.id) ?? sourceMessage;
+  const source = sourceFlagForDamageButton(sourceMessage, button);
+  if (!source) return false;
   const rules = primitiveRules(source.sourceFlag.damageRules);
   const { actor, token } = await resolveFlaggedActorAndToken(source.sourceFlag, source.card.particId, source.card.particType);
   if (!actor) throw new Error(game.i18n.localize("AOV_SKJALDBORG.Warnings.ActorUnavailable"));
@@ -253,7 +270,8 @@ export async function resolveProneDamageMessage(message) {
     rules = latestMessage?.getFlag?.(MODULE_ID, PRONE_DAMAGE_FLAG) ?? rules;
     if (rules?.oneDieHitLocation !== true || rules.hitLocationResolved === true || rules.resolved === true) return false;
     const located = findDamageLocationCard(latestMessage);
-    if (!located || !damageCardMatchesRules(rules, located.card)) return false;
+    if (!located || !damageCardMatchesRules(rules, located.card)
+      || resolveDamageProvenance(latestMessage, located.card, located.index).resolution !== "exact") return false;
     const targetActor = await targetActorFromRules(rules, located.card);
     if (!targetActor) return false;
 
@@ -368,7 +386,7 @@ function bindProneDamageButtonOverride(message, html) {
       suppressDamageModifier: source.sourceFlag.damageRules?.suppressDamageModifier === true,
       oneDieHitLocation: source.sourceFlag.damageRules?.oneDieHitLocation === true
     });
-    void resolveCoreDamageButton(message, button, event, source).catch(exception => {
+    void resolveCoreDamageButton(message, button, event).catch(exception => {
       warn(exception);
       ui.notifications.error(game.i18n.localize("AOV_SKJALDBORG.Warnings.ActionFailed"));
     });
@@ -417,6 +435,8 @@ export function registerProneDamageAutomationHooks(hooks = globalThis.Hooks) {
 }
 
 export const __test = {
+  markDamageMessage,
+  sourceFlagForDamageButton,
   applyProneDamageSuppressionToConfig,
   damageCardMatchesRules,
   hitLocationForRoll,

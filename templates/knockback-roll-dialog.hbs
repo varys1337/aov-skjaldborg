@@ -63,11 +63,12 @@
       </div>
     </section>
 
-    <div class="skj-roll-dialog__footer skj-attack-roll-dialog__actions">
-      <button type="button" class="skj-roll-dialog__action skj-attack-roll-dialog__roll-button" data-action="submitKnockback" {{#unless hasTargets}}disabled{{/unless}}>
-        <i class="fa-solid fa-people-arrows-left-right" aria-hidden="true"></i>
-        <span>{{localize "AOV_SKJALDBORG.KnockbackDialog.RollKnockback"}}</span>
-      </button>
-    </div>
   </section>
+
+  <div class="skj-dialog-footer skj-roll-dialog__footer skj-attack-roll-dialog__actions">
+    <button type="button" class="skj-roll-dialog__action skj-attack-roll-dialog__roll-button" data-action="submitKnockback" {{#unless hasTargets}}disabled{{/unless}}>
+      <i class="fa-solid fa-people-arrows-left-right" aria-hidden="true"></i>
+      <span>{{localize "AOV_SKJALDBORG.KnockbackDialog.RollKnockback"}}</span>
+    </button>
+  </div>
 </div>

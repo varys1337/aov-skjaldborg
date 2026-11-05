@@ -1,8 +1,9 @@
+// Cascade-order coordinator: preserve the established interleaving of surfaces.
 @use "shared";
-@use "action-ring";
-@use "actor-hotbar-core";
+@use "../apps/action-ring";
+@use "../apps/actor-hotbar/core";
 @use "tracker-canvas";
 @use "settings-dialogs";
-@use "actor-hotbar-overrides";
+@use "../apps/actor-hotbar/overrides";
 @use "movement-tracker";
-@use "actor-hotbar-grapple";
+@use "../apps/actor-hotbar/grapple";

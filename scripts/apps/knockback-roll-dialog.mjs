@@ -17,7 +17,7 @@ import {
   serializeTargetSnapshot,
   unregisterTargetRefresh
 } from "./target-refresh-helpers.mjs";
-import { SkjDialogV2 } from "./base/dialog-v2.mjs";
+import { ACTION_DIALOG_WIDTHS, actionDialogPosition, SkjDialogV2 } from "./base/dialog-v2.mjs";
 
 function resistanceSummary(_actor, _targetActor) {
   return game.i18n.localize("AOV_SKJALDBORG.KnockbackDialog.ResistancePublicSummary");
@@ -34,7 +34,7 @@ export class KnockbackRollDialog extends SkjDialogV2 {
       contentTag: "form",
       contentClasses: ["aov-skjaldborg", "skj-attack-roll-content"]
     },
-    position: { width: 390, height: "auto" },
+    position: actionDialogPosition(ACTION_DIALOG_WIDTHS.compact),
     actions: {
       ...super.DEFAULT_OPTIONS.actions,
       submitKnockback: function (event, target) {
@@ -63,7 +63,7 @@ export class KnockbackRollDialog extends SkjDialogV2 {
         },
         { action: "cancel", label: game.i18n.localize("Cancel") }
       ],
-      position: { width: 390, height: "auto" }
+      position: actionDialogPosition(ACTION_DIALOG_WIDTHS.compact)
     });
     dialog = this;
     this.actor = actor;

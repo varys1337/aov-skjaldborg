@@ -1,0 +1,22 @@
+.skj-prone-raw-note {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.45rem;
+  align-items: start;
+  margin: 0.45rem 0 0;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid rgba(120, 80, 40, 0.35);
+  border-radius: 4px;
+  background: rgba(120, 80, 40, 0.08);
+  font-size: 0.86em;
+  line-height: 1.25;
+}
+
+.skj-prone-raw-note i {
+  margin-top: 0.12rem;
+}
+
+.skj-prone-raw-note div {
+  display: grid;
+  gap: 0.2rem;
+}

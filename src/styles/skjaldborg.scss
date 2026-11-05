@@ -1,9 +1,13 @@
 @use "components/design-tokens";
+@use "components/action-palette";
 @use "legacy/skjaldborg";
 @use "components/dialog-layout";
 @use "components/dialog-controls";
 @use "components/dialog-sections";
 @use "apps/attack-roll-dialog";
+@use "apps/knockback-roll-dialog";
+@use "apps/prone-note";
 @use "apps/disengage-dialog";
 @use "apps/grapple-roll-dialog";
 @use "apps/utility-dialog";
+@use "apps/combat-action-recovery";

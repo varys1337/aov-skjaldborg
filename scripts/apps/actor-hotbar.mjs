@@ -14,7 +14,7 @@ import { hotbarVisibleEffects, openEffectSheet } from "../compat/active-effects.
 import { performanceDiagnostics } from "../performance/performance-monitor.mjs";
 import { RenderCoordinator } from "../ui/render-coordinator.mjs";
 import { PresentationCache } from "../ui/presentation-cache.mjs";
-import { handleCommitInputKeydown } from "../ui/dom-utils.mjs";
+import { actionThemeClasses, applyActionTheme, handleCommitInputKeydown, isMonochromeActionImage } from "../ui/dom-utils.mjs";
 import { reactionPenaltyForCount } from "../combat/reaction-penalty-effects.mjs";
 import {
   ACTOR_HOTBAR_QUICK_SLOT_CAPACITY,
@@ -109,6 +109,7 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
     },
     actions: {
       activate: ActorHotbar.onActivate,
+      activateIntent: { buttons: [0, 2], handler: ActorHotbar.onActivateIntent },
       incrementReaction: ActorHotbar.onIncrementReaction,
       openActor: ActorHotbar.onOpenActor,
       createWound: ActorHotbar.onCreateWound,
@@ -152,7 +153,7 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
   };
 
   constructor(options = {}) {
-    super(options);
+    super({ ...options, classes: [...(options.classes ?? []), ...actionThemeClasses("interface")] });
     this.actor = null;
     this.combatant = null;
     this._dragData = null;
@@ -178,6 +179,13 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
     this._intentUpdatePending = false;
     this._scrollPositions = new Map();
     this._renderedActorKey = null;
+  }
+
+  /** @inheritdoc */
+  async _renderFrame(options) {
+    const frame = await super._renderFrame(options);
+    applyActionTheme(frame, "interface");
+    return frame;
   }
 
   /**
@@ -276,7 +284,7 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
       || parts.has(HOTBAR_PARTS.SHELL)
       || parts.has("portrait")
       || !parts.size
-      || (!regions.size && parts.size > 0);
+      || (!regions.length && parts.size > 0);
     performanceDiagnostics.count(full ? "actorHotbar.render.fullRequest" : "actorHotbar.render.targetedRequest", 1, {
       parts: Array.from(parts),
       regions,
@@ -990,6 +998,7 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
 
       return {
         ...action,
+        monochromeImage: isMonochromeActionImage(action.img),
         index,
         style,
         empty: false,
@@ -1221,9 +1230,7 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
    * @returns {void}
    */
   _applyThemeClass() {
-    const theme = game.settings.get(MODULE_ID, "actionUiTheme");
-    this.element.classList.toggle("skj-theme-aov", theme === "aov");
-    this.element.classList.toggle("skj-theme-classic", theme !== "aov");
+    applyActionTheme(this.element, "interface");
   }
 
   /**
@@ -1886,7 +1893,7 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
   }
 
   /**
-   * Stop secondary-button presses before AppV2 activation or drag handlers see them.
+   * Protect secondary presses from dragging while allowing AppV2 intent actions.
    *
    * @param {PointerEvent} event Delegated pointer event.
    * @returns {void}
@@ -1895,9 +1902,10 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
     if (event.button !== 2) return;
     const control = this._actionControlFromDelegatedEvent(event);
     if (!control) return;
+    this._temporarilyDisableDragSource(control);
+    if (control.dataset.action === "activateIntent") return;
     event.preventDefault();
     event.stopImmediatePropagation();
-    this._temporarilyDisableDragSource(control);
   }
 
   /**
@@ -1910,6 +1918,7 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
     if (event.button !== 2) return;
     const control = this._actionControlFromDelegatedEvent(event);
     if (!control) return;
+    if (control.dataset.action === "activateIntent") return;
     event.preventDefault();
     event.stopImmediatePropagation();
   }
@@ -2088,6 +2097,8 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
   _onDelegatedContextMenu(event) {
     const target = event.target instanceof Element ? event.target : null;
     if (!target) return;
+    // AppV2 owns both buttons for Combat actions; do not consume its event.
+    if (target.closest('[data-action="activateIntent"]')) return;
 
     const quickSlot = target.closest("[data-quick-slot-index]");
     if (quickSlot instanceof HTMLElement) {
@@ -2098,18 +2109,6 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
     }
 
     if (target.closest("input, textarea, select")) return;
-
-    const intentControl = target.closest("[data-intent-action-control]");
-    if (intentControl instanceof HTMLElement) {
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      if (intentControl.dataset.actionKind === "utility" || intentControl.dataset.actionId === UTILITY_ACTION_ID) {
-        void openUtilityDialog({ actor: this.actor, combatant: this.combatant, combat: game.combat ?? null, originEvent: event });
-        return;
-      }
-      void this._commitIntentAction(intentControl.dataset.actionId);
-      return;
-    }
 
     const reactionControl = target.closest("[data-reaction-control]");
     if (reactionControl instanceof HTMLElement) {
@@ -2706,26 +2705,56 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
   }
 
   /**
-   * Commit one intent category using the declaration behavior formerly bound
-   * to primary click in the Combat tab.
+   * Route the documented AppV2 primary/secondary action for Combat buttons.
+   *
+   * @param {PointerEvent} event Interaction event.
+   * @param {HTMLElement} target Action control.
+   * @returns {Promise<unknown|null>}
+   */
+  static async onActivateIntent(event, target) {
+    event.preventDefault();
+    try {
+      if (event.button === 0) return await ActorHotbar.onActivate.call(this, event, target);
+      if (event.button !== 2) return null;
+      if (target.dataset.actionKind === "utility" || target.dataset.actionId === UTILITY_ACTION_ID) {
+        return await openUtilityDialog({ actor: this.actor, combatant: this.combatant, combat: game.combat ?? null, originEvent: event });
+      }
+      return await this._commitIntentAction(target.dataset.actionId);
+    } catch (exception) {
+      error("Failed to activate a Combat button from the actor hotbar.", exception);
+      ui.notifications.error(game.i18n.localize("AOV_SKJALDBORG.Warnings.ActionFailed"));
+      return null;
+    }
+  }
+
+  /**
+   * Toggle one intent declaration and refresh from authoritative documents.
    *
    * @param {string|undefined} actionId Intent action category.
    * @returns {Promise<unknown|null>}
    */
   async _commitIntentAction(actionId) {
     if (this._intentUpdatePending) return null;
+    const actor = this.actor;
     this._intentUpdatePending = true;
     try {
       const combat = game.combat ?? null;
-      const liveCombatant = resolveActorCombatant(this.actor, combat) ?? this.combatant;
+      const liveCombatant = resolveActorCombatant(actor, combat) ?? this.combatant;
       const result = await toggleIntentCategory(
-        this.actor,
+        actor,
         liveCombatant,
         combat,
         actionId,
         { promptOther: true }
       );
+      if (result !== null && this.actor === actor) {
+        RenderCoordinator.invalidateActorHotbar(["workflow", "tabBody", "weaponControls"], "intent-update");
+      }
       return result;
+    } catch (exception) {
+      error("Failed to update intent from the actor hotbar.", exception);
+      ui.notifications.error(game.i18n.localize("AOV_SKJALDBORG.Warnings.ActionFailed"));
+      return null;
     } finally {
       this._intentUpdatePending = false;
     }
@@ -2922,11 +2951,12 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
     target.disabled = true;
     target.setAttribute("aria-busy", "true");
     try {
-      const result = await toggleActorItemXpCheck(this.actor, target.dataset.itemId);
-      ActorHotbar.scheduleRender({ parts: ["tabBody"], reason: "xp-toggle" });
-      return result;
+      return await toggleActorItemXpCheck(this.actor, target.dataset.itemId);
     } finally {
       this._xpUpdatePending = false;
+      target.disabled = false;
+      target.removeAttribute("aria-busy");
+      ActorHotbar.scheduleRender({ parts: ["tabBody"], reason: "xp-toggle" });
     }
   }
 
@@ -2948,15 +2978,16 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
     target.disabled = true;
     target.setAttribute("aria-busy", "true");
     try {
-      const result = await AoVAdapter.toggleActorMagicPrepared(this.actor, itemId);
-      ActorHotbar.scheduleRender({ parts: ["resources", "tabBody"], reason: "magic-prepared-toggle" });
-      return result;
+      return await AoVAdapter.toggleActorMagicPrepared(this.actor, itemId);
     } catch (exception) {
       error(`Failed to toggle magic preparation for Item ${itemId}.`, exception);
       ui.notifications.error(game.i18n.localize("AOV_SKJALDBORG.Warnings.MagicPreparationFailed"));
       return null;
     } finally {
       this._magicPreparationUpdatesPending.delete(itemId);
+      target.disabled = false;
+      target.removeAttribute("aria-busy");
+      ActorHotbar.scheduleRender({ parts: ["resources", "tabBody"], reason: "magic-prepared-toggle" });
     }
   }
 
@@ -3014,7 +3045,7 @@ export class ActorHotbar extends HandlebarsApplicationMixin(ApplicationV2) {
         { locations }
       );
       const result = await foundry.applications.api.DialogV2.input({
-        classes: ["aov", "aov-skjaldborg", "skj-npc-wound-dialog-window"],
+        classes: ["aov", "aov-skjaldborg", "skj-npc-wound-dialog-window", "skj-owned-dialog-window", ...actionThemeClasses()],
         window: { title: game.i18n.localize("AOV_SKJALDBORG.ActorHotbar.AddNpcWound") },
         content,
         rejectClose: false,

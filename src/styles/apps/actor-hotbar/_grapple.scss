@@ -3,14 +3,14 @@
 /* ------------------------------------------------------------------------- */
 
 .skj-hit-location-card.is-grappled {
-  border-color: #4db6ff;
+  border-color: var(--skj-hitloc-injury-color, var(--skj-palette-grapple-border, #4db6ff));
   box-shadow:
     inset 0 0 8px rgba(77, 182, 255, 0.42),
     0 0 0 1px rgba(77, 182, 255, 0.36);
 }
 
 .skj-hit-location-card.is-immobilized {
-  border-color: #b388ff;
+  border-color: var(--skj-hitloc-injury-color, var(--skj-palette-immobilized-border, #b388ff));
   box-shadow:
     inset 0 0 8px rgba(179, 136, 255, 0.48),
     0 0 0 1px rgba(179, 136, 255, 0.42);
@@ -32,22 +32,22 @@
 
 .skj-hit-location-state.is-grappled {
   background: rgba(77, 182, 255, 0.22);
-  color: #b8e4ff;
+  color: var(--skj-palette-grapple, #b8e4ff);
 }
 
 .skj-hit-location-state.is-immobilized {
   background: rgba(179, 136, 255, 0.24);
-  color: #dec8ff;
+  color: var(--skj-palette-immobilized, #dec8ff);
 }
 
 .skj-hit-location-list-row.is-grappled {
-  border-color: #4db6ff;
-  box-shadow: inset 0 0 7px rgba(77, 182, 255, 0.24);
+  border-color: var(--skj-hitloc-injury-color, var(--skj-palette-grapple-border, #4db6ff));
+  box-shadow: inset 2px 0 0 var(--skj-hitloc-injury-color, var(--skj-palette-grapple-border, #4db6ff)), inset 0 0 7px rgba(77, 182, 255, 0.24);
 }
 
 .skj-hit-location-list-row.is-immobilized {
-  border-color: #b388ff;
-  box-shadow: inset 0 0 7px rgba(179, 136, 255, 0.28);
+  border-color: var(--skj-hitloc-injury-color, var(--skj-palette-immobilized-border, #b388ff));
+  box-shadow: inset 2px 0 0 var(--skj-hitloc-injury-color, var(--skj-palette-immobilized-border, #b388ff)), inset 0 0 7px rgba(179, 136, 255, 0.28);
 }
 
 .skj-hit-location-list-state {
@@ -57,9 +57,9 @@
 }
 
 .skj-hit-location-list-state.is-grappled {
-  color: #b8e4ff;
+  color: var(--skj-palette-grapple, #b8e4ff);
 }
 
 .skj-hit-location-list-state.is-immobilized {
-  color: #dec8ff;
+  color: var(--skj-palette-immobilized, #dec8ff);
 }

@@ -24,48 +24,16 @@
           {{/each}}
         </div>
       </div>
-      <label class="skj-roll-dialog__control skj-attack-roll-dialog__weapon">
-        <span>{{localize "AOV_SKJALDBORG.AttackDialog.Weapon"}}</span>
-        <select name="weaponId" class="skj-roll-dialog__select skj-attack-roll-dialog__weapon-select">
-          {{#each weapons}}
-          <option value="{{id}}" {{#if selected}}selected{{/if}}>{{label}}</option>
-          {{/each}}
-        </select>
-      </label>
-      {{#if twoWeapon.enabled}}
-      <label class="skj-attack-roll-dialog__two-weapon-toggle" data-tooltip="{{twoWeapon.halfSkillTooltip}}">
-        <input
-          type="checkbox"
-          name="twoWeaponHalfSkill"
-          aria-label="{{twoWeapon.halfSkillTooltip}}"
-        />
-        <span>{{localize "AOV_SKJALDBORG.AttackDialog.TwoWeaponHalfSkill"}}</span>
-      </label>
-      {{/if}}
-      {{#if splitAttack.forced}}
-      <div class="skj-attack-roll-dialog__split-forced">{{splitAttack.forcedLabel}}</div>
-      {{else}}
-        {{#if splitAttack.available}}
-        <label class="skj-attack-roll-dialog__split-toggle" data-tooltip="{{localize "AOV_SKJALDBORG.SplitAttack.Hint"}}">
-          <input type="checkbox" name="splitAttackEnabled" />
-          <span>{{localize "AOV_SKJALDBORG.SplitAttack.Toggle"}}</span>
+      <div class="skj-roll-dialog__weapon-controls">
+        <label class="skj-roll-dialog__control skj-attack-roll-dialog__weapon">
+          <span>{{localize "AOV_SKJALDBORG.AttackDialog.Weapon"}}</span>
+          <select name="weaponId" class="skj-roll-dialog__select skj-attack-roll-dialog__weapon-select">
+            {{#each weapons}}
+            <option value="{{id}}" {{#if selected}}selected{{/if}}>{{label}}</option>
+            {{/each}}
+          </select>
         </label>
-        <div class="skj-attack-roll-dialog__split-fields" data-split-attack-fields hidden>
-          <label>
-            <span>{{localize "AOV_SKJALDBORG.SplitAttack.First"}}</span>
-            <input type="number" name="splitFirstChance" min="50" step="1" value="{{splitAttack.first}}" />
-          </label>
-          <label>
-            <span>{{localize "AOV_SKJALDBORG.SplitAttack.Second"}}</span>
-            <input type="number" name="splitSecondChance" min="50" step="1" value="{{splitAttack.second}}" />
-          </label>
-        </div>
-        {{else}}
-        <div class="skj-attack-roll-dialog__split-unavailable" data-tooltip="{{splitAttack.unavailableHint}}">
-          {{localize "AOV_SKJALDBORG.SplitAttack.Toggle"}}
-        </div>
-        {{/if}}
-      {{/if}}
+      </div>
     </div>
 
     <div class="skj-roll-dialog__rating-card skj-attack-roll-dialog__target-card" data-tooltip="{{initialSummary}}" aria-label="{{initialSummary}}">
@@ -76,13 +44,41 @@
   </header>
 
   <section class="skj-roll-dialog__body skj-attack-roll-dialog__body">
-    <div class="skj-roll-dialog__row skj-roll-dialog__row--modifier skj-attack-roll-dialog__row skj-attack-roll-dialog__row--modifier">
-      <label for="skj-attack-situational-modifier">{{localize "AOV_SKJALDBORG.AttackDialog.Situation"}}</label>
-      <select id="skj-attack-situational-modifier" name="situationalModifier">
-        {{#each modifiers}}
-        <option value="{{value}}" {{#if selected}}selected{{/if}}>{{label}} ({{value}}%)</option>
-        {{/each}}
-      </select>
+    <div class="skj-roll-dialog__combat-options">
+      <div class="skj-roll-dialog__row skj-roll-dialog__row--modifier skj-attack-roll-dialog__row skj-attack-roll-dialog__row--modifier">
+        <label for="skj-attack-situational-modifier">{{localize "AOV_SKJALDBORG.AttackDialog.Situation"}}</label>
+        <select id="skj-attack-situational-modifier" name="situationalModifier">
+          {{#each modifiers}}
+          <option value="{{value}}" {{#if selected}}selected{{/if}}>{{label}} ({{value}}%)</option>
+          {{/each}}
+        </select>
+      </div>
+      <div class="skj-roll-dialog__weapon-options">
+        {{#if twoWeapon.enabled}}
+        <label class="skj-attack-roll-dialog__two-weapon-toggle" data-tooltip="{{twoWeapon.halfSkillTooltip}}">
+          <input
+            type="checkbox"
+            name="twoWeaponHalfSkill"
+            aria-label="{{twoWeapon.halfSkillTooltip}}"
+          />
+          <span>{{localize "AOV_SKJALDBORG.AttackDialog.TwoWeaponHalfSkill"}}</span>
+        </label>
+        {{/if}}
+        {{#if splitAttack.forced}}
+        <div class="skj-attack-roll-dialog__split-forced">{{splitAttack.forcedLabel}}</div>
+        {{else}}
+          {{#if splitAttack.available}}
+          <label class="skj-attack-roll-dialog__split-toggle" data-tooltip="{{localize "AOV_SKJALDBORG.SplitAttack.Hint"}}">
+            <input type="checkbox" name="splitAttackEnabled" />
+            <span>{{localize "AOV_SKJALDBORG.SplitAttack.Toggle"}}</span>
+          </label>
+          {{else}}
+          <div class="skj-attack-roll-dialog__split-unavailable" data-tooltip="{{splitAttack.unavailableHint}}">
+            {{localize "AOV_SKJALDBORG.SplitAttack.Toggle"}}
+          </div>
+          {{/if}}
+        {{/if}}
+      </div>
       <button
         type="button"
         class="skj-roll-dialog__damage-pill skj-attack-roll-dialog__damage {{#if damageTypeSelectable}}is-switchable{{else}}is-fixed{{/if}}"
@@ -96,6 +92,20 @@
         <span class="skj-roll-dialog__damage-formula skj-attack-roll-dialog__damage-formula" data-weapon-damage-formula>{{damage}}</span>
       </button>
       <input type="hidden" name="damageType" value="{{damageTypeKey}}" data-selected-damage-type>
+      {{#unless splitAttack.forced}}
+      {{#if splitAttack.available}}
+      <div class="skj-attack-roll-dialog__split-fields" data-split-attack-fields hidden>
+        <label>
+          <span>{{localize "AOV_SKJALDBORG.SplitAttack.First"}}</span>
+          <input type="number" name="splitFirstChance" min="50" step="1" value="{{splitAttack.first}}" />
+        </label>
+        <label>
+          <span>{{localize "AOV_SKJALDBORG.SplitAttack.Second"}}</span>
+          <input type="number" name="splitSecondChance" min="50" step="1" value="{{splitAttack.second}}" />
+        </label>
+      </div>
+      {{/if}}
+      {{/unless}}
     </div>
 
     <fieldset class="skj-roll-dialog__augment skj-attack-roll-dialog__fieldset">
@@ -185,11 +195,12 @@
       </div>
     </section>
 
-    <div class="skj-roll-dialog__footer skj-attack-roll-dialog__actions">
-      <button type="button" class="skj-roll-dialog__action skj-attack-roll-dialog__roll-button" data-action="submitAttack" {{#unless hasTargets}}disabled{{/unless}}>
-        <i class="fa-solid fa-dice" aria-hidden="true"></i>
-        <span>{{localize "AOV_SKJALDBORG.AttackDialog.RollAttack"}}</span>
-      </button>
-    </div>
   </section>
+
+  <div class="skj-dialog-footer skj-roll-dialog__footer skj-attack-roll-dialog__actions">
+    <button type="button" class="skj-roll-dialog__action skj-attack-roll-dialog__roll-button" data-action="submitAttack" {{#unless hasTargets}}disabled{{/unless}}>
+      <i class="fa-solid fa-dice" aria-hidden="true"></i>
+      <span>{{localize "AOV_SKJALDBORG.AttackDialog.RollAttack"}}</span>
+    </button>
+  </div>
 </div>

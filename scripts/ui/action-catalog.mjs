@@ -14,7 +14,8 @@ import {
   sanitizePreparedIntentText,
   setActorPreparedIntent
 } from "../combat/prepared-intent.mjs";
-import { actionThemeClass, finiteNumber, localizeOrFallback } from "./dom-utils.mjs";
+import { ACTION_DIALOG_WIDTHS, actionDialogPosition } from "../apps/base/dialog-v2.mjs";
+import { actionThemeClasses, actionThemeClass, finiteNumber, localizeOrFallback } from "./dom-utils.mjs";
 
 export { getActorPreparedIntent } from "../combat/prepared-intent.mjs";
 
@@ -299,12 +300,13 @@ export async function promptOtherIntentText(currentText = "") {
   );
 
   const result = await foundry.applications.api.DialogV2.prompt({
-    classes: ["aov-skjaldborg", "dialog", "skj-attack-roll-window", "skj-other-intent-dialog-window", themeClass],
+    classes: ["aov-skjaldborg", "dialog", "skj-attack-roll-window", "skj-other-intent-dialog-window", "skj-action-dialog-window", themeClass, "skj-owned-dialog-window", ...actionThemeClasses()],
     window: {
       title: game.i18n.localize("AOV_SKJALDBORG.IntentDialog.Title"),
       contentClasses: ["aov-skjaldborg", "skj-attack-roll-content", themeClass]
     },
     content,
+    position: actionDialogPosition(ACTION_DIALOG_WIDTHS.compact),
     rejectClose: false,
     modal: true,
     ok: {
@@ -585,10 +587,11 @@ export function prepareActorStats(actor) {
     .map(([key, ability]) => {
       const total = finiteNumber(ability?.total);
       if (total === null) return null;
+      const label = String(ability?.label ?? key.toLocaleUpperCase(game.i18n.lang));
       return {
         id: `ability:${key}`,
         kind: "stat",
-        name: String(ability?.label ?? key.toLocaleUpperCase(game.i18n.lang)),
+        name: localizeOrFallback(`AOV_SKJALDBORG.ActorHotbar.CharacteristicNames.${key}`, label),
         base: String(finiteNumber(ability?.value) ?? 0),
         age: String(finiteNumber(ability?.age) ?? 0),
         xp: String(finiteNumber(ability?.xp) ?? 0),

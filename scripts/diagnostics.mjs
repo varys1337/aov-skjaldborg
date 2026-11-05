@@ -129,6 +129,7 @@ export async function runDiagnostics() {
   ));
   results.push(check("socket-name", SOCKET_NAME === `module.${MODULE_ID}`, SOCKET_NAME));
   results.push(check("socket-api", capabilities.sockets.available));
+  results.push(optionalCheck("combat-result-provenance", "v1 exact attack/defense and returned-ID prone receipts; native AoV damage without a parent link remains unresolved; opt-in local details: combat.provenance counters"));
   results.push(check("v14-migration-version", Number(game.settings.get(MODULE_ID, "v14MigrationVersion")) >= 1, String(game.settings.get(MODULE_ID, "v14MigrationVersion"))));
   results.push(check("v14-migration-last-run", true, String(game.settings.get(MODULE_ID, "v14MigrationLastRun") ?? "")));
   results.push(check("combat-class-preserved", CONFIG.Combat?.documentClass?.name !== "SkjaldborgCombat", CONFIG.Combat?.documentClass?.name));

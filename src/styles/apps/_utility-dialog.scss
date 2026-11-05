@@ -11,10 +11,6 @@
   display: none !important;
 }
 
-.skj-roll-dialog--utility {
-  width: min(400px, 92vw);
-}
-
 .skj-utility-dialog__portrait-fallback {
   color: var(--skj-roll-muted);
   font-size: 0.9rem;
@@ -22,7 +18,7 @@
 }
 
 .skj-utility-dialog__header {
-  grid-template-columns: minmax(0, 1fr) 70px;
+  grid-template-columns: minmax(0, 1fr) max(70px, 6.5em);
 }
 
 .skj-utility-dialog__title strong {
@@ -31,7 +27,6 @@
 
 .skj-utility-dialog__status-card {
   border-radius: 12px;
-  min-height: 58px;
 }
 
 .skj-utility-dialog__status-card strong {
@@ -39,8 +34,7 @@
 }
 
 .skj-utility-dialog__body {
-  gap: 0.52rem;
-  overflow-y: visible;
+  gap: var(--skj-dialog-gap-md);
 }
 
 .skj-utility-dialog__tabs {
@@ -59,7 +53,7 @@
 
 .skj-utility-dialog__tab {
   align-items: center;
-  background: rgba(2, 5, 5, 0.58);
+  background: var(--skj-palette-field);
   border: 1px solid var(--skj-roll-frame-soft);
   border-radius: 12px;
   color: var(--skj-roll-muted);
@@ -68,7 +62,7 @@
   font-size: 0.68rem;
   font-weight: 700;
   justify-content: center;
-  min-height: 1.82rem;
+  min-height: var(--skj-dialog-control-height);
   min-width: 0;
   padding: 0.18rem 0.42rem;
   text-align: center;
@@ -94,8 +88,8 @@
   display: none;
   grid-column: 1 / -1;
   margin: 0.08rem 0 0;
-  min-height: 8rem;
-  padding: 0.48rem;
+  min-height: 0;
+  padding: var(--skj-dialog-gap-md);
 }
 
 #skj-utility-tab-equipped:checked ~ .skj-utility-dialog__panel--equipped,
@@ -138,7 +132,7 @@
 
 .skj-utility-dialog__note {
   align-items: center;
-  background: rgba(2, 5, 5, 0.48);
+  background: var(--skj-palette-field);
   border: 1px solid var(--skj-roll-frame-soft);
   border-radius: 6px;
   color: var(--skj-roll-muted);
@@ -148,10 +142,6 @@
   margin: 0;
   min-height: 2.1rem;
   padding: 0.42rem 0.52rem;
-}
-
-.skj-utility-dialog__note.is-disabled {
-  opacity: 0.72;
 }
 
 .skj-utility-dialog__toggle {
@@ -180,7 +170,7 @@
   font-size: 0.76rem;
   justify-content: center;
   line-height: 1.15;
-  min-height: 1.9rem;
+  min-height: var(--skj-dialog-control-height);
   min-width: 0;
   padding: 0.24rem 0.5rem;
   text-align: center;
@@ -248,7 +238,7 @@
 .skj-utility-dialog__chip,
 .skj-utility-dialog__chip-empty {
   align-items: center;
-  background: rgba(2, 5, 5, 0.58);
+  background: var(--skj-palette-field);
   border: 1px solid var(--skj-roll-frame-soft);
   border-radius: 999px;
   color: var(--skj-roll-muted);
@@ -272,15 +262,12 @@
 .skj-utility-dialog__location-list {
   display: grid;
   gap: 0.24rem;
-  max-height: 6.3rem;
-  overflow-y: auto;
-  padding-right: 0.1rem;
-  scrollbar-width: thin;
+  min-width: 0;
 }
 
 .skj-utility-dialog__location {
   align-items: center;
-  background: rgba(2, 5, 5, 0.58);
+  background: var(--skj-palette-field);
   border: 1px solid var(--skj-roll-frame-soft);
   border-radius: 6px;
   color: var(--skj-roll-muted);
@@ -309,17 +296,15 @@
 }
 
 .skj-utility-dialog__footer {
-  grid-template-columns: minmax(0, 1fr) 112px;
   margin-top: 0.02rem;
 }
 
 .skj-utility-dialog__footer-summary span {
-  max-width: 210px;
+  max-width: 100%;
 }
 
 .skj-utility-dialog__apply {
   min-width: 0;
-  width: 112px;
 }
 
 .application.dialog.skj-delay-dialog-window .form-footer,
@@ -327,11 +312,11 @@
 .application.dialog.skj-other-intent-dialog-window .form-footer,
 .application.dialog.skj-other-intent-dialog-window .dialog-buttons {
   align-items: center;
-  background: rgba(4, 7, 7, 0.88);
+  background: var(--skj-palette-background);
   border-top: 1px solid var(--skj-roll-frame-soft);
   display: flex;
-  justify-content: center;
-  padding: 0.6rem 0.72rem 0.72rem;
+  justify-content: flex-end;
+  padding: var(--skj-dialog-gap-md) var(--skj-dialog-section-padding);
 }
 
 .application.dialog.skj-delay-dialog-window .form-footer button,
@@ -339,17 +324,18 @@
 .application.dialog.skj-other-intent-dialog-window .form-footer button,
 .application.dialog.skj-other-intent-dialog-window .dialog-buttons button {
   align-items: center;
-  background: linear-gradient(180deg, rgba(45, 105, 73, 0.94), rgba(20, 66, 43, 0.96));
+  background: var(--skj-palette-action);
   border: 1px solid var(--skj-roll-frame);
   border-radius: 12px;
-  color: var(--skj-roll-text);
+  color: var(--skj-palette-action-text);
   display: inline-flex;
   font-family: inherit;
   font-size: 0.82rem;
   font-weight: 700;
   justify-content: center;
-  min-height: 2rem;
-  min-width: 11rem;
+  min-height: var(--skj-dialog-control-height);
+  min-width: 0;
+  width: var(--skj-dialog-action-width);
   padding: 0.28rem 0.72rem;
 }
 
@@ -361,14 +347,10 @@
 .application.dialog.skj-other-intent-dialog-window .form-footer button:focus,
 .application.dialog.skj-other-intent-dialog-window .dialog-buttons button:hover,
 .application.dialog.skj-other-intent-dialog-window .dialog-buttons button:focus {
-  background: var(--skj-roll-hover);
+  background: var(--skj-palette-action-hover);
+  color: var(--skj-palette-action-text);
   box-shadow: 0 0 0 1px var(--skj-roll-frame-soft);
   outline: none;
-}
-
-.skj-simple-roll-dialog {
-  max-height: 70vh;
-  width: min(390px, 92vw);
 }
 
 .skj-simple-roll-dialog__body {
@@ -412,9 +394,9 @@
 
 #skj-delay-mode-dex:checked ~ fieldset label[for="skj-delay-mode-dex"] span,
 #skj-delay-mode-combatant:checked ~ fieldset label[for="skj-delay-mode-combatant"] span {
-  background: linear-gradient(180deg, var(--skj-roll-accent-soft), var(--skj-roll-accent));
-  border-color: var(--skj-roll-accent-strong);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--skj-roll-accent-strong) 40%, transparent);
+  background: var(--skj-roll-active);
+  border-color: var(--skj-roll-frame);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--skj-roll-frame) 40%, transparent);
   color: var(--skj-roll-text-strong);
 }
 
@@ -442,7 +424,7 @@
 }
 
 .skj-simple-roll-dialog textarea {
-  background: rgba(3, 6, 6, 0.82);
+  background: var(--skj-palette-field);
   border: 1px solid var(--skj-roll-frame-soft);
   border-radius: 6px;
   box-sizing: border-box;
@@ -492,24 +474,5 @@
 
   .skj-tracker-indicator.shieldwall {
     --skj-indicator-accent: #78aee8;
-  }
-}
-
-@media (max-width: 410px) {
-  .skj-utility-dialog__header,
-  .skj-utility-dialog__footer {
-    grid-template-columns: 1fr;
-  }
-
-  .skj-utility-dialog__panel {
-    min-height: 9.2rem;
-  }
-
-  .skj-utility-dialog__footer-summary span {
-    max-width: none;
-  }
-
-  .skj-utility-dialog__apply {
-    width: 100%;
   }
 }

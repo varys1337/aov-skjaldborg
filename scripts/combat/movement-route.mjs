@@ -287,3 +287,84 @@ export function normalizeMovementRoute(movement = {}, { limit = DEFAULT_WAYPOINT
     });
   }
 }
+
+/**
+ * Normalize a route into plain ordered movement points.
+ *
+ * @param {unknown[]} points Candidate route points.
+ * @param {{x: number, y: number}|null} [origin=null] Optional origin to omit.
+ * @returns {object[]}
+ */
+export function cleanMovementRoute(points, origin = null) {
+  const route = [];
+  if (!Array.isArray(points)) return route;
+  for (const point of points) {
+    const clean = cleanMovementPoint(point);
+    if (!clean) continue;
+    if (!route.length && sameMovementPoint(clean, cleanMovementPoint(origin))) continue;
+    appendRoutePoint(route, point);
+  }
+  return route;
+}
+
+/**
+ * Return whether every required point occurs in the same order within a route.
+ *
+ * @param {object[]} route Candidate containing route.
+ * @param {object[]} required Ordered points that must be retained.
+ * @returns {boolean}
+ */
+function routeContainsOrderedPoints(route, required) {
+  if (!required.length) return true;
+  let index = 0;
+  for (const point of route) {
+    if (!sameMovementPoint(cleanMovementPoint(point), cleanMovementPoint(required[index]))) continue;
+    index += 1;
+    if (index >= required.length) return true;
+  }
+  return false;
+}
+
+/**
+ * Merge a live ruler draft with the final Foundry movement operation.
+ *
+ * The final `pending.waypoints` route is preferred when it already contains
+ * every explicit ruler corner. If the final operation only exposes its current
+ * destination, the cached explicit corners are retained and the destination is
+ * appended. The largest shared suffix/prefix is removed when two partial route
+ * revisions are joined.
+ *
+ * @param {unknown[]} draftRoute Explicit corners captured from TokenRuler data.
+ * @param {unknown[]} operationRoute Route captured from preMoveToken.
+ * @param {object|null} [destination=null] Final movement destination.
+ * @returns {object[]}
+ */
+export function mergeMovementRoutes(draftRoute, operationRoute, destination = null) {
+  const draft = cleanMovementRoute(draftRoute);
+  const operation = cleanMovementRoute(operationRoute);
+  let merged;
+
+  if (!draft.length) merged = operation;
+  else if (!operation.length) merged = draft;
+  else if (routeContainsOrderedPoints(operation, draft)) merged = operation;
+  else if (routeContainsOrderedPoints(draft, operation)) merged = draft;
+  else {
+    let overlap = Math.min(draft.length, operation.length);
+    while (overlap > 0) {
+      const draftTail = draft.slice(draft.length - overlap);
+      const operationHead = operation.slice(0, overlap);
+      const matches = draftTail.every((point, index) => {
+        return sameMovementPoint(cleanMovementPoint(point), cleanMovementPoint(operationHead[index]));
+      });
+      if (matches) break;
+      overlap -= 1;
+    }
+    merged = [...draft, ...operation.slice(overlap)];
+  }
+
+  const result = cleanMovementRoute(merged);
+  if (destination && !sameMovementPoint(cleanMovementPoint(destination), cleanMovementPoint(result.at(-1)))) {
+    appendRoutePoint(result, destination);
+  }
+  return result;
+}

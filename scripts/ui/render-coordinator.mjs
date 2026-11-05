@@ -1,13 +1,16 @@
-import { incrementCounter, measureAsync } from "../performance/performance-monitor.mjs";
+import { incrementCounter, measureAsync, performanceDiagnosticsEnabled } from "../performance/performance-monitor.mjs";
 import { warn } from "../logger.mjs";
 
 const handlers = new Map();
 const pending = new Map();
 let frame = null;
+let activeFlush = null;
 
 function requestFrame(callback) {
-  if (typeof globalThis.requestAnimationFrame === "function") return globalThis.requestAnimationFrame(callback);
-  return globalThis.setTimeout(callback, 16);
+  if (typeof globalThis.requestAnimationFrame === "function") {
+    return { id: globalThis.requestAnimationFrame(callback), cancel: id => globalThis.cancelAnimationFrame?.(id) };
+  }
+  return { id: globalThis.setTimeout(callback, 16), cancel: id => globalThis.clearTimeout(id) };
 }
 
 function mergeSet(target, source) {
@@ -22,7 +25,7 @@ function normalizeDetail(detail = {}) {
     parts: new Set(detail.parts ?? []),
     tokenIds: new Set(detail.tokenIds ?? []),
     combatantIds: new Set(detail.combatantIds ?? []),
-    reasons: new Set(detail.reason ? [detail.reason] : detail.reasons ?? []),
+    reasons: new Set([...(detail.reasons ?? []), ...(detail.reason ? [detail.reason] : [])]),
     positionOnly: detail.positionOnly === true
   };
 }
@@ -58,8 +61,12 @@ export function registerRenderSurface(surface, handler) {
 export function invalidateRenderSurface(surface, detail = {}) {
   if (!surface) return;
   pending.set(surface, mergeDetail(pending.get(surface), detail));
-  incrementCounter(`render.invalidate.${surface}`, 1, serializableDetail(pending.get(surface)));
-  if (frame !== null) return;
+  if (performanceDiagnosticsEnabled()) incrementCounter(`render.invalidate.${surface}`, 1, serializableDetail(pending.get(surface)));
+  scheduleFlush();
+}
+
+function scheduleFlush() {
+  if (frame !== null || activeFlush) return;
   frame = requestFrame(() => {
     frame = null;
     void flushRenderSurfaces().catch(exception => {
@@ -73,7 +80,7 @@ export function invalidateCombatTracker(reason = "combat-tracker", detail = {}) 
     ? reason
     : { ...detail, reason };
   const reasons = Array.isArray(merged?.reasons) ? merged.reasons : [merged?.reason].filter(Boolean);
-  if (reasons.some(entry => String(entry).startsWith("movement") || String(entry).includes("engagement"))) {
+  if (performanceDiagnosticsEnabled() && reasons.some(entry => String(entry).startsWith("movement") || String(entry).includes("engagement"))) {
     incrementCounter("movement.tick.trackerInvalidations", 1, serializableDetail(normalizeDetail(merged)));
   }
   invalidateRenderSurface("combatTracker", merged);
@@ -83,19 +90,39 @@ export function invalidateActorHotbarSurface(parts = ["shell"], reason = "actor-
   invalidateRenderSurface("actorHotbar", { parts, reason, full: parts.includes?.("shell") === true });
 }
 
-export async function flushRenderSurfaces() {
-  const batch = Array.from(pending.entries());
-  pending.clear();
-  incrementCounter("render.flush", 1, {
-    surfaceCount: batch.length,
-    surfaces: batch.map(([surface]) => surface)
-  });
-  for (const [surface, detail] of batch) {
-    const handler = handlers.get(surface);
-    if (!handler) continue;
-    incrementCounter(`render.flush.${surface}`, 1, serializableDetail(detail));
-    await measureAsync(`render.${surface}`, () => handler(serializableDetail(detail)), () => serializableDetail(detail));
+export function flushRenderSurfaces() {
+  if (activeFlush) return activeFlush;
+  if (frame !== null) {
+    frame.cancel(frame.id);
+    frame = null;
   }
+  // Assign the shared promise before invoking handlers, including synchronous
+  // ones which invalidate another surface or explicitly request a flush.
+  activeFlush = Promise.resolve().then(async () => {
+    while (pending.size) {
+      const batch = Array.from(pending.entries());
+      pending.clear();
+      if (performanceDiagnosticsEnabled()) incrementCounter("render.flush", 1, {
+        surfaceCount: batch.length,
+        surfaces: batch.map(([surface]) => surface)
+      });
+      for (const [surface, detail] of batch) {
+        const handler = handlers.get(surface);
+        if (!handler) continue;
+        try {
+          const payload = serializableDetail(detail);
+          incrementCounter(`render.flush.${surface}`, 1, payload);
+          await measureAsync(`render.${surface}`, () => handler(payload), () => payload);
+        } catch (exception) {
+          warn(`Coordinated render failed for ${surface}.`, exception);
+        }
+      }
+    }
+  }).finally(() => {
+    activeFlush = null;
+    if (pending.size) scheduleFlush();
+  });
+  return activeFlush;
 }
 
 export const RenderCoordinator = Object.freeze({

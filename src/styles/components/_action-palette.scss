@@ -1,0 +1,239 @@
+/* Palette selection is orthogonal to AoV/Classic. Only owned action surfaces
+ * receive this class; sheets, settings and native AoV dialogs are untouched. */
+.aov-skjaldborg.skj-themed-surface {
+  --skj-palette-text: #f2eadb;
+  --skj-palette-muted: #c8c6ba;
+  --skj-palette-background: #080c0b;
+  --skj-palette-surface: #0e1512;
+  --skj-palette-field: #030606;
+  --skj-palette-border: #579c74;
+  --skj-palette-border-soft: #52715f;
+  --skj-palette-accent: #f0d9ac;
+  --skj-palette-action: #225b49;
+  --skj-palette-action-hover: #276c55;
+  --skj-palette-action-text: #fff8e8;
+  --skj-palette-option-active: #225b49;
+  --skj-palette-option-hover: #276c55;
+  --skj-palette-selected: #17392c;
+  --skj-palette-focus: #79bfd9;
+  --skj-palette-warning: #e5b95d;
+  --skj-palette-warning-bg: #352b16;
+  --skj-palette-danger: #ff9584;
+  --skj-palette-danger-bg: #351c19;
+  --skj-palette-injury-1: #d9c238;
+  --skj-palette-injury-2: #e07a21;
+  --skj-palette-injury-3: #e46d65;
+  --skj-palette-grapple: #b8e4ff;
+  --skj-palette-immobilized: #dec8ff;
+  --skj-palette-grapple-border: #4db6ff;
+  --skj-palette-immobilized-border: #b388ff;
+  --skj-palette-shadow: rgba(0, 0, 0, 0.55);
+  --skj-palette-text-shadow: 0 1px 2px #000;
+  --skj-stone-texture: url("/systems/aov/art-assets/darkstone.jpg");
+  --skj-palette-texture: var(--skj-stone-texture);
+  --skj-palette-overlay: rgba(8, 12, 11, 0.94);
+  --skj-palette-header: linear-gradient(110deg, #0a2b1f, #050d0c);
+
+  --skj-text: var(--skj-palette-text);
+  --skj-text-muted: var(--skj-palette-muted);
+  --skj-background: var(--skj-palette-background);
+  --skj-background-hover: var(--skj-palette-surface);
+  --skj-frame: var(--skj-palette-border);
+  --skj-frame-light: var(--skj-palette-border);
+  --skj-shadow: var(--skj-palette-shadow);
+  --skj-score-background: var(--skj-palette-field);
+  --skj-surface-texture: var(--skj-palette-texture);
+  --skj-surface-overlay: var(--skj-palette-overlay);
+  --skj-surface-overlay-strong: var(--skj-palette-overlay);
+  --skj-surface-overlay-soft: var(--skj-palette-overlay);
+  --skj-hover: var(--skj-palette-focus);
+  --skj-active: var(--skj-palette-focus);
+  --skj-active-soft: var(--skj-palette-selected);
+  --skj-hover-glow: var(--skj-palette-shadow);
+  --skj-active-glow: var(--skj-palette-shadow);
+  --skj-frame-glow: var(--skj-palette-shadow);
+  --skj-drop-glow: var(--skj-palette-shadow);
+  --skj-dialog-bg-soft: var(--skj-palette-surface);
+  --skj-dialog-bg-strong: var(--skj-palette-field);
+  --skj-dialog-border: var(--skj-palette-border-soft);
+  --skj-roll-text: var(--skj-palette-text);
+  --skj-roll-text-strong: var(--skj-palette-text);
+  --skj-roll-muted: var(--skj-palette-muted);
+  --skj-roll-surface: var(--skj-palette-background);
+  --skj-roll-surface-soft: var(--skj-palette-surface);
+  --skj-roll-frame: var(--skj-palette-border);
+  --skj-roll-frame-soft: var(--skj-palette-border-soft);
+  --skj-roll-active: var(--skj-palette-option-active);
+  --skj-roll-hover: var(--skj-palette-option-hover);
+  --skj-roll-accent: var(--skj-palette-accent);
+  --skj-roll-warning: var(--skj-palette-warning);
+  --color-text-primary: var(--skj-palette-text);
+  --color-text-secondary: var(--skj-palette-muted);
+  --color-text-emphatic: var(--skj-palette-text);
+  --color-text-subtle: var(--skj-palette-muted);
+  --button-text-color: var(--skj-palette-text);
+  --button-background-color: var(--skj-palette-field);
+  --button-border-color: var(--skj-palette-border);
+  color: var(--skj-palette-text);
+}
+
+.aov-skjaldborg.skj-themed-surface.skj-theme-classic {
+  --skj-palette-background: #1a1716;
+  --skj-palette-surface: #26201c;
+  --skj-palette-field: #151315;
+  --skj-palette-border: #ad8860;
+  --skj-palette-border-soft: #907456;
+  --skj-palette-header: linear-gradient(110deg, #522714, #140b08);
+  --skj-palette-texture: none;
+  --skj-palette-overlay: rgba(26, 23, 22, 0.96);
+}
+
+.aov-skjaldborg.skj-themed-surface.skj-color-light {
+  color-scheme: light;
+  --skj-palette-text: #171d19;
+  --skj-palette-muted: #48574f;
+  --skj-palette-background: #f3f2ec;
+  --skj-palette-surface: #eeeee7;
+  --skj-palette-field: #fffefa;
+  --skj-palette-border: #62796c;
+  --skj-palette-border-soft: #718579;
+  --skj-palette-accent: #446f5e;
+  --skj-palette-action: #446f5e;
+  --skj-palette-action-hover: #365b4d;
+  --skj-palette-action-text: #fffefa;
+  --skj-palette-option-active: #d8e5de;
+  --skj-palette-option-hover: #dce6df;
+  --skj-palette-selected: #d8e5de;
+  --skj-palette-focus: #185e86;
+  --skj-palette-warning: #806500;
+  --skj-palette-warning-bg: #fff0cd;
+  --skj-palette-danger: #9e2925;
+  --skj-palette-danger-bg: #fbe4dd;
+  --skj-palette-injury-1: #806500;
+  --skj-palette-injury-2: #a4480a;
+  --skj-palette-injury-3: #9e2925;
+  --skj-palette-grapple: #185e86;
+  --skj-palette-immobilized: #653399;
+  --skj-palette-grapple-border: #185e86;
+  --skj-palette-immobilized-border: #653399;
+  --skj-palette-shadow: rgba(25, 40, 32, 0.2);
+  --skj-palette-text-shadow: none;
+  --skj-stone-texture: url("/systems/aov/art-assets/lightstone.jpg");
+  --skj-palette-texture: var(--skj-stone-texture);
+  --skj-palette-overlay: rgba(243, 242, 236, 0.94);
+  --skj-palette-header: linear-gradient(110deg, #e1e9e1, #eeeee7);
+}
+
+.aov-skjaldborg.skj-themed-surface.skj-theme-classic.skj-color-light {
+  --skj-palette-text: #2b2119;
+  --skj-palette-muted: #5e4d3d;
+  --skj-palette-background: #f4ead9;
+  --skj-palette-surface: #ede0cb;
+  --skj-palette-field: #fff9ed;
+  --skj-palette-border: #80674e;
+  --skj-palette-border-soft: #8a7157;
+  --skj-palette-accent: #765236;
+  --skj-palette-action: #765236;
+  --skj-palette-action-hover: #604029;
+  --skj-palette-selected: #e2d1b7;
+  --skj-palette-option-active: #e2d1b7;
+  --skj-palette-option-hover: #e8dac4;
+  --skj-palette-header: linear-gradient(110deg, #e4d4b9, #f4ead9);
+  --skj-palette-texture: none;
+  --skj-palette-overlay: rgba(244, 234, 217, 0.96);
+}
+
+.aov-skjaldborg.skj-themed-surface.skj-color-dark { color-scheme: dark; }
+
+/* Stone is shared by the floating widgets in both skins. Keep this treatment
+ * on existing controls and cards; section headings and surrounding space stay
+ * transparent. Denser tint protects small values without fading their text. */
+.aov-skjaldborg.skj-themed-surface:is(.skj-actor-hotbar, .skj-action-ring-app) {
+  --skj-surface-texture: var(--skj-stone-texture);
+  --skj-surface-overlay: color-mix(in srgb, var(--skj-background) 82%, transparent);
+  --skj-surface-overlay-soft: color-mix(in srgb, var(--skj-background-hover) 80%, transparent);
+  --skj-surface-overlay-strong: color-mix(in srgb, var(--skj-score-background) 90%, transparent);
+
+  :is(
+    .skj-hit-location-card,
+    .skj-hit-location-values,
+    .skj-weapon-select-wrap,
+    .skj-weapon-action-button,
+    .skj-effect-icon,
+    .skj-resource-secondary,
+    .skj-named-action-score,
+    .skj-slot-score,
+    .skj-ring-score,
+    .skj-history-action-score,
+    .skj-macro-key,
+    .skj-equipment-quantity,
+    .skj-equipment-weapon-hp-input,
+    .skj-active-wound-damage
+  ) {
+    background-color: var(--skj-widget-surface-color, var(--skj-background));
+    background-image:
+      linear-gradient(var(--skj-widget-surface-tint, var(--skj-surface-overlay)), var(--skj-widget-surface-tint, var(--skj-surface-overlay))),
+      var(--skj-surface-texture);
+    background-position: center;
+    background-size: auto, 256px 256px;
+  }
+
+  :is(
+    .skj-hit-location-values,
+    .skj-resource-secondary,
+    .skj-named-action-score,
+    .skj-slot-score,
+    .skj-ring-score,
+    .skj-history-action-score,
+    .skj-macro-key,
+    .skj-equipment-quantity,
+    .skj-equipment-weapon-hp-input,
+    .skj-active-wound-damage
+  ) {
+    --skj-widget-surface-color: var(--skj-score-background);
+    --skj-widget-surface-tint: var(--skj-surface-overlay-strong);
+  }
+}
+
+.application.skj-themed-surface .window-header :is(.window-title, button) {
+  color: var(--skj-palette-text);
+  text-shadow: var(--skj-palette-text-shadow);
+}
+.application.skj-themed-surface .window-header button { background: transparent; }
+
+/* Controls retain their semantic selected/disposition colours; focus always
+ * has a separate outline that is visible on both the control and its panel. */
+.aov-skjaldborg.skj-themed-surface :is(input, select, textarea) {
+  transition: none;
+}
+.aov-skjaldborg.skj-themed-surface :is(button, a, input, select, textarea):focus-visible,
+.aov-skjaldborg.skj-themed-surface label:has(input:focus-visible) > span {
+  outline: 2px solid var(--skj-palette-focus);
+  outline-offset: 2px;
+}
+
+.skj-themed-surface.skj-color-light .skj-monochrome-icon { filter: invert(1); }
+
+/* Native DialogV2 helpers use their own footer and submission paths. */
+.application.skj-owned-dialog-window {
+  .window-header {
+    background: var(--skj-palette-surface);
+    color: var(--skj-palette-text);
+    border-bottom-color: var(--skj-palette-border);
+  }
+  .window-content {
+    background: var(--skj-palette-background);
+    color: var(--skj-palette-text);
+  }
+  :is(input, select, textarea, option) {
+    background: var(--skj-palette-field);
+    color: var(--skj-palette-text);
+    border-color: var(--skj-palette-border-soft);
+  }
+  :is(.dialog-buttons, .form-footer) button {
+    background: var(--skj-palette-action);
+    color: var(--skj-palette-action-text);
+    border-color: var(--skj-palette-border);
+  }
+  :is(.dialog-buttons, .form-footer) button:hover { background: var(--skj-palette-action-hover); }
+}

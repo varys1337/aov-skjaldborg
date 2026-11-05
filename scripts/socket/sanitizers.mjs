@@ -143,6 +143,7 @@ export function sanitizePromptDefensePayload(payload = {}) {
   const source = sanitizeSocketPayload(payload);
   return {
     attackMessageId: cleanDocumentId(source.attackMessageId) || null,
+    ...(source.sourceCardIndex !== undefined ? { sourceCardIndex: Number.isInteger(source.sourceCardIndex) ? source.sourceCardIndex : -1 } : {}),
     tokenUuid: cleanString(source.tokenUuid ?? source.targetTokenUuid, 200),
     actorUuid: cleanString(source.actorUuid ?? source.targetActorUuid, 200),
     incomingWeaponType: cleanString(source.incomingWeaponType, 80)
@@ -154,10 +155,27 @@ export function sanitizeCommitDefensePayload(payload = {}) {
   const actionOption = cleanString(source.actionOption, 40);
   return {
     attackMessageId: cleanDocumentId(source.attackMessageId) || null,
+    ...(source.sourceCardIndex !== undefined ? { sourceCardIndex: Number.isInteger(source.sourceCardIndex) ? source.sourceCardIndex : -1 } : {}),
     tokenUuid: cleanString(source.tokenUuid ?? source.targetTokenUuid, 200),
     actorUuid: cleanString(source.actorUuid ?? source.targetActorUuid, 200),
     actionOption: ["none", "dodge", "parry"].includes(actionOption) ? actionOption : "none",
     checkBonus: Math.round(Number(source.checkBonus) || 0),
     itemId: cleanDocumentId(source.itemId) || null
+  };
+}
+
+export function sanitizeChatActionClaimPayload(payload = {}) {
+  const source = sanitizeSocketPayload(payload);
+  const kind = ["target", "split"].includes(source.kind) ? source.kind : "";
+  const stage = ["reserve", "execute", "consume", "release", "reconcile"].includes(source.stage) ? source.stage : "";
+  if (!kind || !stage || !cleanDocumentId(source.sourceMessageId)) throw new Error("Invalid chat action claim.");
+  return {
+    sourceMessageId: cleanDocumentId(source.sourceMessageId), kind, stage,
+    index: Number.isInteger(Number(source.index)) ? Number(source.index) : -1,
+    attemptId: cleanString(source.attemptId, 100),
+    weaponUuid: cleanString(source.weaponUuid, 200),
+    ammunitionUuid: cleanString(source.ammunitionUuid, 200),
+    targetTokenUuids: Array.isArray(source.targetTokenUuids)
+      ? source.targetTokenUuids.slice(0, 32).map(uuid => cleanString(uuid, 200)).filter(Boolean) : []
   };
 }

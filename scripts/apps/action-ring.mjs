@@ -1,8 +1,16 @@
+import {
+  openDelayDialog,
+  openDisengageDialog,
+  openGrappleRollDialog,
+  openKnockbackRollDialog,
+  openRunicMagicDialog
+} from "./dialog-launchers.mjs";
 import { ACTION_CATEGORIES, MODULE_ID } from "../constants.mjs";
 import { AoVAdapter } from "../adapter/aov-adapter.mjs";
 import { error } from "../logger.mjs";
 import { getCombatantState } from "../combat/state.mjs";
 import { isPriorityStatusId } from "../compat/active-effects.mjs";
+import { actionThemeClasses, applyActionTheme, isMonochromeActionImage } from "../ui/dom-utils.mjs";
 import {
   commitIntentCategory,
   executeActorItem,
@@ -46,31 +54,6 @@ function markPriorityStatusPalette(element) {
   }
 }
 
-async function openDisengageDialog(context) {
-  const { DisengageDialog } = await import("./disengage-dialog.mjs");
-  return DisengageDialog.show(context);
-}
-
-async function openKnockbackRollDialog(context) {
-  const { KnockbackRollDialog } = await import("./knockback-roll-dialog.mjs");
-  return KnockbackRollDialog.show(context);
-}
-
-async function openGrappleRollDialog(context) {
-  const { GrappleRollDialog } = await import("./grapple-roll-dialog.mjs");
-  return GrappleRollDialog.show(context);
-}
-
-async function openDelayDialog(context) {
-  const { DelayDialog } = await import("./delay-dialog.mjs");
-  return DelayDialog.show(context);
-}
-
-async function openRunicMagicDialog(context) {
-  const { RunicMagicDialog } = await import("./runic-magic-dialog.mjs");
-  return RunicMagicDialog.show(context);
-}
-
 /**
  * Token-centered action ring for quick actor actions.
  *
@@ -107,7 +90,7 @@ export class ActionRing extends HandlebarsApplicationMixin(ApplicationV2) {
    * @param {object} [options={}] Application options.
    */
   constructor({ token, combat = game.combat, combatant = null, fallbackPosition = null }, options = {}) {
-    super(options);
+    super({ ...options, classes: [...(options.classes ?? []), ...actionThemeClasses("interface")] });
     this.token = token;
     this.actor = token?.actor ?? null;
     this.combat = combat;
@@ -115,6 +98,16 @@ export class ActionRing extends HandlebarsApplicationMixin(ApplicationV2) {
     this.fallbackPosition = fallbackPosition;
     this._actions = [];
     this._diameter = (ActionRing.BASE_RADIUS + ActionRing.BUTTON_SIZE) * 2;
+    this._delegatedControlsAbort = null;
+    this._delegatedControlsRoot = null;
+    this._expandTimeout = null;
+  }
+
+  /** @inheritdoc */
+  async _renderFrame(options) {
+    const frame = await super._renderFrame(options);
+    applyActionTheme(frame, "interface");
+    return frame;
   }
 
   /**
@@ -226,6 +219,7 @@ export class ActionRing extends HandlebarsApplicationMixin(ApplicationV2) {
         : (action.tooltip ?? action.name);
       return {
         ...action,
+        monochromeImage: isMonochromeActionImage(action.img),
         tooltip,
         style: `left: ${position.x}px; top: ${position.y}px;`
       };
@@ -333,16 +327,35 @@ export class ActionRing extends HandlebarsApplicationMixin(ApplicationV2) {
   /** @inheritdoc */
   async _onRender(context, options) {
     await super._onRender(context, options);
-    const theme = game.settings.get(MODULE_ID, "actionUiTheme");
-    this.element.classList.toggle("skj-theme-aov", theme === "aov");
-    this.element.classList.toggle("skj-theme-classic", theme !== "aov");
+    applyActionTheme(this.element, "interface");
     this.setPosition();
+    this._activateDelegatedControls();
 
-    this.element.addEventListener("contextmenu", event => this._onActionContextMenu(event), { capture: true });
-    this.element.addEventListener("auxclick", event => this._onActionAuxClick(event), { capture: true });
-    this.element.addEventListener("pointerdown", event => this._onActionCapturePointerDown(event), { capture: true });
+    window.clearTimeout(this._expandTimeout);
+    const root = this.element;
+    const timeout = window.setTimeout(() => {
+      if (this._expandTimeout !== timeout || this._delegatedControlsRoot !== root) return;
+      this._expandTimeout = null;
+      root.querySelectorAll(".collapsed").forEach(element => element.classList.remove("collapsed"));
+    }, 20);
+    this._expandTimeout = timeout;
+  }
 
-    this.element.addEventListener("pointerdown", event => {
+  /** Keep one delegated listener set per root, as in ActorHotbar. */
+  _activateDelegatedControls() {
+    const root = this.element;
+    if (this._delegatedControlsRoot === root) return;
+    this._delegatedControlsAbort?.abort();
+    const abort = new AbortController();
+    this._delegatedControlsAbort = abort;
+    this._delegatedControlsRoot = root;
+    const options = { signal: abort.signal };
+    const captureOptions = { ...options, capture: true };
+    root.addEventListener("contextmenu", event => this._onActionContextMenu(event), captureOptions);
+    root.addEventListener("auxclick", event => this._onActionAuxClick(event), captureOptions);
+    root.addEventListener("pointerdown", event => this._onActionCapturePointerDown(event), captureOptions);
+
+    root.addEventListener("pointerdown", event => {
       if (event.button === 2) {
         const target = event.target instanceof Element ? event.target.closest("[data-action-id]") : null;
         if (target instanceof HTMLElement) {
@@ -355,15 +368,16 @@ export class ActionRing extends HandlebarsApplicationMixin(ApplicationV2) {
       void ActionRing.closeAll().catch(exception => {
         error("Failed to close the action ring after a background pointer interaction.", exception);
       });
-    });
-
-    window.setTimeout(() => {
-      this.element?.querySelectorAll(".collapsed").forEach(element => element.classList.remove("collapsed"));
-    }, 20);
+    }, options);
   }
 
   /** @inheritdoc */
   _onClose(options) {
+    this._delegatedControlsAbort?.abort();
+    this._delegatedControlsAbort = null;
+    this._delegatedControlsRoot = null;
+    window.clearTimeout(this._expandTimeout);
+    this._expandTimeout = null;
     if (ActionRing.current === this) ActionRing.current = null;
     return super._onClose(options);
   }

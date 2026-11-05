@@ -1,3 +1,5 @@
+import { performanceDiagnostics } from "../performance/performance-monitor.mjs";
+
 const STAGES = Object.freeze([
   "prepareAttackContext",
   "prepareDefenseContext",
@@ -25,14 +27,18 @@ function assertPlainRule(rule) {
   return id;
 }
 
-function primitiveReportValue(value) {
+function primitiveReportValue(value, depth = 0) {
+  if (depth > 2) return undefined;
   if (value === null || value === undefined) return value;
-  if (["string", "number", "boolean"].includes(typeof value)) return value;
-  if (Array.isArray(value)) return value.map(primitiveReportValue).filter(entry => entry !== undefined);
+  if (typeof value === "number") return Number.isFinite(value) ? value : undefined;
+  if (typeof value === "string") return value.slice(0, 200);
+  if (typeof value === "boolean") return value;
+  if (Array.isArray(value)) return value.slice(0, 20).map(entry => primitiveReportValue(entry, depth + 1)).filter(entry => entry !== undefined);
   if (typeof value === "object") {
-    return Object.fromEntries(Object.entries(value)
+    return Object.fromEntries(Object.entries(value).slice(0, 30)
       .filter(([_key, entry]) => entry === null || ["string", "number", "boolean"].includes(typeof entry))
-      .map(([key, entry]) => [key, entry]));
+      .map(([key, entry]) => [key.slice(0, 80), primitiveReportValue(entry, depth + 1)])
+      .filter(([_key, entry]) => entry !== undefined));
   }
   return undefined;
 }
@@ -40,10 +46,47 @@ function primitiveReportValue(value) {
 function appendRuleReport(context, id, stage, report) {
   if (!report || typeof report !== "object") return;
   context.ruleReports.push({
+    ...primitiveReportValue(report),
     id,
-    stage,
-    ...primitiveReportValue(report)
+    stage
   });
+}
+
+/** Copy bounded primitive report data at the submitted action boundary. */
+export function serializeCombatRuleReports(reports) {
+  return Array.isArray(reports) ? reports.slice(0, 20).map(value => primitiveReportValue(value)).filter(value => value && !Array.isArray(value) && typeof value === "object") : [];
+}
+
+/** Local GM diagnostics only: no documents, names, UUIDs, chat writes or logs. */
+export function recordCombatRuleTrace(payload, committed) {
+  if (globalThis.game?.user?.isGM !== true || !performanceDiagnostics.enabled()) return;
+  const start = performance.now();
+  const finite = value => Number.isFinite(Number(value)) ? Number(value) : 0;
+  const additive = Object.fromEntries([
+    "situationalModifier", "aimedModifier", "disarmModifier", "stunModifier", "augmentModifier", "proneModifier", "evadingModifier"
+  ].map(key => [key, finite(payload[key])]));
+  const providers = serializeCombatRuleReports(payload.ruleReports)
+    .filter(report => rules.has(report.id) && STAGES.includes(report.stage)).map(report => ({
+    id: report.id, stage: report.stage,
+    values: Object.fromEntries(Object.entries(report).filter(([_key, value]) => typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value))))
+  }));
+  const trace = {
+    version: 1, stage: "committed-card", workflow: payload.workflowType === "missile" ? "missile" : "melee",
+    submitted: { baseChance: finite(payload.baseChance), targetNumber: finite(payload.targetNumber), additive,
+      rangeMultiplier: payload.missileRange?.enabled === true ? finite(payload.missileRange.multiplier) : 1,
+      intoMeleeDivisor: payload.missileIntoMelee?.enabled === true ? finite(payload.missileIntoMelee.combatantCount) : 1 },
+    coreCheckBonus: finite(payload.coreOptions?.checkBonus),
+    nativeActionModifier: finite(committed.nativeActionModifier),
+    mountedCap: { active: payload.mountedCap?.active === true, modifier: finite(payload.mountedCap?.modifier) },
+    committed: { flatModifier: finite(committed.flatModifier), encumbrance: finite(committed.encumbrance), targetNumber: finite(committed.targetNumber) },
+    providers
+  };
+  performanceDiagnostics.recordMeasure("combat.ruleAttribution", performance.now() - start, trace);
+}
+
+export function combatRuleDiagnostics() {
+  if (globalThis.game?.user?.isGM !== true || !performanceDiagnostics.enabled()) return null;
+  return performanceDiagnostics.report().measures["combat.ruleAttribution"] ?? null;
 }
 
 function runStage(stage, context, ...args) {
@@ -94,9 +137,7 @@ export function createCombatRuleContext(seed = {}) {
     ruleMetadata: {
       ...(seed.ruleMetadata ?? {})
     },
-    ruleReports: Array.isArray(seed.ruleReports)
-      ? seed.ruleReports.map(entry => primitiveReportValue(entry)).filter(Boolean)
-      : []
+    ruleReports: serializeCombatRuleReports(seed.ruleReports)
   };
 }
 

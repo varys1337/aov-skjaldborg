@@ -12,6 +12,7 @@ const DEFAULTS = Object.freeze({
   adaptiveCheckpointMaxBatchSize: 1,
   debug: false,
   dynamicPlanningInitiative: false,
+  showPlayerInitiative: false,
   enabled: false,
   engagementVisualMode: ENGAGEMENT_VISUAL_MODE_DEFAULT,
   evadeFightingDefensively: false,

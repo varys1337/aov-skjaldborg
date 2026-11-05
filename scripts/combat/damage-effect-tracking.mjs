@@ -17,12 +17,13 @@ import {
   aovCards,
   idTypeMatch,
   numberOr,
-  recentFlaggedMessages,
   safeFromUuid
 } from "./automation-helpers.mjs";
 import { warn } from "../logger.mjs";
 import { guardedUpdate } from "../utils/guarded-document-writes.mjs";
 import { itemActor } from "../utils/document-data.mjs";
+import { findCombatDamageSource } from "./result-provenance.mjs";
+import { isAuthoritativeGmClient } from "../utils/authority.mjs";
 
 const IMPALED_EFFECT_NAME = "AOV_SKJALDBORG.StatusEffects.Impaled";
 const INJURY_EFFECT_NAME = "AOV_SKJALDBORG.StatusEffects.Injury";
@@ -130,16 +131,12 @@ function matchesDamageSource(source, card) {
 }
 
 function findDamageSource(message, card) {
-  const direct = message.getFlag?.(MODULE_ID, DAMAGE_EFFECT_SOURCE_FLAG) ?? null;
-  if (matchesDamageSource(direct, card)) return { message, source: direct };
-
-  const [match = null] = recentFlaggedMessages({
-    excludeMessage: message,
+  const match = findCombatDamageSource(message, card, {
     flag: DAMAGE_EFFECT_SOURCE_FLAG,
     windowMs: DAMAGE_SOURCE_MATCH_WINDOW_MS,
-    predicate: entry => matchesDamageSource(entry.flag, card)
+    matches: matchesDamageSource
   });
-  return match ? { message: match.message, source: match.flag } : null;
+  return { ...match, source: match.flag ?? (match.resolution === "exact" && match.sourceCardIndex === 0 ? match.proof : null) };
 }
 
 function resolvedDamageType(card, weapon, source = null) {
@@ -308,7 +305,13 @@ async function applyImpaledEffect({ message, card, index, sourceMatch, targetAct
     useToggle: false,
     predicate: effect => {
       const data = moduleFlag(effect, "impalement");
-      return effectHasStatus(effect, IMPALED_STATUS_ID) && data?.targetKey === targetKey;
+      // One hit location can hold independent impales. Only a retry of the
+      // same committed damage card owns this effect; another weapon/source
+      // must not overwrite its provenance or extraction state.
+      return effectHasStatus(effect, IMPALED_STATUS_ID)
+        && data?.targetKey === targetKey
+        && data?.damageMessageId === message.id
+        && Number(data?.damageCardIndex) === index;
     },
     moduleFlags: {
       impalement: {
@@ -316,7 +319,11 @@ async function applyImpaledEffect({ message, card, index, sourceMatch, targetAct
         targetKey,
         stuckIn,
         sourceMessageId: sourceMatch?.message?.id ?? null,
+        sourceMessageUuid: sourceMatch?.message?.uuid ?? null,
+        sourceCardIndex: sourceMatch?.sourceCardIndex ?? null,
+        sourceResolution: sourceMatch?.resolution ?? "missing",
         damageMessageId: message.id,
+        damageMessageUuid: message.uuid ?? null,
         damageCardIndex: index,
         createdAt: Date.now(),
         attackerActorUuid: attackerActor?.uuid ?? sourceMatch?.source?.attackerActorUuid ?? null,
@@ -340,7 +347,7 @@ async function applyImpaledEffect({ message, card, index, sourceMatch, targetAct
   return { applied: true, type: "impalement", targetKey };
 }
 
-async function applyInjuryEffect({ message, card, index, targetActor, hitLocation }) {
+async function applyInjuryEffect({ message, card, index, targetActor, hitLocation, sourceMatch = null }) {
   const severity = injurySeverity(card.rollVal, hitLocation?.system?.hpMax);
   if (!severity) return null;
   const existing = existingInjuryEffect(hitLocation);
@@ -371,7 +378,11 @@ async function applyInjuryEffect({ message, card, index, targetActor, hitLocatio
         severity,
         sourceMessageId: message.id,
         damageMessageId: message.id,
+        damageMessageUuid: message.uuid ?? null,
         damageCardIndex: index,
+        attackMessageUuid: sourceMatch?.message?.uuid ?? null,
+        attackCardIndex: sourceMatch?.sourceCardIndex ?? null,
+        sourceResolution: sourceMatch?.resolution ?? "missing",
         createdAt: Date.now(),
         targetActorUuid: targetActor?.uuid ?? null,
         targetActorId: targetActor?.id ?? null,
@@ -407,6 +418,10 @@ async function processDamageCard(message, card, index) {
     return { status: "pending", reason: "target-location-unresolved", results: [] };
   }
   const context = await resolveTrackingContext(message, card);
+  if (context.sourceMatch?.resolution === "ambiguous"
+    || (context.sourceMatch?.resolution === "missing" && context.sourceMatch.reason !== "no-legacy-source")) {
+    return { status: "pending", reason: context.sourceMatch.reason, results: [] };
+  }
   if (!context.targetActor) {
     return { status: "pending", reason: "target-actor-unavailable", results: [] };
   }
@@ -420,6 +435,7 @@ async function processDamageCard(message, card, index) {
     card: foundry.utils.deepClone(card),
     targetActorId: context.targetActor.id,
     targetActorUuid: context.targetActor.uuid ?? null,
+    sourceResolution: context.sourceMatch?.resolution ?? "missing",
     hitLocationId: context.hitLocation?.id ?? "",
     targetWeaponId: context.stuckIn === "weapon" ? context.impaleTargetItem?.id ?? "" : "",
     targetItemId: context.impaleTargetItem?.id ?? "",
@@ -435,7 +451,8 @@ async function processDamageCard(message, card, index) {
   } else if (String(card?.targetLocID ?? "").trim() && !context.impaleTargetItem) {
     return { status: "pending", reason: "hit-location-unavailable", results: [] };
   }
-  if (context.impaleTargetItem && isImpalingDamageCard(card, { weapon: context.weapon, source: context.sourceMatch?.source ?? null })) {
+  if (context.impaleTargetItem && !["ambiguous", "missing"].includes(context.sourceMatch?.resolution)
+    && isImpalingDamageCard(card, { weapon: context.weapon, source: context.sourceMatch?.source ?? null })) {
     pending.impalementEligible = true;
   }
 
@@ -454,6 +471,7 @@ async function processDamageCard(message, card, index) {
 function pendingMatchesAppliedItem(pending, item, changed = {}) {
   const actor = itemActor(item);
   if (!actor || String(actor.id ?? "") !== String(pending?.targetActorId ?? "")) return false;
+  if (pending?.targetActorUuid && actor.uuid !== pending.targetActorUuid) return false;
   if (item?.type === "wound") {
     return String(item.system?.hitLocId ?? "") === String(pending.hitLocationId ?? "");
   }
@@ -496,13 +514,16 @@ async function resolvePendingDamageEntry(message, entryKey, pending, appliedItem
 
   const card = cardByPending(message, current);
   const context = await resolveTrackingContext(message, card);
+  if (context.sourceMatch?.resolution === "ambiguous"
+    || (context.sourceMatch?.resolution === "missing" && context.sourceMatch.reason !== "no-legacy-source")) return null;
   if (!context.targetActor) return null;
   const results = [];
   if (current.injurySeverity > 0 && context.hitLocation) {
-    const injury = await applyInjuryEffect({ message, card, index: current.damageCardIndex, targetActor: context.targetActor, hitLocation: context.hitLocation });
+    const injury = await applyInjuryEffect({ message, card, index: current.damageCardIndex, targetActor: context.targetActor, hitLocation: context.hitLocation, sourceMatch: context.sourceMatch });
     if (injury) results.push(injury);
   }
-  if (current.impalementEligible && context.impaleTargetItem && isImpalingDamageCard(card, { weapon: context.weapon, source: context.sourceMatch?.source ?? null })) {
+  if (current.impalementEligible && context.impaleTargetItem && !["ambiguous", "missing"].includes(context.sourceMatch?.resolution)
+    && isImpalingDamageCard(card, { weapon: context.weapon, source: context.sourceMatch?.source ?? null })) {
     results.push(await applyImpaledEffect({
       message,
       card,
@@ -532,7 +553,7 @@ async function resolvePendingDamageEntry(message, entryKey, pending, appliedItem
 }
 
 async function handleMessageUpdate(message) {
-  if (!game.user?.isGM) return;
+  if (!isAuthoritativeGmClient()) return;
   const key = String(message?.id ?? "");
   if (!key || processingMessages.has(key)) return;
   processingMessages.add(key);
@@ -551,7 +572,9 @@ async function handleMessageUpdate(message) {
       if (tracking.cards[entryKey]?.status === "pending") continue;
       const result = await processDamageCard(message, card, index);
       if (result.status === "pending") {
-        tracking.cards[entryKey] = result.pending;
+        tracking.cards[entryKey] = result.pending ?? {
+          resolved: false, status: "unresolved", reason: result.reason, damageCardIndex: index
+        };
         changed = true;
         continue;
       }
@@ -576,18 +599,17 @@ async function handleMessageUpdate(message) {
 }
 
 async function handleAppliedItemChange(item, changed = {}) {
-  if (!game.user?.isGM) return;
+  if (!isAuthoritativeGmClient()) return;
   const key = String(item?.uuid ?? item?.id ?? "");
   if (!key || processingItems.has(key)) return;
   const entries = pendingTrackingEntriesForItem(item, changed);
   if (!entries.length) return;
   processingItems.add(key);
   try {
-    const [entry] = entries.sort((a, b) => {
-      const score = appliedItemMatchScore(a.pending, item) - appliedItemMatchScore(b.pending, item);
-      if (score) return score;
-      return Number(a.pending?.createdAt ?? 0) - Number(b.pending?.createdAt ?? 0);
-    });
+    const bestScore = Math.min(...entries.map(entry => appliedItemMatchScore(entry.pending, item)));
+    const candidates = entries.filter(entry => appliedItemMatchScore(entry.pending, item) === bestScore);
+    if (candidates.length !== 1) return; // Timing is not proof of which wound was applied.
+    const [entry] = candidates;
     await resolvePendingDamageEntry(entry.message, entry.entryKey, entry.pending, item);
   } finally {
     processingItems.delete(key);
@@ -659,6 +681,9 @@ export function registerDamageEffectTrackingHooks(hooks = globalThis.Hooks) {
 }
 
 export const __test = {
+  findDamageSource,
+  pendingMatchesAppliedItem,
+  applyImpaledEffect,
   IMPALED_EFFECT_ICON,
   INJURY_EFFECT_ICON,
   DAMAGE_TYPE_ALIASES,

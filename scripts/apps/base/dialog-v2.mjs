@@ -1,4 +1,22 @@
+import { actionThemeClasses, applyActionTheme } from "../../ui/dom-utils.mjs";
+
 const { DialogV2 } = foundry.applications.api;
+
+export const ACTION_DIALOG_WIDTHS = Object.freeze({ standard: 560, compact: 520 });
+
+/**
+ * Resolve the opening width with the same viewport margin as the dialog CSS.
+ *
+ * @param {number} [width=ACTION_DIALOG_WIDTHS.standard] Preferred width.
+ * @returns {{width: number, height: string}} ApplicationV2 opening position.
+ */
+export function actionDialogPosition(width = ACTION_DIALOG_WIDTHS.standard) {
+  const viewportWidth = globalThis.window?.innerWidth;
+  return {
+    width: Number.isFinite(viewportWidth) ? Math.min(width, Math.max(0, viewportWidth - 32)) : width,
+    height: "auto"
+  };
+}
 
 /**
  * DialogV2 base with coalesced Foundry 14.365 content refitting.
@@ -9,6 +27,19 @@ const { DialogV2 } = foundry.applications.api;
  * automatic positioning behavior when the API is unavailable.
  */
 export class SkjDialogV2 extends DialogV2 {
+  static DEFAULT_OPTIONS = { ...DialogV2.DEFAULT_OPTIONS, classes: ["skj-action-dialog-window"] };
+
+  constructor(options = {}) {
+    super({ ...options, classes: [...(options.classes ?? []), ...actionThemeClasses()] });
+  }
+
+  /** Apply the palette to the frame before AppV2 inserts it into the document. */
+  async _renderFrame(options) {
+    const frame = await super._renderFrame(options);
+    applyActionTheme(frame);
+    return frame;
+  }
+
   #contentRefitQueued = false;
   #contentRefitPosition = {};
 

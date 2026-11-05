@@ -378,7 +378,7 @@ export class PhaseController {
       if (crossedPhase === PHASES.MOVEMENT) {
         await resolvePendingFlees(combat);
         if (crossedPhase !== targetPhase) {
-          await startMovementPhase(combat, { positionAtLast: false });
+          if (await startMovementPhase(combat, { positionAtLast: false }) === null) return getCombatState(combat);
           movementRun = foundry.utils.deepClone(getCombatState(combat).movementRun ?? movementRun);
         }
         continue;
@@ -462,7 +462,7 @@ export class PhaseController {
     if (targetPhase === PHASES.MOVEMENT) {
       try {
         await resolvePendingFlees(combat);
-        await startMovementPhase(combat, { positionAtLast: false });
+        if (await startMovementPhase(combat, { positionAtLast: false }) === null) return getCombatState(combat);
         if (shouldQueueResolutionImmediately()) {
           await refreshAllImmediateResolutionActions(combat, { preserveStatus: true });
         }

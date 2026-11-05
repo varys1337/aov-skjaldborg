@@ -23,6 +23,7 @@ import {
 import { htmlEscape } from "../ui/dom-utils.mjs";
 import { performanceDiagnostics } from "../performance/performance-monitor.mjs";
 import { error } from "../logger.mjs";
+import { runtimeSettings } from "../runtime-settings.mjs";
 
 const INTENT_STATUS_ICONS = Object.freeze({
   [INTENT_STATUS.UNCOMMITTED]: "fa-circle-question",
@@ -348,10 +349,72 @@ function decoratePhaseBar(element, combat, state) {
   header.insertAdjacentHTML("beforeend", renderPhaseBar(combat, state));
 }
 
+/**
+ * Present initiative without changing documents or adding filtered combatants.
+ * Native numeric fields are hidden by a module class; roll controls remain native.
+ *
+ * @param {HTMLElement} element Tracker root.
+ * @param {Combat} combat Viewed encounter.
+ * @returns {void}
+ */
+function applyPlayerInitiativePresentation(element, combat) {
+  const active = AoVAdapter.enabledSetting && !game.user.isGM;
+  if (!active && !element.classList.contains("skj-player-initiative")) return;
+  element.classList.toggle("skj-player-initiative", active);
+  const showInitiative = !active || runtimeSettings.showPlayerInitiative === true;
+  const rows = trackerCombatantRows(element);
+  const groups = new Map();
+  const names = new Map();
+  for (const row of rows) {
+    const cell = row.querySelector(".token-initiative");
+    let score = cell?.querySelector("[data-skj-initiative-score]");
+    const initiative = combatantFromTrackerRow(combat, row)?.initiative;
+    if (active && showInitiative && cell && typeof initiative === "number" && Number.isFinite(initiative)) {
+      if (!score) {
+        score = cell.ownerDocument.createElement("span");
+        score.dataset.skjInitiativeScore = "";
+        score.setAttribute("aria-label", localize("COMBAT.InitiativeScore"));
+        cell.append(score);
+      }
+      if (score.textContent !== String(initiative)) score.textContent = String(initiative);
+    } else score?.remove();
+
+    const parent = row.parentElement;
+    if (!parent) continue;
+    const group = groups.get(parent) ?? [];
+    group.push(row);
+    groups.set(parent, group);
+    // Use rendered labels so masked names never acquire an undisclosed sort key.
+    names.set(row, (row.querySelector(".token-name .name, .token-name > strong, .token-name > h4")?.textContent
+      ?? row.querySelector(".token-image")?.getAttribute("alt") ?? "").trim());
+  }
+
+  const ranks = new Map((combat.turns ?? []).map((combatant, index) => [combatant.id, index]));
+  const collator = showInitiative ? null : new Intl.Collator(game.i18n.lang, { sensitivity: "base", numeric: true });
+  for (const [parent, group] of groups) {
+    const sorted = [...group].sort((left, right) => {
+      const leftId = left.dataset.combatantId;
+      const rightId = right.dataset.combatantId;
+      const order = showInitiative
+        ? (ranks.get(leftId) ?? Number.MAX_SAFE_INTEGER) - (ranks.get(rightId) ?? Number.MAX_SAFE_INTEGER)
+        : collator.compare(names.get(left), names.get(right));
+      return order || String(leftId).localeCompare(String(rightId));
+    });
+    if (sorted.every((row, index) => row === group[index])) continue;
+    const rowSet = new Set(group);
+    let index = 0;
+    const children = Array.from(parent.children).map(child => rowSet.has(child) ? sorted[index++] : child);
+    children.forEach((child, childIndex) => {
+      if (parent.children[childIndex] !== child) parent.insertBefore(child, parent.children[childIndex] ?? null);
+    });
+  }
+}
+
 function decorateTrackerElement(element, combat) {
   if (!element || !combat) return 0;
   element.querySelectorAll(".skj-phasebar, .skj-combatant-row, .skj-combatant-indicators, .skj-combatant-notes, .skj-combatant-status, .skj-combatant-status-fallback, .skj-status-fallback").forEach(node => node.remove());
   const state = getCombatState(combat);
+  applyPlayerInitiativePresentation(element, combat);
   decoratePhaseBar(element, combat, state);
   let rowCount = 0;
   for (const row of trackerCombatantRows(element)) {
@@ -399,18 +462,18 @@ function attachTrackerEvents(element, combat) {
  * when the current tracker DOM is still available. Returns false when the
  * caller should request a full tracker render instead.
  *
+ * @param {HTMLElement} element Tracker root.
+ * @param {Combat|null} combat Viewed encounter.
  * @param {object} [detail={}] Serialized invalidation detail.
  * @returns {boolean}
  */
-export function refreshCombatTrackerDecorations(detail = {}) {
+function refreshTrackerElementDecorations(element, combat, detail = {}) {
   const measureId = performanceDiagnostics.markStart("tracker.delta");
   let rowCount = 0;
   let fallback = false;
   try {
-    if (!AoVAdapter.isAoVWorld()) return false;
-    const element = lastTrackerElement instanceof HTMLElement ? lastTrackerElement : ui.combat?.element instanceof HTMLElement ? ui.combat.element : null;
-    const combat = lastTrackerCombat ?? game.combat ?? null;
     if (!element || !element.isConnected || !combat || detail.full === true) return false;
+    applyPlayerInitiativePresentation(element, combat);
     if (!AoVAdapter.enabledSetting) {
       element.querySelectorAll(".skj-phasebar, .skj-combatant-row, .skj-combatant-indicators, .skj-combatant-notes, .skj-combatant-status, .skj-combatant-status-fallback, .skj-status-fallback").forEach(node => node.remove());
       return true;
@@ -445,13 +508,38 @@ export function refreshCombatTrackerDecorations(detail = {}) {
   }
   finally {
     performanceDiagnostics.markEnd(measureId, {
-      combatId: lastTrackerCombat?.id ?? game.combat?.id ?? null,
+      combatId: combat?.id ?? null,
       rowCount,
       fallback,
       parts: detail.parts ?? [],
       combatantIds: detail.combatantIds ?? []
     });
   }
+}
+
+/**
+ * Refresh every connected tracker view, including the documented sidebar popout.
+ * Returning false requests native renders when any view cannot accept a delta.
+ *
+ * @param {object} [detail={}] Coordinated invalidation.
+ * @returns {boolean}
+ */
+export function refreshCombatTrackerDecorations(detail = {}) {
+  if (!AoVAdapter.isAoVWorld()) return false;
+  const views = new Map();
+  for (const app of [ui.combat, ui.combat?.popout]) {
+    const element = elementFromTrackerHook(app);
+    if (element?.isConnected) views.set(element, combatFromTrackerApp(app));
+  }
+  if (lastTrackerElement?.isConnected && !views.has(lastTrackerElement)) {
+    views.set(lastTrackerElement, lastTrackerCombat);
+  }
+  if (!views.size) return false;
+  let refreshed = true;
+  for (const [element, combat] of views) {
+    if (!refreshTrackerElementDecorations(element, combat, detail)) refreshed = false;
+  }
+  return refreshed;
 }
 
 /**
@@ -477,6 +565,7 @@ export function registerTrackerHooks(hooks = globalThis.Hooks) {
     lastTrackerCombat = combat;
 
     if (!AoVAdapter.enabledSetting) {
+      if (combat) applyPlayerInitiativePresentation(element, combat);
       element.querySelectorAll(".skj-phasebar, .skj-combatant-row, .skj-combatant-indicators, .skj-combatant-notes, .skj-combatant-status, .skj-combatant-status-fallback, .skj-status-fallback").forEach(node => node.remove());
       return;
     }

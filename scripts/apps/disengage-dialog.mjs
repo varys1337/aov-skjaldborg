@@ -10,6 +10,7 @@ import {
   registerTargetRefresh,
   unregisterTargetRefresh
 } from "./target-refresh-helpers.mjs";
+import { ACTION_DIALOG_WIDTHS, actionDialogPosition } from "./base/dialog-v2.mjs";
 import { SkjCombatDialogV2 } from "./base/combat-dialog-v2.mjs";
 
 function localize(key) {
@@ -127,7 +128,7 @@ function renderContent({ combat, combatant, targets = [] }) {
           </div>
         </section>
       </section>
-      <footer class="skj-disengage-dialog__footer">
+      <footer class="skj-disengage-dialog__footer skj-dialog-footer">
         <button type="button" class="skj-disengage-confirm-button" data-action="submitWorkflow" ${partners.length ? "" : "disabled"}>
           <i class="fa-solid fa-person-running" aria-hidden="true"></i>
           <span>${htmlEscape(localize("AOV_SKJALDBORG.DisengageDialog.Confirm"))}</span>
@@ -147,14 +148,14 @@ export class DisengageDialog extends SkjCombatDialogV2 {
       contentTag: "form",
       contentClasses: ["aov-skjaldborg", "skj-disengage-content"]
     },
-    position: { width: 430, height: "auto" }
+    position: actionDialogPosition()
   };
 
   constructor({ actor, combatant, combat = game.combat }) {
     let dialog;
     super({
       title: localize("AOV_SKJALDBORG.DisengageDialog.Title"),
-      width: 430,
+      width: ACTION_DIALOG_WIDTHS.standard,
       classes: ["skj-disengage-window"],
       contentClasses: ["skj-disengage-content"],
       modal: true,

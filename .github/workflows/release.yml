@@ -16,6 +16,8 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      AOV_SYSTEM_PATH: ${{ github.workspace }}/.ci/aov
 
     steps:
       - name: Check out tagged source
@@ -23,40 +25,66 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Check out pinned AoV 14.7 source
+        uses: actions/checkout@v4
+        with:
+          repository: cragstone/aov
+          ref: 08965ef0b2d95c806858542e7cfb036cf3014714
+          path: .ci/aov
+          persist-credentials: false
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
 
       - name: Install development tooling
         run: npm ci
 
-      - name: Run validation
+      - name: Run validation and contracts
         run: npm run ci
 
       - name: Build tagged release assets
         run: npm run build -- --tag "${GITHUB_REF_NAME}"
 
-      - name: Verify release archive
-        run: unzip -t release/aov-skjaldborg.zip
+      - name: Verify reproducible release assets
+        shell: bash
+        run: |
+          cp release/SHA256SUMS.txt "$RUNNER_TEMP/skjaldborg-checksums.txt"
+          npm run build -- --tag "$GITHUB_REF_NAME"
+          cmp "$RUNNER_TEMP/skjaldborg-checksums.txt" release/SHA256SUMS.txt
+          unzip -t release/aov-skjaldborg.zip
+          (cd release && sha256sum -c SHA256SUMS.txt)
+
+      - name: Extract versioned release notes
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const version = JSON.parse(readFileSync('module.json', 'utf8')).version;
+          const sections = readFileSync('previous-releases.md', 'utf8').split(/^##\s+/m).slice(1);
+          const section = sections.find(text => text.split(/\r?\n/, 1)[0].trim() === version);
+          if (!section) throw new Error(`Missing release notes for ${version}`);
+          writeFileSync('.ci/release-notes.md', section.replace(/^[^\n]*\n/, '').trim() + '\n');
+          NODE
 
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          prerelease_flag=""
-          if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
-            prerelease_flag="--prerelease"
+          release_flags=(--latest)
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+            release_flags=(--prerelease --latest=false)
           fi
-
-          gh release create "${GITHUB_REF_NAME}" \
+          gh release create "$GITHUB_REF_NAME" \
             release/aov-skjaldborg.zip \
             release/module.json \
             release/SHA256SUMS.txt \
-            --repo "${GITHUB_REPOSITORY}" \
-            --title "Age of Vikings - Skjaldborg ${GITHUB_REF_NAME}" \
-            --generate-notes \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Age of Vikings - Skjaldborg $GITHUB_REF_NAME" \
+            --notes-file .ci/release-notes.md \
             --verify-tag \
-            ${prerelease_flag}
+            "${release_flags[@]}"

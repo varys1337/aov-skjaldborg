@@ -1,0 +1,103 @@
+<div class="skj-recovery__layout">
+  <header class="skj-recovery__notice">
+    <strong>{{localize "AOV_SKJALDBORG.Recovery.InspectionOnly"}}</strong>
+    <p>{{localize "AOV_SKJALDBORG.Recovery.Prerequisite"}}</p>
+    <p>{{localize "AOV_SKJALDBORG.Recovery.SelectedGm"}} <strong>{{selectedGm}}</strong>{{#if secondaryGm}} · {{localize "AOV_SKJALDBORG.Recovery.SecondaryGm"}}{{/if}}</p>
+  </header>
+
+  <div class="skj-recovery__filters">
+    <label>{{localize "AOV_SKJALDBORG.Recovery.Scope"}}
+      <select name="scope">
+        <option value="current" {{#if currentScope}}selected{{/if}}>{{localize "AOV_SKJALDBORG.Recovery.CurrentCombat"}}</option>
+        <option value="all" {{#if allScope}}selected{{/if}}>{{localize "AOV_SKJALDBORG.Recovery.LoadedChat"}}</option>
+      </select>
+    </label>
+    <label>{{localize "AOV_SKJALDBORG.Recovery.SourceId"}}
+      <input name="sourceMessageId" type="text" value="{{filters.sourceMessageId}}" maxlength="100" autocomplete="off">
+    </label>
+    <label class="skj-recovery__checkbox"><input type="checkbox" name="includeCommitted" {{checked filters.includeCommitted}}> {{localize "AOV_SKJALDBORG.Recovery.IncludeCommitted"}}</label>
+    <button type="submit"><i class="fa-solid fa-filter" inert></i> {{localize "AOV_SKJALDBORG.Recovery.ApplyFilter"}}</button>
+  </div>
+  <nav class="skj-recovery__toolbar" aria-label="{{localize 'AOV_SKJALDBORG.Recovery.Navigation'}}">
+    <button type="button" data-action="refresh"><i class="fa-solid fa-arrows-rotate" inert></i> {{localize "AOV_SKJALDBORG.Recovery.Refresh"}}</button>
+    <button type="button" data-action="older" {{#unless hasOlder}}disabled{{/unless}}>{{localize "AOV_SKJALDBORG.Recovery.Older"}}</button>
+    <button type="button" data-action="newer" {{#unless hasNewer}}disabled{{/unless}}>{{localize "AOV_SKJALDBORG.Recovery.Newer"}}</button>
+    <span>{{historyLabel}}</span>
+  </nav>
+  {{#if searchIncomplete}}<p class="skj-recovery__hint">{{localize "AOV_SKJALDBORG.Recovery.SearchBound"}}</p>{{/if}}
+  {{#if limited}}<p class="skj-recovery__hint">{{localize "AOV_SKJALDBORG.Recovery.LimitNotice"}}</p>{{/if}}
+  {{#if focusUnavailable}}<p class="skj-recovery__hint">{{localize "AOV_SKJALDBORG.Recovery.PreviewUnavailable"}}</p>{{/if}}
+
+  <div class="skj-recovery__body">
+    <section class="skj-recovery__incidents" aria-label="{{localize 'AOV_SKJALDBORG.Recovery.Incidents'}}">
+      {{#unless hasRows}}<p class="skj-recovery__empty">{{localize "AOV_SKJALDBORG.Recovery.Empty"}}</p>{{/unless}}
+      {{#each groups}}
+        <h3>{{label}}</h3>
+        {{#each rows}}
+          <details class="skj-recovery__incident">
+            <summary><span>{{sourceMessageId}} · {{slot}}</span><span class="skj-recovery__state">{{stateLabel}}</span></summary>
+            <div class="skj-recovery__evidence">
+              <dl>
+                <dt>{{localize "AOV_SKJALDBORG.Recovery.Workflow"}}</dt><dd>{{workflow}}</dd>
+                <dt>{{localize "AOV_SKJALDBORG.Recovery.Source"}}</dt><dd><code>{{sourceMessageUuid}}</code></dd>
+                <dt>{{localize "AOV_SKJALDBORG.Recovery.UpdatePermission"}}</dt><dd>{{#if sourceUpdateAllowed}}{{localize "AOV_SKJALDBORG.Recovery.Yes"}}{{else}}{{localize "AOV_SKJALDBORG.Recovery.No"}}{{/if}}</dd>
+                <dt>{{localize "AOV_SKJALDBORG.Recovery.Attempt"}}</dt><dd><code>{{attemptId}}</code></dd>
+                <dt>{{localize "AOV_SKJALDBORG.Recovery.Claimant"}}</dt><dd>{{claimantLabel}}{{#unless claimantActive}} · {{localize "AOV_SKJALDBORG.Recovery.Offline"}}{{/unless}}</dd>
+                <dt>{{localize "AOV_SKJALDBORG.Recovery.ClaimAge"}}</dt><dd>{{ageLabel}}</dd>
+                <dt>{{localize "AOV_SKJALDBORG.Recovery.Actor"}}</dt><dd><code>{{actorUuid}}</code></dd>
+                <dt>{{localize "AOV_SKJALDBORG.Recovery.AttackerToken"}}</dt><dd><code>{{attackerTokenUuid}}</code></dd>
+                <dt>{{localize "AOV_SKJALDBORG.Recovery.Weapon"}}</dt><dd><code>{{weaponUuid}}</code></dd>
+                <dt>{{localize "AOV_SKJALDBORG.Recovery.TargetActor"}}</dt><dd><code>{{targetActorUuid}}</code></dd>
+                <dt>{{localize "AOV_SKJALDBORG.Recovery.TargetToken"}}</dt><dd><code>{{targetTokenUuid}}</code>{{#each admittedTargetTokenUuids}}<code class="skj-recovery__token">{{this}}</code>{{/each}}</dd>
+                <dt>{{localize "AOV_SKJALDBORG.Recovery.Context"}}</dt><dd>{{contextLabel}}</dd>
+                <dt>{{localize "AOV_SKJALDBORG.Recovery.Ammunition"}}</dt><dd><code>{{ammunitionUuid}}</code> <span>{{ammunitionQuantity}}</span></dd>
+                <dt>{{localize "AOV_SKJALDBORG.Recovery.Receipt"}}</dt>
+                <dd>{{#if receipt}}{{receipt.before}} → {{receipt.after}} ({{receipt.count}}){{else}}{{localize "AOV_SKJALDBORG.Recovery.NoReceipt"}}{{/if}}</dd>
+              </dl>
+              {{#if reasonLabels}}<ul class="skj-recovery__reasons">{{#each reasonLabels}}<li>{{this}}</li>{{/each}}</ul>{{/if}}
+              <div class="skj-recovery__row-actions">
+                <button type="button" data-action="viewSource" data-source-id="{{sourceMessageId}}" data-slot="{{slot}}" data-attempt-id="{{attemptId}}" {{#unless sourceAvailable}}disabled{{/unless}}>{{localize "AOV_SKJALDBORG.Recovery.ViewSource"}}</button>
+                <button type="button" data-action="refresh">{{localize "AOV_SKJALDBORG.Recovery.Refresh"}}</button>
+              </div>
+              <p>{{resultsLabel}}</p>
+              <ul class="skj-recovery__results">
+                {{#each results}}
+                  <li>
+                    <code>{{messageId}}</code><span>{{proofLabel}}</span>
+                    {{#if attackProof}}<span>{{localize "AOV_SKJALDBORG.Recovery.SourceCard"}} {{sourceCardIndex}} · {{localize "AOV_SKJALDBORG.Recovery.BatchIndex"}} {{batchIndex}} / {{batchSize}}</span>{{/if}}
+                    <button type="button" data-action="viewResult" data-source-id="{{../sourceMessageId}}" data-slot="{{../slot}}" data-attempt-id="{{../attemptId}}" data-result-id="{{messageId}}" {{#unless claimProof}}disabled{{/unless}}>{{localize "AOV_SKJALDBORG.Recovery.ViewResult"}}</button>
+                  </li>
+                {{/each}}
+              </ul>
+            </div>
+          </details>
+        {{/each}}
+      {{/each}}
+    </section>
+    <aside class="skj-recovery__review">
+      <h3>{{localize "AOV_SKJALDBORG.Recovery.Preview"}}</h3>
+      <p class="skj-recovery__hint">{{localize "AOV_SKJALDBORG.Recovery.PreviewReadOnly"}}</p>
+      <code>{{previewLabel}}</code>
+      <pre data-recovery-preview>{{localize "AOV_SKJALDBORG.Recovery.NoPreview"}}</pre>
+      <h3>{{localize "AOV_SKJALDBORG.Recovery.ManualReview"}}</h3>
+      <ol>
+        <li>{{localize "AOV_SKJALDBORG.Recovery.ManualSource"}}</li>
+        <li>{{localize "AOV_SKJALDBORG.Recovery.ManualReceipt"}}</li>
+        <li>{{localize "AOV_SKJALDBORG.Recovery.ManualDamage"}}</li>
+        <li>{{localize "AOV_SKJALDBORG.Recovery.ManualPreserve"}}</li>
+      </ol>
+      <div class="skj-recovery__locked-actions">
+        <button type="button" disabled>{{localize "AOV_SKJALDBORG.Recovery.Release"}}</button>
+        <button type="button" disabled>{{localize "AOV_SKJALDBORG.Recovery.Reconcile"}}</button>
+      </div>
+      <p class="skj-recovery__hint">{{localize "AOV_SKJALDBORG.Recovery.RepairDisabled"}}</p>
+    </aside>
+  </div>
+
+  <footer class="skj-recovery__toolbar">
+    <button type="button" data-action="previous" {{#unless hasPrevious}}disabled{{/unless}}>{{localize "AOV_SKJALDBORG.Recovery.PreviousPage"}}</button>
+    <span>{{pageLabel}}</span>
+    <button type="button" data-action="next" {{#unless hasNext}}disabled{{/unless}}>{{localize "AOV_SKJALDBORG.Recovery.NextPage"}}</button>
+    <button type="button" data-action="exportSummary"><i class="fa-solid fa-download" inert></i> {{localize "AOV_SKJALDBORG.Recovery.Export"}}</button>
+  </footer>
+</div>

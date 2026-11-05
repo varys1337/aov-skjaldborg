@@ -29,6 +29,7 @@ import { shouldExecuteMovementImmediately, shouldQueueResolutionImmediately, sho
 import { refreshImmediateResolutionActions } from "./combat/resolution-queue.mjs";
 import { performanceDiagnostics } from "./performance/performance-monitor.mjs";
 import { createModuleChatMessage } from "./compat/chat-message.mjs";
+import { valuesMeaningfullyEqual } from "./utils/guarded-document-writes.mjs";
 import {
   captureExternalPlanningInitiativeChange,
   refreshPlanningInitiative
@@ -79,6 +80,7 @@ const SOCKET_MESSAGE_REQUEST = "request";
 const SOCKET_MESSAGE_RESPONSE = "response";
 const SOCKET_SCHEMA_VERSION = 1;
 const PROCESSED_REQUEST_TTL_MS = 60000;
+const REQUEST_COMPARISON_OPTIONS = { ignoredKeys: new Set() };
 const pendingSocketRequests = new Map();
 const processedSocketRequests = new Map();
 const userPromptQueues = new Map();
@@ -169,23 +171,38 @@ function emitSocketResponse(request, response) {
 }
 
 /**
- * Return whether the GM has already processed a socket request.
+ * Share the actual outcome of a request, including while it is still running.
+ * The TTL begins after settlement; slow prompts must not expire in flight.
+ * This deduplicates request envelopes, not separate clicks with new ids.
  *
  * @param {object} message Socket request envelope.
- * @returns {boolean}
+ * @param {() => Promise<unknown>} operation Authorized socket operation.
+ * @returns {Promise<unknown>}
  */
-function isDuplicateRequest(message) {
+function processSocketRequestOnce(message, operation) {
   const requestId = String(message?.requestId ?? "");
   const from = String(message?.from ?? "");
-  if (!requestId || !from) return false;
   const now = Date.now();
-  for (const [key, timestamp] of processedSocketRequests) {
-    if ((now - Number(timestamp)) > PROCESSED_REQUEST_TTL_MS) processedSocketRequests.delete(key);
+  for (const [key, entry] of processedSocketRequests) {
+    if (entry.settledAt !== null && (now - entry.settledAt) > PROCESSED_REQUEST_TTL_MS) processedSocketRequests.delete(key);
   }
   const key = `${from}:${requestId}`;
-  if (processedSocketRequests.has(key)) return true;
-  processedSocketRequests.set(key, now);
-  return false;
+  const previous = processedSocketRequests.get(key);
+  const requestData = { action: message.action, payload: message.payload ?? {} };
+  if (previous) {
+    if (!valuesMeaningfullyEqual(previous.requestData, requestData, REQUEST_COMPARISON_OPTIONS)) {
+      throw new Error(`Rejected ${MODULE_ID} socket request reusing an id for different data.`);
+    }
+    performanceDiagnostics.count("socket.request.duplicate", 1, { action: message.action, requestId });
+    return previous.promise.then(result => ({
+      ...normalizeSocketResult(message.action, result),
+      duplicate: true
+    }));
+  }
+  const entry = { requestData: foundry.utils.deepClone(requestData), settledAt: null, promise: null };
+  entry.promise = Promise.resolve().then(operation).finally(() => { entry.settledAt = Date.now(); });
+  processedSocketRequests.set(key, entry);
+  return entry.promise;
 }
 
 /**
@@ -1102,7 +1119,7 @@ export async function requestGm(action, payload = {}) {
     sentAt: Date.now()
   };
 
-  if (game.user.isGM) {
+  if (game.user.isGM && (action !== "chatActionClaim" || !message.to || message.to === game.user.id)) {
     try {
       const result = await handleSocketRequest(message);
       const summary = normalizeSocketResult(action, result);
@@ -1280,7 +1297,67 @@ export async function startDialogCombatWorkflow(payload = {}) {
   return result;
 }
 
+/** Reserve one logical chat action before any workflow side effects. */
+export async function runClaimedChatAction(source, operation) {
+  const reserved = await requestGm("chatActionClaim", { ...source, stage: "reserve" });
+  if (!reserved) return [];
+  if (!reserved.accepted) {
+    if (reserved.state === "committed") return reserved.resultMessageIds.map(attackMessageId => ({
+      started: true, attackMessageId, alreadyResolved: true, duplicate: true, defenseRouted: true
+    }));
+    ui.notifications.warn(game.i18n.localize(reserved.state === "executing"
+      ? "AOV_SKJALDBORG.Warnings.ActionClaimUncertain" : "AOV_SKJALDBORG.Warnings.ActionClaimBusy"));
+    return [];
+  }
+  const request = stage => ({ ...source, stage, attemptId: reserved.attemptId });
+  const reference = { version: 1, sourceMessageId: source.sourceMessageId, key: reserved.key, slot: reserved.slot, attemptId: reserved.attemptId };
+  const claim = {
+    reference,
+    async begin(payloads = []) {
+      const first = payloads[0] ?? {};
+      const result = await requestGm("chatActionClaim", { ...request("execute"),
+        weaponUuid: first.weaponUuid ?? first.weapon?.uuid,
+        ammunitionUuid: first.ammunitionUuid ?? first.ammunition?.uuid,
+        targetTokenUuids: payloads.map(payload => (payload.targetToken?.document ?? payload.targetToken)?.uuid ?? payload.targetTokenUuid).filter(Boolean)
+      });
+      claim.ammunitionRequired = result?.ammunitionRequired === true;
+      return result?.accepted === true;
+    },
+    async consume(payloads) {
+      if (!claim.ammunitionRequired) return;
+      const result = await requestGm("chatActionClaim", { ...request("consume"), ammunitionUuid: payloads[0]?.ammunitionUuid });
+      if (!result?.accepted) throw new Error(game.i18n.localize("AOV_SKJALDBORG.Warnings.ActionFailed"));
+      for (const payload of payloads) payload.ammunitionChange = result.ammunitionChange;
+    }
+  };
+  try {
+    return await operation(claim);
+  } finally {
+    // A failed/late reply cannot release an executing action. The GM checks the
+    // persisted state and exact creation-time proof before every transition.
+    try {
+      await requestGm("chatActionClaim", request("release"));
+      const state = await requestGm("chatActionClaim", request("reconcile"));
+      if (state?.state === "executing") ui.notifications.warn(game.i18n.localize("AOV_SKJALDBORG.Warnings.ActionClaimUncertain"));
+    } catch (exception) { warn("Unable to reconcile the persisted chat action claim.", exception); }
+  }
+}
+
 export async function startDialogCombatWorkflowBatch(payloads = [], options = {}) {
+  const actionSource = options.actionSource ?? (payloads[0]?.splitAttackSourceMessageId
+    ? { sourceMessageId: payloads[0].splitAttackSourceMessageId, kind: "split" } : null);
+  if (actionSource && options.claimed !== true) {
+    return runClaimedChatAction(actionSource, claim => startDialogCombatWorkflowBatch(
+      payloads.map(payload => ({ ...payload, actionClaim: claim.reference })), {
+        ...options, claimed: true,
+        beforeCreate: async prompted => {
+          if (!await claim.begin(prompted)) return false;
+          await claim.consume(prompted);
+          return typeof options.beforeCreate === "function" ? options.beforeCreate(prompted) : true;
+        }
+      }
+    ));
+  }
   const results = await AoVAdapter.rollDialogCombatWorkflowBatch(payloads, {
     beforeCreate: options.beforeCreate,
     promptDefender: (user, defensePayload) => requestUserQueued("promptDefenseRoll", defensePayload, user.id)
@@ -1416,8 +1493,8 @@ async function executeRecordMovement({ combat, combatant, payload }) {
     && persisted?.planStatus === MOVEMENT_PLAN_STATUS.PLANNED
     && shouldExecuteMovementImmediately(combatPhase)
   ) {
-    await startMovementPhase(combat, { positionAtLast: false });
-    if (shouldQueueResolutionImmediately()) {
+    const movementRun = await startMovementPhase(combat, { positionAtLast: false });
+    if (movementRun !== null && shouldQueueResolutionImmediately()) {
       await refreshImmediateResolutionActions(combat, combatant, { preserveStatus: true });
     }
   }
@@ -1712,6 +1789,12 @@ const SOCKET_ACTION_RUNTIMES = Object.freeze({
       requestId: message.requestId
     })
   },
+  chatActionClaim: {
+    execute: async ({ payload, user }) => {
+      const { updateChatActionClaim } = await import("./combat/dialog-target-queue.mjs");
+      return updateChatActionClaim(payload, user);
+    }
+  },
   promptDefenseRoll: {}
 });
 
@@ -1728,15 +1811,6 @@ async function executeSocketEnvelope(message, { clientAction }) {
     throw new Error(`Unsupported ${MODULE_ID} socket schema version.`);
   }
   if (!message?.requestId) throw new Error(`Rejected ${MODULE_ID} socket request without a request id.`);
-  if (isDuplicateRequest(message)) {
-    performanceDiagnostics.count("socket.request.duplicate", 1, {
-      action: message.action,
-      requestId: message.requestId,
-      client: clientAction
-    });
-    return { accepted: true, action: message.action, duplicate: true };
-  }
-
   const schema = getSocketActionSchema(message.action);
   if (!schema || schema.clientAction !== clientAction) {
     throw unknownSocketActionError(MODULE_ID, message.action, { client: clientAction });
@@ -1747,7 +1821,8 @@ async function executeSocketEnvelope(message, { clientAction }) {
   assertSocketAuthority({ action: schema.id, schema, user, payload, message });
   const context = await schema.resolve(baseContext);
   await schema.authorize(context);
-  return schema.execute(context);
+  // Authenticate and authorize every delivery before replaying a cached result.
+  return processSocketRequestOnce({ ...message, payload }, () => schema.execute(context));
 }
 
 /**

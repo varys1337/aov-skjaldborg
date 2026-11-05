@@ -88,7 +88,7 @@
   min-width: 0;
 }
 
-@media (max-width: 460px) {
+@container skj-action (width < 20rem) {
   .aov-skjaldborg .skj-dialog-segments,
   .aov-skjaldborg .skj-dialog-custom-modifier-row {
     grid-template-columns: minmax(0, 1fr);

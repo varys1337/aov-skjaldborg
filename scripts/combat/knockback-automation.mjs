@@ -1,3 +1,4 @@
+import { actionThemeClasses } from "../ui/dom-utils.mjs";
 /**
  * Knockback follow-up automation.
  *
@@ -273,7 +274,7 @@ function renderFailedRecoveryChoiceContent(actor, rollTotal) {
 
 async function promptFailedRecoveryChoice(actor, rollTotal) {
   const result = await DialogV2.wait({
-    classes: ["aov-skjaldborg", "dialog", "skj-knockback-choice-window"],
+    classes: ["aov-skjaldborg", "dialog", "skj-knockback-choice-window", "skj-owned-dialog-window", ...actionThemeClasses()],
     window: {
       title: localize("AOV_SKJALDBORG.KnockbackDialog.RecoveryChoiceTitle"),
       contentClasses: ["aov-skjaldborg", "skj-knockback-choice-content"]
@@ -524,7 +525,7 @@ function bindFumblePrompt(message, html) {
  * @param {Event|null} [request.originEvent=null] Originating UI event.
  * @returns {Promise<ChatMessage|object|null>}
  */
-export async function startKnockbackAttack({ actor, targetToken, weapon, targetNumber, situationalModifier, augmentModifier, augmentations, batchId = "", batchIndex = 0, batchSize = 1, originEvent = null }) {
+export async function startKnockbackAttack({ actor, targetToken, weapon, targetNumber, situationalModifier, augmentModifier, augmentations, batchId = "", batchIndex = 0, batchSize = 1, originEvent = null, actionClaim = null }) {
   if (!actor || !targetToken?.actor || !weapon) return null;
   const combat = game.combat ?? null;
   const attackerToken = actor.getActiveTokens?.()?.[0]?.document ?? actor.token ?? null;
@@ -573,6 +574,7 @@ export async function startKnockbackAttack({ actor, targetToken, weapon, targetN
         successLevelLabelVisible: chatMsgData.successLevelLabelVisible
       },
       [MODULE_ID]: {
+        ...(actionClaim ? { actionClaim: foundry.utils.deepClone(actionClaim) } : {}),
         combatCardBatch: {
           batchId: String(batchId ?? ""),
           batchIndex: Number(batchIndex) || 0,

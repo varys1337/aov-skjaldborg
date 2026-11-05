@@ -8,6 +8,8 @@
  * damage or unequip an item twice.
  */
 import { MODULE_ID } from "../constants.mjs";
+import { findCombatDamageSource } from "./result-provenance.mjs";
+import { isAuthoritativeGmClient } from "../utils/authority.mjs";
 import { AOV_TEMPLATES } from "../adapter/aov-contract.mjs";
 import { createModuleChatMessage } from "../compat/chat-message.mjs";
 import { warn } from "../logger.mjs";
@@ -24,7 +26,6 @@ import {
   inlineResultHtml,
   localize,
   numberOr,
-  recentFlaggedMessages,
   registerChatMessageAutomationHooks,
   renderActorStackCard,
   renderAoVChat,
@@ -63,14 +64,12 @@ function findDamageCard(message) {
 }
 
 function findMatchingDisarmSource(damageMessage, damageCard) {
-  const [match = null] = recentFlaggedMessages({
-    excludeMessage: damageMessage,
+  const match = findCombatDamageSource(damageMessage, damageCard, {
     flag: DISARM_FLAG,
     windowMs: DISARM_MATCH_WINDOW_MS,
-    predicate: entry => ["awaitingDamage", "attack"].includes(String(entry.flag?.stage ?? ""))
-      && matchesDamageCard(entry.flag, damageCard)
+    matches: (flag, card) => ["awaitingDamage", "attack"].includes(String(flag?.stage ?? "")) && matchesDamageCard(flag, card)
   });
-  return match ? { message: match.message, disarm: match.flag } : null;
+  return match.flag ? { ...match, disarm: match.flag } : null;
 }
 
 function attackSpecialOrBetter(message) {
@@ -324,7 +323,7 @@ async function resolveFlatDamage(sourceMessage, disarm, damageMessage, damageCar
 }
 
 async function handleDamageMessage(message) {
-  if (!game.user?.isGM || message?.getFlag?.(MODULE_ID, DISARM_DAMAGE_FLAG)?.resolved === true) return;
+  if (!isAuthoritativeGmClient() || message?.getFlag?.(MODULE_ID, DISARM_DAMAGE_FLAG)?.resolved === true) return;
   const located = findDamageCard(message);
   if (!located) return;
   const source = findMatchingDisarmSource(message, located.card);
@@ -334,7 +333,7 @@ async function handleDamageMessage(message) {
 }
 
 async function handleCombatMessage(message) {
-  if (!game.user?.isGM || !attackCardResolved(message)) return;
+  if (!isAuthoritativeGmClient() || !attackCardResolved(message)) return;
   const disarm = message.getFlag?.(MODULE_ID, DISARM_FLAG) ?? null;
   if (!disarm || disarm.resolved === true || disarm.stage !== "attack") return;
 
@@ -434,7 +433,7 @@ async function handleEntangleCounterClosed(message, disarm, resultLevel) {
 }
 
 async function handleResistanceMessage(message) {
-  if (!game.user?.isGM || message?.getFlag?.("aov", "cardType") !== "RE" || message?.getFlag?.("aov", "state") !== "closed") return;
+  if (!isAuthoritativeGmClient() || message?.getFlag?.("aov", "cardType") !== "RE" || message?.getFlag?.("aov", "state") !== "closed") return;
   const disarm = message.getFlag?.(MODULE_ID, DISARM_FLAG) ?? null;
   if (!disarm || disarm.resolved === true) return;
   const resultLevel = Number(aovCards(message)[0]?.resultLevel ?? 1);
@@ -473,5 +472,6 @@ export function registerDisarmAutomationHooks(hooks = globalThis.Hooks) {
 }
 
 export const __test = {
+  findMatchingDisarmSource,
   isHooksRegistered: () => hooksRegistered
 };

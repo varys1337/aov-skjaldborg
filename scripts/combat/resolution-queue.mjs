@@ -5,8 +5,7 @@ import {
   combatantStateUpdateData,
   getCombatState,
   getCombatantState,
-  updateCombatState,
-  updateCombatantState
+  updateCombatState
 } from "./state.mjs";
 import { createDocumentTransaction } from "../utils/document-transaction.mjs";
 
@@ -157,7 +156,6 @@ export async function settleImmediateResolutionWrites(combat) {
 export async function buildResolutionQueue(combat, { announcedOnly = false } = {}) {
   const queue = [];
   const carryover = [];
-  const initiativeUpdates = [];
   const transaction = createDocumentTransaction();
 
   for (const combatant of combat.combatants) {
@@ -175,22 +173,24 @@ export async function buildResolutionQueue(combat, { announcedOnly = false } = {
       scheduledActions: actions,
       activeGroupId: null
     });
+    if (game.user?.isGM && requiresInitiativeUpdate(combatant, ledger.projectedInitiative)) {
+      stateUpdate.initiative = ledger.projectedInitiative;
+    }
     transaction.updateCombatant(combat, combatant.id, Object.fromEntries(
       Object.entries(stateUpdate).filter(([key]) => key !== "_id")
     ));
-    if (requiresInitiativeUpdate(combatant, ledger.projectedInitiative)) {
-      initiativeUpdates.push({ _id: combatant.id, initiative: ledger.projectedInitiative });
-    }
   }
 
   sortQueue(queue);
   for (const action of queue) action.status = RESOLUTION_STATUS.PENDING;
   const simultaneousGroups = buildSimultaneousGroups(queue);
 
-  if (!transaction.empty) await transaction.commit();
-  if (initiativeUpdates.length && game.user.isGM) {
-    await combat.updateEmbeddedDocuments("Combatant", initiativeUpdates, { turnEvents: false, combatTurn: combat.turn });
-  }
+  // State and its initiative projection belong to the same Combatant update.
+  // There is no second write which can leave a successfully saved ledger with
+  // an old initiative. This does not claim cross-document transactionality.
+  if (!transaction.empty) await transaction.commit({
+    combatantOptions: { turnEvents: false, combatTurn: combat.turn }
+  });
 
   return { queue, simultaneousGroups, carryover };
 }
@@ -210,7 +210,6 @@ export async function buildResolutionQueue(combat, { announcedOnly = false } = {
  */
 export async function applyMovementDexResults(combat) {
   const ledgers = [];
-  const initiativeUpdates = [];
   const transaction = createDocumentTransaction();
 
   for (const combatant of combat?.combatants ?? []) {
@@ -219,22 +218,21 @@ export async function applyMovementDexResults(combat) {
     const ledger = computeDexLedger(combatant, state, { includeMovementPenalty: true });
     ledgers.push(ledger);
     const stateUpdate = combatantStateUpdateData(combatant, { dexLedger: ledger });
+    if (game.user?.isGM && requiresInitiativeUpdate(combatant, ledger.projectedInitiative)) {
+      stateUpdate.initiative = ledger.projectedInitiative;
+    }
     transaction.updateCombatant(combat, combatant.id, Object.fromEntries(
       Object.entries(stateUpdate).filter(([key]) => key !== "_id")
     ));
-    if (requiresInitiativeUpdate(combatant, ledger.projectedInitiative)) {
-      initiativeUpdates.push({ _id: combatant.id, initiative: ledger.projectedInitiative });
-    }
   }
 
-  if (!transaction.empty) await transaction.commit();
-  if (initiativeUpdates.length && game.user?.isGM) {
-    await combat.updateEmbeddedDocuments("Combatant", initiativeUpdates, {
+  if (!transaction.empty) await transaction.commit({
+    combatantOptions: {
       turnEvents: false,
       combatTurn: combat.turn,
       [MODULE_ID]: { movementDexProjection: true }
-    });
-  }
+    }
+  });
 
   return ledgers;
 }
@@ -286,16 +284,16 @@ export function refreshImmediateResolutionActions(combat, combatant, { preserveS
 
     sortQueue(queue);
     const simultaneousGroups = buildSimultaneousGroups(queue);
-    await updateCombatantState(combatant, {
+    const stateUpdate = combatantStateUpdateData(combatant, {
       dexLedger: ledger,
       scheduledActions,
       activeGroupId: null
-    });
-
-    if (requiresInitiativeUpdate(combatant, ledger.projectedInitiative) && game.user?.isGM) {
+    }, { skipUnchanged: true });
+    const initiativeChanged = game.user?.isGM && requiresInitiativeUpdate(combatant, ledger.projectedInitiative);
+    if (stateUpdate || initiativeChanged) {
       await combat.updateEmbeddedDocuments("Combatant", [{
-        _id: combatant.id,
-        initiative: ledger.projectedInitiative
+        ...(stateUpdate ?? { _id: combatant.id }),
+        ...(initiativeChanged ? { initiative: ledger.projectedInitiative } : {})
       }], { turnEvents: false, combatTurn: combat.turn });
     }
 

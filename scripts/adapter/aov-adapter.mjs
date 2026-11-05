@@ -10,6 +10,10 @@ import {
   getWeaponCritFumbleChances
 } from "../combat/automation-helpers.mjs";
 import { combatantForTokenDocument } from "../combat/combatant-token-resolution.mjs";
+import { enqueueDocumentWrite } from "../combat/authoritative-write-queue.mjs";
+import { recordCombatRuleTrace } from "../combat/rule-kernel.mjs";
+import { attackProvenance, COMBAT_PROVENANCE_FLAG, defenseMatchesProvenance, resultProvenance } from "../combat/result-provenance.mjs";
+import { injurySeverity as singleBlowInjurySeverity } from "../combat/damage-effect-tracking.mjs";
 import {
   proneAttackModifierContext,
   proneDamageContext,
@@ -23,7 +27,6 @@ import {
 } from "./aov-contract.mjs";
 
 const CORE_ROLL_PROMPT_TIMEOUT_MS = 15000;
-const defenseCardQueues = new Map();
 const defenseCommitResults = new Map();
 const DEFENSE_COMMIT_RESULT_TTL_MS = 60000;
 
@@ -130,19 +133,6 @@ function pruneDefenseCommitResults() {
   }
 }
 
-function queuedDefenseCardAppend(messageId, operation) {
-  const key = String(messageId ?? "") || "no-message";
-  const previous = defenseCardQueues.get(key) ?? Promise.resolve();
-  const next = previous
-    .catch(() => undefined)
-    .then(operation);
-  defenseCardQueues.set(key, next);
-  void next.finally(() => {
-    if (defenseCardQueues.get(key) === next) defenseCardQueues.delete(key);
-  }).catch(() => undefined);
-  return next;
-}
-
 /**
  * Find an open unresolved core AoV combat card.
  *
@@ -170,9 +160,10 @@ function findOpenCoreCombatCard() {
  */
 async function waitForOpenCoreCombatCard(messageId, timeoutMs = CORE_COMBAT_CARD_WAIT_MS) {
   const targetId = String(messageId ?? "").trim();
+  if (!targetId) return null;
   const deadline = Date.now() + timeoutMs;
   while (Date.now() <= deadline) {
-    const message = targetId ? (game.messages?.get?.(targetId) ?? null) : findOpenCoreCombatCard();
+    const message = game.messages?.get?.(targetId) ?? null;
     if (
       message?.getFlag?.("aov", "cardType") === "CO"
       && message?.getFlag?.("aov", "state") !== "closed"
@@ -181,7 +172,7 @@ async function waitForOpenCoreCombatCard(messageId, timeoutMs = CORE_COMBAT_CARD
     }
     await sleep(CORE_COMBAT_CARD_WAIT_STEP_MS);
   }
-  return targetId ? null : findOpenCoreCombatCard();
+  return null;
 }
 
 /**
@@ -1061,19 +1052,22 @@ export class AoVAdapter {
   static async resolveDefenseParticipant(payload = {}) {
     const suppliedToken = payload.targetToken?.document ?? payload.targetToken ?? payload.token?.document ?? payload.token ?? null;
     let token = suppliedToken?.uuid && suppliedToken?.actor ? suppliedToken : null;
+    const tokenUuid = payload.tokenUuid ?? payload.targetTokenUuid;
     if (!token) {
-      const resolvedToken = await resolveUuid(payload.tokenUuid ?? payload.targetTokenUuid);
+      const resolvedToken = await resolveUuid(tokenUuid);
       token = resolvedToken?.actor ? resolvedToken : null;
     }
+    if (tokenUuid && (!token || token.uuid !== tokenUuid)) return { actor: null, token: null };
 
     const suppliedActor = payload.targetActor ?? payload.actor ?? null;
-    let actor = suppliedActor ?? token?.actor ?? null;
+    let actor = token?.actor ?? suppliedActor ?? null;
     if (!actor) {
       const resolvedActor = await resolveUuid(payload.actorUuid ?? payload.targetActorUuid);
       actor = resolvedActor?.items ? resolvedActor : null;
     }
 
-    if (!token && actor) token = this.resolveActorTokenDocument(actor, null);
+    const actorUuid = payload.actorUuid ?? payload.targetActorUuid ?? suppliedActor?.uuid;
+    if (actorUuid && actor?.uuid !== actorUuid) return { actor: null, token: null };
     return { actor, token };
   }
 
@@ -1090,6 +1084,7 @@ export class AoVAdapter {
     const actor = request.targetActor ?? token?.actor ?? null;
     return {
       attackMessageId: request.attackMessageId ?? null,
+      sourceCardIndex: 0,
       tokenUuid: token?.uuid ?? "",
       actorUuid: token?.actor?.uuid ?? actor?.uuid ?? "",
       incomingWeaponType: String(request.incomingWeaponType ?? "").slice(0, 80)
@@ -1234,7 +1229,8 @@ export class AoVAdapter {
     actionOptions,
     combatAction = "",
     flatMod = 0,
-    label = ""
+    label = "",
+    aimedBlow = null
   }) {
     const { AOVDialog } = await getAoVRollOptionsApi();
     const options = this.#coreActionOptions(source, actionOptions);
@@ -1265,10 +1261,36 @@ export class AoVAdapter {
       successLevel: "99"
     };
     const html = await foundry.applications.handlebars.renderTemplate(AOV_TEMPLATES.ROLL_OPTIONS, data);
+    let content = html;
+    if (aimedBlow?.enabled === true) {
+      // DialogV2 requires an attribute-free outer div; attributes belong on
+      // its children. Keep native fields and the submitted aim inside it.
+      content = document.createElement("div");
+      content.innerHTML = html;
+      const target = aimedBlow.targetKind === "weapon"
+        ? game.i18n.format("AOV_SKJALDBORG.AttackDialog.AimedEquipmentOption", { weapon: aimedBlow.targetWeaponName })
+        : aimedBlow.hitLocationName;
+      const penalty = numberOr(aimedBlow.penalty, 0);
+      const summary = document.createElement("p");
+      summary.classList.add("hint");
+      summary.textContent = game.i18n.format("AOV_SKJALDBORG.CoreRollDialog.AimedSummary", {
+        target: target || game.i18n.localize("AOV_SKJALDBORG.ActorHotbar.UnassignedLocation"),
+        penalty: penalty > 0 ? `+${penalty}` : String(penalty)
+      });
+      content.prepend(summary);
+      const action = content.querySelector('select[name="actionOption"]');
+      if (action) action.disabled = true;
+      const bonus = content.querySelector('input[name="checkBonus"]');
+      const bonusLabel = bonus?.closest(".flexrow")?.querySelector("label");
+      if (bonusLabel) {
+        bonusLabel.textContent = game.i18n.localize("AOV_SKJALDBORG.CoreRollDialog.AdditionalModifier");
+        bonusLabel.dataset.tooltip = game.i18n.localize("AOV_SKJALDBORG.CoreRollDialog.AdditionalModifierHint");
+      }
+    }
     let promptTimedOut = false;
     const prompt = AOVDialog.input({
       window: { title: game.i18n.localize("AOV.card.rollMods") },
-      content: html,
+      content,
       ok: { label: game.i18n.localize("AOV.rollDice") }
     }).then(result => ({ type: "input", result })).catch(error => ({ type: "error", error }));
     const timeout = new Promise(resolve => {
@@ -1333,17 +1355,26 @@ export class AoVAdapter {
   }
 
   static async #withCoreAttackOptions(payload = {}) {
+    const attackPayload = {
+      ...payload,
+      aimedBlow: payload.aimedBlow ? { ...payload.aimedBlow } : payload.aimedBlow
+    };
+    const aimed = attackPayload.aimedBlow?.enabled === true;
+    const actionOptions = await this.#attackActionOptions();
     const coreOptions = await this.#promptCoreRollOptions({
       source: "attack",
-      actionOptions: await this.#attackActionOptions(),
-      combatAction: this.#attackCombatAction(payload),
+      actionOptions: aimed
+        ? { attack: actionOptions?.attack ?? game.i18n.localize("AOV.Combat.action.attack") }
+        : actionOptions,
+      combatAction: this.#attackCombatAction(attackPayload),
       flatMod: 0,
-      label: itemName(payload.weapon)
+      label: itemName(attackPayload.weapon),
+      aimedBlow: attackPayload.aimedBlow
     });
     if (coreOptions.cancelled) return null;
-    const combatAction = payload.aimedBlow?.enabled === true ? "attack" : coreOptions.actionOption;
+    const combatAction = aimed ? "attack" : coreOptions.actionOption;
     return {
-      ...payload,
+      ...attackPayload,
       coreOptions,
       coreDialogSource: "attack",
       combatAction
@@ -1357,7 +1388,8 @@ export class AoVAdapter {
     );
   }
 
-  static async #createCombatMessage({ actor, chatCard, batchId = "", batchIndex = 0, batchSize = 1 }) {
+  static async #createCombatMessage({ actor, chatCard, batchId = "", batchIndex = 0, batchSize = 1, sourceMessageId = null, targetActorUuid = null, targetTokenUuid = null, actionClaim = null, provenanceContext }) {
+    const messageId = foundry.utils.randomID();
     const aovFlags = {
       rollType: "WP",
       cardType: "CO",
@@ -1374,6 +1406,7 @@ export class AoVAdapter {
     };
     const content = await this.#renderCombatMessage(aovFlags);
     const message = await createModuleChatMessage({
+      _id: messageId,
       user: game.user.id,
       style: CONST.CHAT_MESSAGE_STYLES.OTHER,
       content,
@@ -1384,20 +1417,26 @@ export class AoVAdapter {
       flags: {
         aov: aovFlags,
         [MODULE_ID]: {
+          [COMBAT_PROVENANCE_FLAG]: attackProvenance(messageId, { ...provenanceContext, actionClaim }),
+          ...(actionClaim ? { actionClaim: foundry.utils.deepClone(actionClaim) } : {}),
           combatCardBatch: {
             batchId,
             batchIndex,
             batchSize,
+            ...(sourceMessageId ? { sourceMessageId: String(sourceMessageId) } : {}),
+            actorUuid: actor?.uuid ?? null,
+            targetActorUuid,
+            targetTokenUuid,
             createdAt: Date.now()
           }
         }
       }
-    }, { applyDefaultMode: false });
+    }, { applyDefaultMode: false, operation: { keepId: true } });
     return message ?? null;
   }
 
   static async #appendDefenseCard(messageId, card, { requestId = "" } = {}) {
-    return queuedDefenseCardAppend(messageId, async () => {
+    return enqueueDocumentWrite(`ChatMessage.${messageId}`, async () => {
       pruneDefenseCommitResults();
       const commitKey = defenseCommitResultKey(messageId, requestId);
       const cached = commitKey ? defenseCommitResults.get(commitKey) : null;
@@ -1423,11 +1462,18 @@ export class AoVAdapter {
         ...aovFlags,
         chatCard: [...chatCards, card]
       };
+      const source = message.getFlag?.(MODULE_ID, COMBAT_PROVENANCE_FLAG)?.cards?.[0];
+      const token = source?.targetTokenUuid ? await resolveUuid(source.targetTokenUuid) : null;
+      const actor = token?.actor ?? this.#actorFromCombatCard(card);
+      if (!defenseMatchesProvenance(message, actor, token)) return null;
+      const provenance = resultProvenance(message, { resultCardIndex: chatCards.length, stage: "defense" });
       const content = await this.#renderCombatMessage(nextFlags);
-      await guardedUpdate(message, {
+      const updated = await guardedUpdate(message, {
         content,
-        "flags.aov.chatCard": nextFlags.chatCard
+        "flags.aov.chatCard": nextFlags.chatCard,
+        ...(provenance ? { [`flags.${MODULE_ID}.${COMBAT_PROVENANCE_FLAG}.cards.${chatCards.length}`]: provenance.cards[chatCards.length] } : {})
       }, { category: "chat.defenseCardAppend" });
+      if (!updated) return null;
       const result = {
         accepted: true,
         messageId: message.id,
@@ -1480,9 +1526,36 @@ export class AoVAdapter {
       encPenalty,
       combatAction: this.#attackCombatAction(payload)
     });
-    const message = await this.#createCombatMessage({ actor, chatCard: card, batchId, batchIndex, batchSize });
+    const message = await this.#createCombatMessage({
+      actor,
+      chatCard: card,
+      batchId,
+      batchIndex,
+      batchSize,
+      sourceMessageId: payload.splitAttackSourceMessageId,
+      targetActorUuid: targetActor?.uuid ?? null,
+      targetTokenUuid: targetToken?.uuid ?? null,
+      actionClaim: payload.actionClaim,
+      provenanceContext: {
+        actor, sourceToken, weapon, targetActor, targetToken,
+        damageType: payload.damageType?.key ?? payload.damageProfile?.core?.damageType
+          ?? payload.damageSelection?.effective?.key ?? weapon.system?.damType ?? ""
+      }
+    });
     const attackMessageId = message?.id ?? null;
     if (!attackMessageId) return null;
+    recordCombatRuleTrace(payload, { flatModifier: flatMod, encumbrance: encPenalty, targetNumber: targetNumber + encPenalty,
+      nativeActionModifier: this.#nativeAimedModifier(this.#attackCombatAction(payload), payload) });
+    if (payload.splitAttackSourceMessageId) {
+      try {
+        const { completeSplitAttack } = await import("../combat/dialog-target-queue.mjs");
+        await completeSplitAttack(payload.splitAttackSourceMessageId);
+      } catch (exception) {
+        // The attack card already committed. Its creation-time link remains
+        // authoritative even if the source prompt cannot currently refresh.
+        warn("Failed to refresh a committed split-attack prompt.", exception);
+      }
+    }
     await this.#attachAimedBlowFlag(attackMessageId, payload, { actor, sourceToken, weapon, targetActor, targetToken });
     await this.#attachDisarmFlag(attackMessageId, payload, { actor, sourceToken, weapon, targetActor, targetToken });
     await this.#attachStunFlag(attackMessageId, payload, { actor, sourceToken, weapon, targetActor, targetToken });
@@ -1601,6 +1674,7 @@ export class AoVAdapter {
     const tokenDocument = token?.document ?? token ?? null;
     return {
       attackMessageId: String(attackMessageId ?? "") || null,
+      sourceCardIndex: 0,
       tokenUuid: tokenDocument?.uuid ?? "",
       actorUuid: tokenDocument?.actor?.uuid ?? actor?.uuid ?? "",
       actionOption: ["parry", "dodge", "none"].includes(String(actionOption ?? "")) ? String(actionOption) : "none",
@@ -1682,6 +1756,9 @@ export class AoVAdapter {
 
     const combatCard = await waitForOpenCoreCombatCard(payload.attackMessageId);
     if (!combatCard) {
+      throw new Error(game.i18n.localize("AOV_SKJALDBORG.Warnings.DefenseCombatCardUnavailable"));
+    }
+    if (!defenseMatchesProvenance(combatCard, actor, token, payload.sourceCardIndex ?? 0)) {
       throw new Error(game.i18n.localize("AOV_SKJALDBORG.Warnings.DefenseCombatCardUnavailable"));
     }
 
@@ -2285,13 +2362,9 @@ export class AoVAdapter {
       throw new Error(game.i18n.localize("AOV_SKJALDBORG.Warnings.DefenseActorNotOwned"));
     }
 
-    const remoteCommit = !game.user?.isGM && typeof options.commitDefenseCard === "function";
-    let combatCard = null;
+    const combatCard = await waitForOpenCoreCombatCard(payload.attackMessageId);
     let incomingWeaponType = String(payload.incomingWeaponType ?? "");
-    if (!remoteCommit || !incomingWeaponType) {
-      combatCard = await waitForOpenCoreCombatCard(payload.attackMessageId);
-    }
-    if (!remoteCommit && !combatCard) {
+    if (!combatCard || !defenseMatchesProvenance(combatCard, actor, token, payload.sourceCardIndex ?? 0)) {
       throw new Error(game.i18n.localize("AOV_SKJALDBORG.Warnings.DefenseCombatCardUnavailable"));
     }
     if (!incomingWeaponType) incomingWeaponType = this.#incomingWeaponType(combatCard);
@@ -2430,14 +2503,17 @@ export class AoVAdapter {
       : [];
     const locationById = new Map(allLocations.map(item => [item.id, item]));
     const damageByLocation = new Map();
+    const largestWoundDamageByLocation = new Map();
     const grappleLocationStates = actorGrappleLocationStates(actor);
 
     for (const wound of characterWounds) {
       const locationId = String(wound.system?.hitLocId ?? "");
+      const woundDamage = Math.max(0, numberOr(wound.system?.damage, 0));
       damageByLocation.set(
         locationId,
-        numberOr(damageByLocation.get(locationId), 0) + Math.max(0, numberOr(wound.system?.damage, 0))
+        numberOr(damageByLocation.get(locationId), 0) + woundDamage
       );
+      largestWoundDamageByLocation.set(locationId, Math.max(largestWoundDamageByLocation.get(locationId) ?? 0, woundDamage));
     }
 
     const describeLocation = (item, gridPosition = null) => {
@@ -2453,6 +2529,15 @@ export class AoVAdapter {
         ? numberOr(item.system?.npcAP, 0)
         : numberOr(item.system?.map, 0);
       const injurySeverity = injuryThresholdSeverityFromEffects(item.effects);
+      // Each character Wound Item is an individual injury. Use its remaining
+      // damage for display even without a managed effect, never the sum of
+      // separate wounds. Retain effects that record an uncapped severe blow;
+      // NPC aggregate damage alone still only establishes an exhausted location.
+      const injuryDisplaySeverity = Math.max(
+        injurySeverity,
+        singleBlowInjurySeverity(largestWoundDamageByLocation.get(item.id), hpMax),
+        hpMax > 0 && hpCurrent <= 0 ? 1 : 0
+      );
       const position = Number.isInteger(gridPosition) ? gridPosition : null;
       const grappleState = grappleLocationStates.get(item.id) ?? null;
       const grappled = !!grappleState?.grappled;
@@ -2472,7 +2557,7 @@ export class AoVAdapter {
         wounded: damage > 0,
         critical: hpMax > 0 && hpCurrent <= 0,
         injurySeverity,
-        injurySeverityClass: injurySeverity ? `aov-skjaldborg-hitloc-injury-${injurySeverity}` : "",
+        injurySeverityClass: injuryDisplaySeverity ? `aov-skjaldborg-hitloc-injury-${injuryDisplaySeverity}` : "",
         grappled,
         immobilized,
         grappleSource,
