@@ -3,7 +3,7 @@
 >
 > This Foundry VTT module was developed with extensive AI assistance across implementation, code completion, refactoring suggestions, debugging, testing, and code-side review workflows.
 >
-> The author does not personally understand or cannot explain every component of the shipped codebase; nevertheless, full responsibility for all code included in this project, as well as its maintenance, is accepted by the author. Software execution was heavily AI-assisted, but package direction, architecture and code oversight, UX intent, and release responsibility were human-led. The author’s role in this project was primarily that of project lead and UX designer: defining the module's vision, directing the workflow, setting priorities, shaping feature scope, making high-level architectural decisions, and determining the user-experience design of the final module.
+> The author does not personally understand or cannot explain every component of the shipped codebase in full; nevertheless, the responsibility for all code included in this project, as well as its maintenance, is accepted by the author. Software execution was heavily AI-assisted, but package direction, architecture and code oversight, UX intent, and release responsibility were human-led. The author’s role in this project was primarily that of project lead and UX designer: defining the module's vision, directing the workflow, setting priorities, shaping feature scope, making all-level architectural decisions, and determining the user-experience design of the final module.
 
 ## Age of Vikings - Skjaldborg
 An automated combat and QoL module for community implementation of Chaosium's Age of Vikings for Foundry VTT.
